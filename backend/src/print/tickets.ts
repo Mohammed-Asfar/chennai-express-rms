@@ -1,5 +1,6 @@
 import { EscPosBuilder, type PaperWidth } from './escpos.js'
 import { formatMoney } from '../lib/money.js'
+import { rasterCommand, type LogoRaster } from './logo.js'
 
 /**
  * Ticket layouts.
@@ -35,6 +36,7 @@ export interface BillData {
   billNumber: string
   branchName: string
   branchAddress?: string | null
+  branchPhone?: string | null
   gstin?: string | null
   orderNo: number
   type: 'dine_in' | 'takeaway'
@@ -51,6 +53,8 @@ export interface BillData {
   payments: { mode: string; amount: number }[]
   footer?: string | null
   isReprint?: boolean
+  /** Pre-rasterised at upload. Absent when none is set or it is switched off. */
+  logo?: LogoRaster | null
 }
 
 const timeOf = (date: Date) =>
@@ -121,8 +125,17 @@ export function renderKot(data: KotData, paper: PaperWidth = '80mm'): Buffer {
 export function renderBill(data: BillData, paper: PaperWidth = '80mm'): Buffer {
   const b = new EscPosBuilder(paper)
 
+  // The logo goes above the name, not instead of it: a thermal logo can print
+  // faintly on worn paper, and the bill must still say who issued it.
+  if (data.logo) {
+    b.align('center').raw(...rasterCommand(data.logo)).line()
+  }
+
   b.align('center').size(true).bold(true).line(data.branchName).size(false).bold(false)
   if (data.branchAddress) b.wrapped(data.branchAddress)
+  // Under the address, where a customer looks for it to call back about an
+  // order — not beside the GSTIN, which is a tax reference, not a contact.
+  if (data.branchPhone) b.line(`Ph: ${data.branchPhone}`)
   if (data.gstin) b.line(`GSTIN: ${data.gstin}`)
   b.line()
 
@@ -132,7 +145,7 @@ export function renderBill(data: BillData, paper: PaperWidth = '80mm'): Buffer {
   }
 
   b.align('left').rule()
-  b.columns(`Bill ${data.billNumber}`, dateOf(data.printedAt))
+  b.columns(`Bill No: ${data.billNumber}`, dateOf(data.printedAt))
   const where = data.type === 'takeaway' ? 'Takeaway' : (data.tableName ?? 'Dine-in')
   b.columns(`${where}  Order #${data.orderNo}`, timeOf(data.printedAt))
   b.rule()
@@ -173,7 +186,10 @@ export function renderBill(data: BillData, paper: PaperWidth = '80mm'): Buffer {
   }
 
   b.rule('=')
-  b.size(true).bold(true).columns('TOTAL', money(data.total)).size(false).bold(false)
+  // Double height only, never double width: doubling the width halves the
+  // usable columns, and the amount is pushed off the edge of the paper. The
+  // total is the one line on the bill that must always be readable.
+  b.size(true, false).bold(true).columns('TOTAL', money(data.total)).size(false).bold(false)
   b.rule('=')
 
   if (data.taxMode === 'inclusive') {
@@ -185,6 +201,21 @@ export function renderBill(data: BillData, paper: PaperWidth = '80mm'): Buffer {
     for (const payment of data.payments) {
       b.columns(titleCase(payment.mode), money(payment.amount))
     }
+  }
+
+  // FR-P8: what is still owed, stated plainly. A customer handed a bill with
+  // payments listed but no balance cannot tell whether they are settled, and
+  // neither can whoever finds it in the drawer later.
+  const paid = data.payments.reduce((sum, payment) => sum + payment.amount, 0)
+  const due = data.total - paid
+
+  b.line()
+  if (due <= 0 && paid > 0) {
+    b.align('center').bold(true).line('*** PAID ***').bold(false).align('left')
+  } else if (paid > 0) {
+    b.bold(true).columns('BALANCE DUE', money(due)).bold(false)
+  } else {
+    b.align('center').bold(true).line('*** UNPAID ***').bold(false).align('left')
   }
 
   b.line()

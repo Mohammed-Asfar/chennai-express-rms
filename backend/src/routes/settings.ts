@@ -4,6 +4,12 @@ import { AppError } from '../lib/errors.js'
 import { currentUser, requireAuth, requireRole } from '../lib/guards.js'
 import { getSetting, setSetting, type SettingKey } from '../lib/settings.js'
 import { formatBillNumber, RESET_PERIODS } from '../lib/bill-number.js'
+import { resolvePrinter } from '../print/queue.js'
+import { rasterise } from '../print/logo.js'
+import { renderBill } from '../print/tickets.js'
+import { decodeTicket } from '../print/preview.js'
+import { CHARS_PER_LINE } from '../print/escpos.js'
+import { currentBusinessDate } from '../lib/business-date.js'
 
 /**
  * Branch settings and details.
@@ -32,6 +38,8 @@ const updateBranchBody = z.object({
   address: z.string().max(200).trim().nullable().optional(),
   phone: z.string().max(20).trim().nullable().optional(),
   gstin: z.string().max(15).trim().nullable().optional(),
+  /** Whether to print the logo, without deleting it (FR-P15). */
+  printLogo: z.boolean().optional(),
 })
 
 interface BranchRow {
@@ -40,6 +48,8 @@ interface BranchRow {
   address: string | null
   phone: string | null
   gstin: string | null
+  logo_bitmap: string | null
+  print_logo: number
 }
 
 export async function settingsRoutes(app: FastifyInstance): Promise<void> {
@@ -118,15 +128,178 @@ export async function settingsRoutes(app: FastifyInstance): Promise<void> {
     }
   })
 
+  /**
+   * A sample bill, as it would print under the current settings.
+   *
+   * Rendered through the same code the printer uses and then decoded back to
+   * text, so what is shown cannot drift from what comes out. Lets someone check
+   * a footer, a bill number format or a logo without spending a roll of paper.
+   */
+  app.get('/settings/bill-preview', { preHandler: requireRole('admin') }, async (request) => {
+    const me = currentUser(request)
+
+    const branch = app.db
+      .prepare(
+        `SELECT name, address, phone, gstin, logo_bitmap, logo_width, logo_height, print_logo
+         FROM branches WHERE id = ?`,
+      )
+      .get(me.branchId) as
+      | {
+          name: string
+          address: string | null
+          phone: string | null
+          gstin: string | null
+          logo_bitmap: string | null
+          logo_width: number | null
+          logo_height: number | null
+          print_logo: number
+        }
+      | undefined
+
+    const printer = resolvePrinter(app.db, me.branchId, 'bill')
+    const paper = printer?.paper_width ?? '80mm'
+
+    const businessDate = currentBusinessDate(app.db, me.branchId)
+    const taxMode = getSetting(app.db, me.branchId, 'tax_mode')
+
+    // A representative order rather than real data: two lines, one with a
+    // quantity above one, so the layout is exercised properly.
+    const billNumber = formatBillNumber({
+      billNo: 42,
+      businessDate,
+      template: getSetting(app.db, me.branchId, 'bill_number_format'),
+      prefix: getSetting(app.db, me.branchId, 'bill_prefix'),
+      padWidth: getSetting(app.db, me.branchId, 'bill_number_pad'),
+    })
+
+    const rendered = renderBill(
+      {
+        billNumber,
+        branchName: branch?.name ?? 'Restaurant',
+        branchAddress: branch?.address ?? null,
+        branchPhone: branch?.phone ?? null,
+        gstin: branch?.gstin ?? null,
+        orderNo: 7,
+        type: 'dine_in',
+        tableName: 'A4',
+        printedAt: new Date(),
+        lines: [
+          {
+            name: 'Mutton Biryani',
+            variantName: 'Full',
+            qty: 2,
+            unitPrice: 38_000,
+            lineTotal: 76_000,
+          },
+          {
+            name: 'Filter Coffee',
+            variantName: 'Standard',
+            qty: 1,
+            unitPrice: 3_000,
+            lineTotal: 3_000,
+          },
+        ],
+        subtotal: 75_238,
+        discountAmount: 0,
+        cgst: 1_881,
+        sgst: 1_881,
+        roundOff: 0,
+        total: 79_000,
+        taxMode,
+        payments: [{ mode: 'cash', amount: 79_000 }],
+        footer: getSetting(app.db, me.branchId, 'bill_footer'),
+        logo:
+          branch?.print_logo === 1 &&
+          branch.logo_bitmap &&
+          branch.logo_width &&
+          branch.logo_height
+            ? {
+                data: branch.logo_bitmap,
+                width: branch.logo_width,
+                height: branch.logo_height,
+              }
+            : null,
+      },
+      paper,
+    )
+
+    return { preview: decodeTicket(rendered, CHARS_PER_LINE[paper]), paper }
+  })
+
   // --- branch details, which appear on the printed bill ---
 
   app.get('/branch', { preHandler: requireAuth }, async (request) => {
     const me = currentUser(request)
     const row = app.db
-      .prepare('SELECT id, name, address, phone, gstin FROM branches WHERE id = ?')
+      .prepare(`SELECT id, name, address, phone, gstin, logo_bitmap, print_logo
+         FROM branches WHERE id = ?`)
       .get(me.branchId) as BranchRow | undefined
     if (!row) throw new AppError(404, 'BRANCH_NOT_FOUND', 'Branch not found')
-    return { branch: row }
+    return { branch: toPublicBranch(row) }
+  })
+
+  /**
+   * Uploads a logo and rasterises it for the till's paper width.
+   *
+   * Converted once here rather than per bill: rasterising on every print would
+   * cost more than the print target allows. The original is kept so it can be
+   * re-rasterised if the paper width changes.
+   */
+  app.post('/branch/logo', { preHandler: requireRole('admin') }, async (request) => {
+    const me = currentUser(request)
+    const body = z
+      .object({
+        /** Base64, with or without a data-URL prefix. */
+        image: z.string().min(1).max(4_000_000),
+      })
+      .parse(request.body)
+
+    const base64 = body.image.replace(/^data:image\/\w+;base64,/, '')
+    let buffer: Buffer
+    try {
+      buffer = Buffer.from(base64, 'base64')
+    } catch {
+      throw new AppError(400, 'INVALID_IMAGE', 'That file could not be read')
+    }
+
+    // Sized to whatever the bill printer uses; falls back to 80mm when none is
+    // configured yet, which is by far the common paper.
+    const printer = resolvePrinter(app.db, me.branchId, 'bill')
+    const paper = printer?.paper_width ?? '80mm'
+
+    let raster
+    try {
+      raster = await rasterise(buffer, paper)
+    } catch (error) {
+      const message = error instanceof Error ? error.message : String(error)
+      throw new AppError(400, 'INVALID_IMAGE', `Could not use that image: ${message}`)
+    }
+
+    const now = new Date().toISOString()
+    app.db
+      .prepare(
+        `UPDATE branches SET logo = ?, logo_bitmap = ?, logo_width = ?, logo_height = ?,
+                             updated_at = ?, synced_at = NULL
+         WHERE id = ?`,
+      )
+      .run(base64, raster.data, raster.width, raster.height, now, me.branchId)
+
+    return {
+      logo: { width: raster.width, height: raster.height, paper },
+    }
+  })
+
+  app.delete('/branch/logo', { preHandler: requireRole('admin') }, async (request) => {
+    const me = currentUser(request)
+    const now = new Date().toISOString()
+    app.db
+      .prepare(
+        `UPDATE branches SET logo = NULL, logo_bitmap = NULL, logo_width = NULL,
+                             logo_height = NULL, updated_at = ?, synced_at = NULL
+         WHERE id = ?`,
+      )
+      .run(now, me.branchId)
+    return { ok: true }
   })
 
   app.patch('/branch', { preHandler: requireRole('admin') }, async (request) => {
@@ -143,6 +316,7 @@ export async function settingsRoutes(app: FastifyInstance): Promise<void> {
     if (body.name !== undefined) push('name', body.name)
     if (body.address !== undefined) push('address', body.address)
     if (body.phone !== undefined) push('phone', body.phone)
+    if (body.printLogo !== undefined) push('print_logo', body.printLogo ? 1 : 0)
     if (body.gstin !== undefined) {
       // Stored uppercase: a GSTIN is case-insensitive but printed uppercase on
       // every invoice, and mixed case on a tax document looks like an error.
@@ -158,13 +332,32 @@ export async function settingsRoutes(app: FastifyInstance): Promise<void> {
     }
 
     const row = app.db
-      .prepare('SELECT id, name, address, phone, gstin FROM branches WHERE id = ?')
+      .prepare(`SELECT id, name, address, phone, gstin, logo_bitmap, print_logo
+         FROM branches WHERE id = ?`)
       .get(me.branchId) as BranchRow
-    return { branch: row }
+    return { branch: toPublicBranch(row) }
   })
 }
 
 /** Every setting in one shape, so read and write return the same thing. */
+/**
+ * The branch as the client needs it.
+ *
+ * The raster itself is never sent: it is kilobytes of base64 the UI has no use
+ * for, and only whether one exists matters on screen.
+ */
+function toPublicBranch(row: BranchRow) {
+  return {
+    id: row.id,
+    name: row.name,
+    address: row.address,
+    phone: row.phone,
+    gstin: row.gstin,
+    hasLogo: row.logo_bitmap !== null,
+    printLogo: row.print_logo === 1,
+  }
+}
+
 function readAll(app: FastifyInstance, branchId: string) {
   const read = <K extends SettingKey>(key: K) => getSetting(app.db, branchId, key)
 

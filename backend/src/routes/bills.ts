@@ -368,10 +368,36 @@ export async function billRoutes(app: FastifyInstance): Promise<void> {
         : undefined
 
       const branch = app.db
-        .prepare('SELECT name, address, gstin FROM branches WHERE id = ?')
+        .prepare(
+          `SELECT name, address, phone, gstin, logo_bitmap, logo_width, logo_height, print_logo
+           FROM branches WHERE id = ?`,
+        )
         .get(me.branchId) as
-        | { name: string; address: string | null; gstin: string | null }
+        | {
+            name: string
+            address: string | null
+            phone: string | null
+            gstin: string | null
+            logo_bitmap: string | null
+            logo_width: number | null
+            logo_height: number | null
+            print_logo: number
+          }
         | undefined
+
+      // FR-P16: a missing or unusable logo never blocks printing — the bill
+      // simply goes out without it.
+      const logo =
+        branch?.print_logo === 1 &&
+        branch.logo_bitmap &&
+        branch.logo_width &&
+        branch.logo_height
+          ? {
+              data: branch.logo_bitmap,
+              width: branch.logo_width,
+              height: branch.logo_height,
+            }
+          : null
 
       const payments = app.db
         .prepare(
@@ -388,6 +414,7 @@ export async function billRoutes(app: FastifyInstance): Promise<void> {
           billNumber: bill.bill_number,
           branchName: branch?.name ?? 'Restaurant',
           branchAddress: branch?.address ?? null,
+          branchPhone: branch?.phone ?? null,
           gstin: branch?.gstin ?? null,
           orderNo: order?.order_no ?? 0,
           type: order?.type ?? 'dine_in',
@@ -410,6 +437,7 @@ export async function billRoutes(app: FastifyInstance): Promise<void> {
           payments,
           footer: getSetting(app.db, me.branchId, 'bill_footer'),
           isReprint: alreadyPrinted.n > 0,
+          logo,
         },
         printer.paper_width,
       )
