@@ -7,18 +7,21 @@ Future<void> main() async {
   WidgetsFlutterBinding.ensureInitialized();
   await windowManager.ensureInitialized();
 
-  // A billing counter runs one window, maximised, all day. A minimum size keeps
-  // the order and bill panes usable if a user drags it smaller.
+  // A billing counter runs one window, maximised, all day.
+  //
+  // The minimum is deliberately modest: a counter PC is often 1366x768, and a
+  // minimum larger than the screen would push content off the edge.
   await windowManager.waitUntilReadyToShow(
     const WindowOptions(
-      size: Size(1400, 900),
-      minimumSize: Size(1024, 700),
+      size: Size(1280, 800),
+      minimumSize: Size(900, 600),
       center: true,
       title: 'Chennai Express',
       titleBarStyle: TitleBarStyle.normal,
     ),
     () async {
       await windowManager.show();
+      await windowManager.maximize();
       await windowManager.focus();
     },
   );
