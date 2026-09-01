@@ -6,6 +6,7 @@ import Fastify, {
   type FastifyServerOptions,
 } from 'fastify'
 import cors from '@fastify/cors'
+import websocket from '@fastify/websocket'
 import { ZodError } from 'zod'
 import type { Db } from './db/client.js'
 import type { Env } from './lib/env.js'
@@ -19,6 +20,7 @@ import { tableRoutes } from './routes/tables.js'
 import { orderRoutes } from './routes/orders.js'
 import { billRoutes } from './routes/bills.js'
 import { syncRoutes } from './routes/sync.js'
+import { printerRoutes } from './routes/printers.js'
 import { SyncWorker } from './sync/worker.js'
 
 export interface BuildOptions {
@@ -51,11 +53,34 @@ export async function buildServer({ db, env, sync }: BuildOptions): Promise<Fast
     bodyLimit: 2 * 1024 * 1024,
   })
 
+  // An empty body with a JSON content-type is treated as no body rather than a
+  // rejected request. DELETE and some POSTs carry no payload, and a client that
+  // sets the header uniformly is being tidy, not wrong — failing those turns a
+  // working "remove item" into an error the cashier cannot act on.
+  app.addContentTypeParser(
+    'application/json',
+    { parseAs: 'string' },
+    (_request, body: string, done) => {
+      if (body === undefined || body === null || body.trim().length === 0) {
+        done(null, undefined)
+        return
+      }
+      try {
+        done(null, JSON.parse(body))
+      } catch (error) {
+        const failure = error as Error & { statusCode?: number }
+        failure.statusCode = 400
+        done(failure, undefined)
+      }
+    },
+  )
+
   app.decorate('db', db)
   app.decorate('env', env)
   app.decorate('sync', sync ?? new SyncWorker(db, env, app.log))
 
   await app.register(cors, { origin: true })
+  await app.register(websocket)
 
   // Nudge sync after any successful mutation.
   //
@@ -93,6 +118,16 @@ export async function buildServer({ db, env, sync }: BuildOptions): Promise<Fast
       })
     }
 
+    // A framework error that already knows it is the client's fault keeps its
+    // own status and message. Reporting a malformed request as a 500 sends the
+    // reader hunting for a server bug that does not exist.
+    if (error.statusCode !== undefined && error.statusCode >= 400 && error.statusCode < 500) {
+      request.log.warn({ err: error }, 'bad request')
+      return reply.status(error.statusCode).send({
+        error: { code: error.code ?? 'BAD_REQUEST', message: error.message },
+      })
+    }
+
     // Never leak an internal message to the client, but always log it — a swallowed
     // exception in a billing path is how a wrong total ships unnoticed.
     request.log.error({ err: error }, 'unhandled error')
@@ -116,6 +151,7 @@ export async function buildServer({ db, env, sync }: BuildOptions): Promise<Fast
   await app.register(orderRoutes)
   await app.register(billRoutes)
   await app.register(syncRoutes)
+  await app.register(printerRoutes)
 
   return app
 }

@@ -23,8 +23,20 @@ class ApiClient {
 
   void setToken(String? token) => _token = token;
 
-  Map<String, String> get _headers => {
-        'Content-Type': 'application/json',
+  /// The current token, for the one caller that cannot use a header.
+  ///
+  /// A websocket handshake carries no Authorization header, so the printer
+  /// discovery stream passes it as a query parameter instead. Nothing else
+  /// should read this — use the client's own methods.
+  String? get token => _token;
+
+  /// Headers for a request.
+  ///
+  /// The JSON content-type is only sent when there is a body. Declaring a JSON
+  /// body and then sending none makes Fastify reject the request outright,
+  /// which is what a DELETE with no payload would do.
+  Map<String, String> _headersFor({required bool hasBody}) => {
+        if (hasBody) 'Content-Type': 'application/json',
         if (_token != null) 'Authorization': 'Bearer $_token',
       };
 
@@ -44,7 +56,8 @@ class ApiClient {
     Map<String, dynamic>? body,
   ) async {
     final uri = Uri.parse('$baseUrl$path');
-    final request = http.Request(method, uri)..headers.addAll(_headers);
+    final request = http.Request(method, uri)
+      ..headers.addAll(_headersFor(hasBody: body != null));
     if (body != null) request.body = jsonEncode(body);
 
     try {

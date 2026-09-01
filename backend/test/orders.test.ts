@@ -342,6 +342,38 @@ test('a line can be removed', async () => {
   await close(ctx)
 })
 
+test('a bodyless DELETE that declares JSON still works', async () => {
+  // The Flutter client sets Content-Type on every request. Fastify rejects a
+  // JSON content-type with no body, which surfaced as "an unexpected error"
+  // when a cashier tried to remove a line.
+  const ctx = await setup()
+  const order = await newOrder(ctx, { type: 'takeaway' })
+  const withItems = await addItem(ctx, order.id, { variantId: ctx.full, qty: 1 })
+
+  const res = await ctx.app.inject({
+    method: 'DELETE',
+    url: `/orders/${order.id}/items/${withItems.items[0]!.id}`,
+    headers: { ...ctx.auth, 'content-type': 'application/json' },
+  })
+  assertEqual(res.statusCode, 200, 'removing a line must not need a request body')
+  assertEqual((res.json() as { order: OrderPayload }).order.items.length, 0)
+  await close(ctx)
+})
+
+test('a client error is not reported as a server crash', async () => {
+  // A 400 dressed up as a 500 sends whoever reads the log hunting for a server
+  // bug that is not there.
+  const ctx = await setup()
+  const res = await ctx.app.inject({
+    method: 'POST',
+    url: '/orders',
+    headers: { ...ctx.auth, 'content-type': 'application/json' },
+    payload: '{ not json',
+  })
+  assertEqual(res.statusCode >= 400 && res.statusCode < 500, true, `got ${res.statusCode}`)
+  await close(ctx)
+})
+
 test('an unavailable item cannot be ordered', async () => {
   const ctx = await setup()
   const order = await newOrder(ctx, { type: 'takeaway' })
