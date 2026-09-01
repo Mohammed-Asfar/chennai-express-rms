@@ -360,3 +360,57 @@ test('the test page reveals a wrong paper width', () => {
     assertEqual(line.length <= 32, true, `"${line}" fits`)
   }
 })
+
+// --- the total and the payment status ---
+
+test('the total keeps its amount on the paper', async () => {
+  // Double *width* halves the usable columns and pushes the amount off the
+  // edge — the one line that must always be readable.
+  for (const paper of ['58mm', '80mm'] as const) {
+    const printed = lines(renderBill(billBase, paper))
+    const total = printed.find((l) => l.includes('TOTAL'))!
+    assertEqual(total.includes('760.00'), true, `${paper}: "${total}"`)
+    assertEqual(total.length <= CHARS_PER_LINE[paper], true, `${paper} fits`)
+  }
+})
+
+test('a settled bill says so', async () => {
+  const text = readable(renderBill(billBase))
+  assertEqual(text.includes('PAID'), true)
+  assertEqual(text.includes('BALANCE DUE'), false, 'nothing is owed')
+})
+
+test('a part-paid bill shows what is still due', async () => {
+  const text = readable(
+    renderBill({ ...billBase, payments: [{ mode: 'cash', amount: 40_000 }] }),
+  )
+  assertEqual(text.includes('BALANCE DUE'), true)
+  assertEqual(text.includes('360.00'), true, '760.00 less 400.00')
+})
+
+test('a bill with no payment is marked unpaid', async () => {
+  const text = readable(renderBill({ ...billBase, payments: [] }))
+  assertEqual(text.includes('UNPAID'), true)
+  assertEqual(text.includes('PAID'), true, 'UNPAID contains PAID, so check both')
+})
+
+test('the balance line fits the paper', async () => {
+  for (const paper of ['58mm', '80mm'] as const) {
+    const printed = lines(
+      renderBill({ ...billBase, payments: [{ mode: 'cash', amount: 1_000 }] }, paper),
+    )
+    for (const line of printed) {
+      assertEqual(line.length <= CHARS_PER_LINE[paper], true, `${paper}: "${line}"`)
+    }
+  }
+})
+
+test('the phone prints under the address', async () => {
+  const text = readable(
+    renderBill({ ...billBase, branchPhone: '04412345678' }),
+  )
+  assertEqual(text.includes('Ph: 04412345678'), true)
+
+  // A restaurant that has not set one gets no empty line.
+  assertEqual(readable(renderBill(billBase)).includes('Ph:'), false)
+})
