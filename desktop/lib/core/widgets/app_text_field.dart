@@ -15,6 +15,7 @@ class AppTextField extends StatelessWidget {
     this.autofocus = false,
     this.textInputAction,
     this.onSubmitted,
+    this.onChanged,
     this.validator,
     this.suffixIcon,
     this.hintText,
@@ -28,6 +29,7 @@ class AppTextField extends StatelessWidget {
   final bool autofocus;
   final TextInputAction? textInputAction;
   final ValueChanged<String>? onSubmitted;
+  final ValueChanged<String>? onChanged;
   final FormFieldValidator<String>? validator;
   final Widget? suffixIcon;
   final String? hintText;
@@ -42,6 +44,7 @@ class AppTextField extends StatelessWidget {
       autofocus: autofocus,
       textInputAction: textInputAction,
       onFieldSubmitted: onSubmitted,
+      onChanged: onChanged,
       validator: validator,
       style: Theme.of(context).textTheme.bodyLarge,
       decoration: InputDecoration(

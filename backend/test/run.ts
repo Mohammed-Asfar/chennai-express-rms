@@ -14,6 +14,7 @@ await import('./bill-number.test.js')
 await import('./orders.test.js')
 await import('./bills.test.js')
 await import('./sync.test.js')
+await import('./print.test.js')
 
 await settle()
 report('backend')

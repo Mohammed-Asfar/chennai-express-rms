@@ -8,6 +8,8 @@ import { currentBusinessDate, nextOrderNumber } from '../lib/business-date.js'
 import { getSetting } from '../lib/settings.js'
 import { lineAmounts, orderSubtotal, orderTax, orderTotal, type TaxMode } from '../lib/order-math.js'
 import { refreshTableStatus } from './tables.js'
+import { enqueueAndSend, resolvePrinter } from '../print/queue.js'
+import { renderKot } from '../print/tickets.js'
 
 const createBody = z
   .object({
@@ -322,6 +324,117 @@ export async function orderRoutes(app: FastifyInstance): Promise<void> {
         // FR-O13: the kitchen is already cooking this. The caller decides whether
         // to send a cancellation slip.
         kotAlreadyPrinted: item.kot_printed_at !== null,
+      }
+    },
+  )
+
+  /**
+   * Sends the kitchen ticket.
+   *
+   * Only lines not yet sent go on it, so pressing the button twice does not
+   * make the kitchen cook everything again. A second press after new items
+   * were added prints just those, marked as an addition.
+   *
+   * FR-P: a print failure never blocks the order. The job queues and the
+   * response says whether paper actually came out.
+   */
+  app.post<{ Params: { id: string } }>(
+    '/orders/:id/kot',
+    { preHandler: requireAuth },
+    async (request) => {
+      const me = currentUser(request)
+      const order = findOpenOrder(app, me.branchId, request.params.id)
+
+      const printer = resolvePrinter(app.db, me.branchId, 'kot')
+      if (!printer) {
+        throw new AppError(
+          400,
+          'NO_KOT_PRINTER',
+          'No kitchen printer is set up. Add one in printer settings.',
+        )
+      }
+
+      const unsent = app.db
+        .prepare(
+          `SELECT * FROM order_items
+           WHERE order_id = ? AND deleted_at IS NULL AND kot_printed_at IS NULL
+           ORDER BY created_at`,
+        )
+        .all(order.id) as OrderItemRow[]
+
+      if (unsent.length === 0) {
+        throw new AppError(
+          409,
+          'NOTHING_TO_SEND',
+          'Every item on this order has already gone to the kitchen.',
+        )
+      }
+
+      // Anything already sent means this is a follow-up ticket, and the kitchen
+      // must not read it as a fresh order.
+      const alreadySent = app.db
+        .prepare(
+          `SELECT COUNT(*) AS n FROM order_items
+           WHERE order_id = ? AND deleted_at IS NULL AND kot_printed_at IS NOT NULL`,
+        )
+        .get(order.id) as { n: number }
+
+      const table = order.table_id
+        ? (app.db.prepare('SELECT name FROM tables WHERE id = ?').get(order.table_id) as
+            | { name: string }
+            | undefined)
+        : undefined
+
+      const printedAt = new Date()
+      const payload = renderKot(
+        {
+          orderNo: order.order_no,
+          type: order.type,
+          tableName: table?.name ?? null,
+          seatLabel: order.seat_label,
+          printedAt,
+          kind: alreadySent.n > 0 ? 'additional' : 'new',
+          lines: unsent.map((item) => ({
+            name: item.item_name,
+            variantName: item.variant_name,
+            qty: item.qty,
+            notes: item.notes,
+          })),
+        },
+        printer.paper_width,
+      )
+
+      // Marked as sent before the paper appears: a ticket that printed but was
+      // recorded as unsent would be reprinted, and the kitchen would cook it
+      // twice. A ticket recorded as sent that did not print is recoverable —
+      // the job is in the queue and can be retried.
+      const now = printedAt.toISOString()
+      app.db.transaction(() => {
+        const mark = app.db.prepare(
+          'UPDATE order_items SET kot_printed_at = ?, updated_at = ?, synced_at = NULL WHERE id = ?',
+        )
+        for (const item of unsent) mark.run(now, now, item.id)
+      })()
+
+      const jobId = enqueueAndSend(app.db, {
+        branchId: me.branchId,
+        printerId: printer.id,
+        type: alreadySent.n > 0 ? 'kot_additional' : 'kot',
+        refId: order.id,
+        payload,
+      })
+
+      await new Promise((resolve) => setTimeout(resolve, 400))
+      const job = app.db
+        .prepare('SELECT status, last_error FROM print_jobs WHERE id = ?')
+        .get(jobId) as { status: string; last_error: string | null } | undefined
+
+      const result = await respond(app, me.branchId, order.id)
+      return {
+        ...result,
+        printed: job?.status === 'printed',
+        itemsSent: unsent.length,
+        printError: job?.status === 'printed' ? null : job?.last_error ?? null,
       }
     },
   )
