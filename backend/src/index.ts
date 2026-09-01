@@ -26,8 +26,11 @@ if (applied.length > 0) {
   app.log.info({ migrations: applied }, 'applied pending migrations')
 }
 
+app.sync.start()
+
 const shutdown = async (signal: string): Promise<void> => {
   app.log.info({ signal }, 'shutting down')
+  app.sync.stop()
   await app.close()
   db.close()
   process.exit(0)

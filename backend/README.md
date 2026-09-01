@@ -125,6 +125,40 @@ test/
 | `PATCH /orders/:id/items/:itemId` | any | Change quantity or notes |
 | `DELETE /orders/:id/items/:itemId` | any | Remove a line |
 | `POST /orders/:id/cancel` | any | Cancel with a reason |
+| `GET /sync/status` | any | Pending count, quarantined count, last success |
+| `POST /sync/now` | admin | Force a cycle |
+| `POST /sync/retry` | admin | Clear quarantine and retry |
+
+## Sync
+
+Push-only: the branch is the source of truth, the cloud a read replica. Nothing
+flows back down, so there is no conflict resolution.
+
+**Triggered** by a response hook after any successful mutation (debounced ~2s so a
+burst of edits is one push), a 5-minute idle heartbeat, and a drain at startup.
+
+**Never blocks billing.** No internet, no cloud configured, or a slow response all
+resolve to a failed cycle recorded in status — the till never waits on it.
+
+**Idempotent upserts** keyed on the row id. If the connection dies after Postgres
+commits but before SQLite records `synced_at`, the next cycle overwrites rather than
+failing on a duplicate.
+
+**Failure handling:** attempts 1–5 back off (30s, 1m, 2m, 4m, 8m); after 5 the row is
+quarantined so it cannot block the queue, and surfaces in `/sync/status` with a Retry
+action. The attempt count and last error are stored on the row.
+
+`print_jobs` never syncs — print state is meaningless in the cloud.
+
+### Testing sync
+
+The cloud integration tests are skipped unless `CLOUD_DATABASE_URL` is set:
+
+```bash
+CLOUD_DATABASE_URL=postgresql://... pnpm test
+```
+
+They truncate the cloud database, so point them at a scratch one, never production.
 
 ## Orders
 

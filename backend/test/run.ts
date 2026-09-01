@@ -10,6 +10,7 @@ await import('./menu.test.js')
 await import('./tables.test.js')
 await import('./business-date.test.js')
 await import('./orders.test.js')
+await import('./sync.test.js')
 
 await settle()
 report('backend')

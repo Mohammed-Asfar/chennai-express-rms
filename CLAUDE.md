@@ -82,6 +82,8 @@ inclusive to exclusive must not change what last month's bills mean.
 | **Order and bill numbers are allocated backend-side, inside the insert transaction** | Two terminals would otherwise allocate the same number. |
 | **A print failure never blocks an order or a bill** | The record saves; the job queues with a retry. A kitchen printer on wifi will go offline. |
 | **Sync never touches the billing path** | Writes go to SQLite and succeed offline. The sync worker is separate and failure-tolerant. |
+| **Sync pushes are idempotent upserts** | A cycle can die after Postgres commits but before SQLite records `synced_at`; the next cycle must overwrite, not fail on a duplicate key. |
+| **SQLite integers are not Postgres booleans** | `is_active`, `is_available`, `print_logo`, `must_change_password` need converting on push, or `1` silently arrives as `false`. |
 | **Validate every request with Zod at the API boundary** | Trust nothing from the client, including a client you wrote. |
 | **An update check never blocks billing** | No internet, no cloud, or a slow response all resolve to "no update". Never an error the user cannot act on. |
 | **An installer's SHA-256 is verified before it runs** | The app executes this binary on the billing PC. An unverified download is remote code execution. |

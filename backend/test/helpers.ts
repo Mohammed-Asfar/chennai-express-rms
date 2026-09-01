@@ -3,7 +3,13 @@ let failed = 0
 const failures: string[] = []
 const pending: Promise<void>[] = []
 
-/** Registers a test. Async bodies are awaited by `settle()` before reporting. */
+/**
+ * Registers a test. Async bodies are awaited by `settle()` before reporting.
+ *
+ * Async tests start immediately and run concurrently. That is fine for
+ * in-memory SQLite, but tests sharing one external database must use
+ * `serialTest` — concurrent schema statements deadlock against each other.
+ */
 export function test(name: string, fn: () => void | Promise<void>): void {
   const record = (error: unknown): void => {
     failed++
@@ -22,8 +28,33 @@ export function test(name: string, fn: () => void | Promise<void>): void {
   }
 }
 
+const serialQueue: { name: string; fn: () => Promise<void> }[] = []
+
+/**
+ * Registers a test that must not run alongside the others.
+ *
+ * For tests sharing an external database: concurrent TRUNCATEs deadlock, and
+ * one test's fixture would wipe another's rows mid-run.
+ */
+export function serialTest(name: string, fn: () => Promise<void>): void {
+  serialQueue.push({ name, fn })
+}
+
 export async function settle(): Promise<void> {
   await Promise.all(pending)
+
+  for (const entry of serialQueue) {
+    try {
+      await entry.fn()
+      passed++
+    } catch (error) {
+      failed++
+      failures.push(
+        `  ${entry.name}
+    ${error instanceof Error ? error.message : String(error)}`,
+      )
+    }
+  }
 }
 
 export function assertEqual<T>(actual: T, expected: T, message?: string): void {

@@ -17,10 +17,14 @@ import { categoryRoutes } from './routes/categories.js'
 import { menuRoutes } from './routes/menu.js'
 import { tableRoutes } from './routes/tables.js'
 import { orderRoutes } from './routes/orders.js'
+import { syncRoutes } from './routes/sync.js'
+import { SyncWorker } from './sync/worker.js'
 
 export interface BuildOptions {
   db: Db
   env: Env
+  /** Injectable so tests can supply a stub. */
+  sync?: SyncWorker
 }
 
 type LoggerConfig = NonNullable<FastifyServerOptions['logger']>
@@ -39,7 +43,7 @@ function loggerConfig(env: Env): LoggerConfig {
   return { level: env.LOG_LEVEL }
 }
 
-export async function buildServer({ db, env }: BuildOptions): Promise<FastifyInstance> {
+export async function buildServer({ db, env, sync }: BuildOptions): Promise<FastifyInstance> {
   const app = Fastify({
     logger: loggerConfig(env),
     // Bills and orders are small; a low cap limits the blast radius of a bad request.
@@ -48,8 +52,22 @@ export async function buildServer({ db, env }: BuildOptions): Promise<FastifyIns
 
   app.decorate('db', db)
   app.decorate('env', env)
+  app.decorate('sync', sync ?? new SyncWorker(db, env, app.log))
 
   await app.register(cors, { origin: true })
+
+  // Nudge sync after any successful mutation.
+  //
+  // A hook rather than a call in each route: a new endpoint would otherwise have
+  // to remember, and forgetting means its writes sit unsynced until the next
+  // heartbeat. The worker debounces, so a burst of edits is still one push.
+  app.addHook('onResponse', async (request, reply) => {
+    if (request.method === 'GET' || request.method === 'HEAD') return
+    if (reply.statusCode >= 400) return
+    // Sync's own endpoints must not retrigger it.
+    if (request.url.startsWith('/sync/')) return
+    app.sync.signal()
+  })
 
   app.setErrorHandler((error: FastifyError, request: FastifyRequest, reply: FastifyReply) => {
     if (error instanceof AppError) {
@@ -95,6 +113,7 @@ export async function buildServer({ db, env }: BuildOptions): Promise<FastifyIns
   await app.register(menuRoutes)
   await app.register(tableRoutes)
   await app.register(orderRoutes)
+  await app.register(syncRoutes)
 
   return app
 }
@@ -103,5 +122,6 @@ declare module 'fastify' {
   interface FastifyInstance {
     db: Db
     env: Env
+    sync: SyncWorker
   }
 }
