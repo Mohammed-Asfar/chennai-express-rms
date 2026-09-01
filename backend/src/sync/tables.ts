@@ -111,7 +111,7 @@ export const SYNC_TABLES: SyncTable[] = [
   {
     name: 'bills',
     columns: [
-      ...BASE, 'order_id', 'bill_no', 'business_date', 'subtotal', 'discount_type',
+      ...BASE, 'order_id', 'bill_no', 'bill_period', 'bill_number', 'business_date', 'subtotal', 'discount_type',
       'discount_value', 'discount_amount', 'cgst', 'sgst', 'round_off', 'total',
       'amount_paid', 'payment_status', 'tax_mode', 'tax_breakdown', 'settled_at',
       'customer_name', 'customer_phone', 'void_reason', 'voided_at', 'voided_by',

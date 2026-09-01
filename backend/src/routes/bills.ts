@@ -4,7 +4,8 @@ import { z } from 'zod'
 import type { Db } from '../db/client.js'
 import { AppError } from '../lib/errors.js'
 import { currentUser, requireAuth, requireRole } from '../lib/guards.js'
-import { currentBusinessDate, nextDailyNumber } from '../lib/business-date.js'
+import { currentBusinessDate, nextBillNumber } from '../lib/business-date.js'
+import { formatBillNumber, periodKey } from '../lib/bill-number.js'
 import { getSetting } from '../lib/settings.js'
 import { BillError, computeBill, type BillResult } from '../lib/bill-math.js'
 import { refreshTableStatus } from './tables.js'
@@ -32,6 +33,8 @@ interface BillRow {
   branch_id: string
   order_id: string
   bill_no: number
+  bill_period: string
+  bill_number: string
   business_date: string
   subtotal: number
   discount_type: string
@@ -129,24 +132,42 @@ export async function billRoutes(app: FastifyInstance): Promise<void> {
     const id = randomUUID()
     const now = new Date().toISOString()
 
+    // Which sequence this bill belongs to. Keyed on the period, not the date:
+    // with monthly reset, bill 47 recurs on many dates within the month.
+    const resetPeriod = getSetting(app.db, me.branchId, 'bill_reset_period')
+    const billPeriod = periodKey(businessDate, resetPeriod)
+
     app.db.transaction(() => {
       // Numbered inside the insert transaction, so two terminals cannot collide.
-      const billNo = nextDailyNumber(app.db, 'bills', 'bill_no', me.branchId, businessDate)
+      const billNo = nextBillNumber(app.db, me.branchId, billPeriod)
+
+      // The formatted string is stored, not derived on read: a reprint must show
+      // what the original showed, even if the format is changed later.
+      const billNumber = formatBillNumber({
+        billNo,
+        businessDate,
+        template: getSetting(app.db, me.branchId, 'bill_number_format'),
+        prefix: getSetting(app.db, me.branchId, 'bill_prefix'),
+        padWidth: getSetting(app.db, me.branchId, 'bill_number_pad'),
+      })
 
       app.db
         .prepare(
-          `INSERT INTO bills (id, branch_id, order_id, bill_no, business_date, subtotal,
+          `INSERT INTO bills (id, branch_id, order_id, bill_no, bill_period, bill_number,
+                              business_date, subtotal,
                               discount_type, discount_value, discount_amount, cgst, sgst,
                               round_off, total, amount_paid, payment_status, tax_mode,
                               tax_breakdown, customer_name, customer_phone, reprint_count,
                               created_by, created_at, updated_at)
-           VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 0, 'unpaid', ?, ?, ?, ?, 0, ?, ?, ?)`,
+           VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 0, 'unpaid', ?, ?, ?, ?, 0, ?, ?, ?)`,
         )
         .run(
           id,
           me.branchId,
           order.id,
           billNo,
+          billPeriod,
+          billNumber,
           businessDate,
           computed.subtotal,
           body.discountType ?? 'none',
@@ -423,6 +444,9 @@ function present(bill: BillRow, payments: PaymentRow[]) {
     id: bill.id,
     orderId: bill.order_id,
     billNo: bill.bill_no,
+    /** The formatted string as printed. */
+    billNumber: bill.bill_number,
+    billPeriod: bill.bill_period,
     businessDate: bill.business_date,
     subtotal: bill.subtotal,
     discountType: bill.discount_type,

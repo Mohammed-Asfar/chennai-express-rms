@@ -440,7 +440,9 @@ snapshot rule means each carries its own price.
 | `id` | `id` | |
 | `branch_id` | `fk` | |
 | `order_id` | `fk` | **One bill per order** — unique |
-| `bill_no` | `int` | Sequential per branch per day |
+| `bill_no` | `int` | Sequential per branch per **numbering period** |
+| `bill_period` | `text` | Which sequence this belongs to — see below |
+| `bill_number` | `text` | The formatted string as printed, e.g. `CE/2026-27/0042` |
 | `business_date` | `text` | Matches the order |
 | `subtotal` | `money` | Σ `line_base` |
 | `discount_type` | `enum` | `none`, `fixed`, `percent` |
@@ -464,9 +466,25 @@ snapshot rule means each carries its own price.
 | `created_by` | `fk` | |
 
 ```sql
-UNIQUE (branch_id, business_date, bill_no)
+UNIQUE (branch_id, bill_period, bill_no)
 UNIQUE (order_id) WHERE deleted_at IS NULL
 ```
+
+**Numbering resets per period**, configured by `settings.bill_reset_period`:
+
+| Period | `bill_period` for 2026-09-15 |
+|---|---|
+| `daily` | `2026-09-15` |
+| `monthly` | `2026-09` |
+| `yearly` | `2026` |
+| `financial_year` | `2026-27` (April–March) |
+| `never` | `all` |
+
+Uniqueness keys on the **period, not the date**. With monthly reset, bill 47 recurs
+on many dates within the month, so the date alone cannot identify the sequence.
+
+**`bill_number` is stored, not derived on read.** A reprint must show what the
+original showed, even if the format is changed afterwards.
 
 **One bill per order.** Two parties sharing a table are two orders and therefore two
 bills — splitting happens at the order, never at the bill. This keeps every bill a
@@ -601,7 +619,10 @@ PRIMARY KEY (branch_id, key)
 | `tax_mode` | `inclusive` | Menu prices include GST |
 | `default_tax_rate` | `500` | 5% in basis points |
 | `business_day_start` | `05:00` | Trading day cutoff |
-| `bill_prefix` | `CE` | Printed before the bill number |
+| `bill_prefix` | `CE` | The `{PREFIX}` token |
+| `bill_reset_period` | `financial_year` | `daily`, `monthly`, `yearly`, `financial_year`, `never` |
+| `bill_number_format` | `{PREFIX}/{FY}/{NO}` | Tokens: `{PREFIX}` `{NO}` `{YYYY}` `{YY}` `{MM}` `{DD}` `{FY}` |
+| `bill_number_pad` | `4` | Zero-padding width for `{NO}` |
 | `bill_footer` | `Thank you!` | Free text on the bill |
 | `round_off_enabled` | `1` | Round the total to the nearest rupee |
 

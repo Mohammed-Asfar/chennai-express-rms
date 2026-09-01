@@ -37,24 +37,37 @@ function toDateString(date: Date): string {
 }
 
 /**
- * Allocates the next number in a per-branch, per-day sequence.
+ * Allocates the next order number for a business day.
  *
  * Must run inside the same transaction as the insert it numbers. `better-sqlite3`
  * is synchronous and SQLite serialises writers, so this cannot interleave; the
- * UNIQUE constraint on (branch_id, business_date, no) is the backstop.
+ * UNIQUE constraint on (branch_id, business_date, order_no) is the backstop.
  */
-export function nextDailyNumber(
-  db: Db,
-  table: 'orders' | 'bills',
-  column: 'order_no' | 'bill_no',
-  branchId: string,
-  businessDate: string,
-): number {
+export function nextOrderNumber(db: Db, branchId: string, businessDate: string): number {
   const row = db
     .prepare(
-      `SELECT COALESCE(MAX(${column}), 0) + 1 AS next FROM ${table}
+      `SELECT COALESCE(MAX(order_no), 0) + 1 AS next FROM orders
        WHERE branch_id = ? AND business_date = ?`,
     )
     .get(branchId, businessDate) as { next: number }
+  return row.next
+}
+
+/**
+ * Allocates the next bill number for a numbering period.
+ *
+ * Keyed on the period, not the date: with monthly reset, bill 47 recurs on many
+ * dates within the month, so the date alone cannot identify the sequence.
+ *
+ * Same transaction rule as above; the UNIQUE constraint on
+ * (branch_id, bill_period, bill_no) is the backstop.
+ */
+export function nextBillNumber(db: Db, branchId: string, billPeriod: string): number {
+  const row = db
+    .prepare(
+      `SELECT COALESCE(MAX(bill_no), 0) + 1 AS next FROM bills
+       WHERE branch_id = ? AND bill_period = ?`,
+    )
+    .get(branchId, billPeriod) as { next: number }
   return row.next
 }

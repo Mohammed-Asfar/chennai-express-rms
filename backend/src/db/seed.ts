@@ -46,6 +46,9 @@ export async function seedIfEmpty(db: Db, env: Env): Promise<{ seeded: boolean; 
       ['default_tax_rate', '500'], // 5% in basis points
       ['business_day_start', '05:00'],
       ['bill_prefix', ''],
+      ['bill_reset_period', 'daily'],
+      ['bill_number_format', '{NO}'],
+      ['bill_number_pad', '4'],
       ['bill_footer', 'Thank you, visit again!'],
       ['round_off_enabled', '1'],
     ]

@@ -1,5 +1,6 @@
 import { z } from 'zod'
 import type { Db } from '../db/client.js'
+import { RESET_PERIODS } from './bill-number.js'
 
 /**
  * Settings are key-value, so values arrive as strings and are parsed on read.
@@ -11,6 +12,10 @@ const parsers = {
   default_tax_rate: z.coerce.number().int().min(0),
   business_day_start: z.string().regex(/^\d{2}:\d{2}$/),
   bill_prefix: z.string(),
+  bill_reset_period: z.enum(RESET_PERIODS),
+  /** Composed from tokens: {PREFIX} {NO} {YYYY} {YY} {MM} {DD} {FY} */
+  bill_number_format: z.string().min(1),
+  bill_number_pad: z.coerce.number().int().min(1).max(10),
   bill_footer: z.string(),
   round_off_enabled: z.enum(['0', '1']).transform((v) => v === '1'),
 } as const
@@ -23,6 +28,9 @@ const fallbacks: { [K in SettingKey]: SettingValue<K> } = {
   default_tax_rate: 500, // 5% in basis points
   business_day_start: '05:00',
   bill_prefix: '',
+  bill_reset_period: 'daily',
+  bill_number_format: '{NO}',
+  bill_number_pad: 4,
   bill_footer: '',
   round_off_enabled: true,
 }

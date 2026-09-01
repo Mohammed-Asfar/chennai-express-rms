@@ -167,6 +167,34 @@ reversed.
 
 **An unpaid bill does not hold its table.** The balance follows the bill.
 
+### Bill numbering
+
+Configurable in settings:
+
+| Setting | Example | Meaning |
+|---|---|---|
+| `bill_reset_period` | `financial_year` | `daily`, `monthly`, `yearly`, `financial_year`, `never` |
+| `bill_number_format` | `{PREFIX}/{FY}/{NO}` | Template, must contain `{NO}` |
+| `bill_prefix` | `CE` | Fills `{PREFIX}` |
+| `bill_number_pad` | `4` | Zero-padding for `{NO}` |
+
+Tokens: `{PREFIX}` `{NO}` `{YYYY}` `{YY}` `{MM}` `{DD}` `{FY}`. An unknown token is
+left visible rather than silently dropped, so a typo shows on the bill.
+
+```
+{NO}                  -> 0042
+{PREFIX}-{NO}         -> CE-0042
+{PREFIX}/{FY}/{NO}    -> CE/2026-27/0042
+INV-{YY}{MM}-{NO}     -> INV-2609-0042
+```
+
+Uniqueness keys on `bill_period`, not the date — with monthly reset, bill 47 recurs
+on many dates within the month. The financial year runs April to March, so 31 March
+and 1 April fall in different sequences.
+
+The formatted string is **stored on the bill**, so a reprint shows what the original
+showed even if the format is changed later.
+
 ## Sync
 
 Push-only: the branch is the source of truth, the cloud a read replica. Nothing

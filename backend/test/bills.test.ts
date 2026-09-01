@@ -88,6 +88,9 @@ async function login(app: FastifyInstance, username: string, password: string) {
 interface BillPayload {
   id: string
   billNo: number
+  billNumber: string
+  billPeriod: string
+  businessDate: string
   subtotal: number
   discountAmount: number
   cgst: number
@@ -661,5 +664,137 @@ test('changing tax mode never changes an existing bill', async () => {
   const after = (res.json() as { bill: BillPayload & { taxMode: string } }).bill
   assertEqual(after.total, bill.total)
   assertEqual((after as unknown as { taxMode: string }).taxMode, 'exclusive', 'snapshotted')
+  await close(ctx)
+})
+
+// --- configurable numbering ---
+
+/** Sets a numbering option and returns the branch id. */
+function configureNumbering(ctx: Ctx, options: Record<string, string>): void {
+  const branchId = (ctx.db.prepare('SELECT id FROM branches LIMIT 1').get() as { id: string }).id
+  for (const [key, value] of Object.entries(options)) {
+    setSetting(ctx.db, branchId, key as never, value)
+  }
+}
+
+test('daily reset gives each bill a per-day sequence', async () => {
+  const ctx = await setup()
+  configureNumbering(ctx, { bill_reset_period: 'daily' })
+
+  const first = await makeBill(ctx, await makeOrder(ctx, [{ variantId: ctx.tea, qty: 1 }]))
+  const second = await makeBill(ctx, await makeOrder(ctx, [{ variantId: ctx.tea, qty: 1 }]))
+
+  assertEqual(first.billNo, 1)
+  assertEqual(second.billNo, 2)
+  assertEqual(first.billPeriod, first.businessDate, 'the period is the date')
+  await close(ctx)
+})
+
+test('a new period restarts the sequence', async () => {
+  const ctx = await setup()
+  configureNumbering(ctx, { bill_reset_period: 'daily' })
+  const bill = await makeBill(ctx, await makeOrder(ctx, [{ variantId: ctx.tea, qty: 1 }]))
+  assertEqual(bill.billNo, 1)
+
+  // Move the existing bill into a previous period, as a new day would.
+  ctx.db.prepare("UPDATE bills SET bill_period = '2020-01-01'").run()
+
+  const next = await makeBill(ctx, await makeOrder(ctx, [{ variantId: ctx.tea, qty: 1 }]))
+  assertEqual(next.billNo, 1, 'the new period starts again at 1')
+  await close(ctx)
+})
+
+test('monthly reset keeps numbering across days in the month', async () => {
+  const ctx = await setup()
+  configureNumbering(ctx, { bill_reset_period: 'monthly' })
+
+  const bill = await makeBill(ctx, await makeOrder(ctx, [{ variantId: ctx.tea, qty: 1 }]))
+  assertEqual(bill.billPeriod, bill.businessDate.slice(0, 7), 'keyed on the month')
+  await close(ctx)
+})
+
+test('financial year reset keys on the April boundary', async () => {
+  const ctx = await setup()
+  configureNumbering(ctx, { bill_reset_period: 'financial_year' })
+
+  const bill = await makeBill(ctx, await makeOrder(ctx, [{ variantId: ctx.tea, qty: 1 }]))
+  // The seeded business date is in September, so FY 2026-27.
+  assertEqual(bill.billPeriod, '2026-27')
+  await close(ctx)
+})
+
+test('never reset keeps one continuous sequence', async () => {
+  const ctx = await setup()
+  configureNumbering(ctx, { bill_reset_period: 'never' })
+
+  const first = await makeBill(ctx, await makeOrder(ctx, [{ variantId: ctx.tea, qty: 1 }]))
+  assertEqual(first.billPeriod, 'all')
+
+  // Even a different business date shares the sequence.
+  ctx.db.prepare("UPDATE bills SET business_date = '2020-01-01'").run()
+  const second = await makeBill(ctx, await makeOrder(ctx, [{ variantId: ctx.tea, qty: 1 }]))
+  assertEqual(second.billNo, 2, 'numbering continues regardless of date')
+  await close(ctx)
+})
+
+test('the printed number follows the configured format', async () => {
+  const ctx = await setup()
+  configureNumbering(ctx, {
+    bill_reset_period: 'financial_year',
+    bill_number_format: '{PREFIX}/{FY}/{NO}',
+    bill_prefix: 'CE',
+    bill_number_pad: '4',
+  })
+
+  const bill = await makeBill(ctx, await makeOrder(ctx, [{ variantId: ctx.tea, qty: 1 }]))
+  assertEqual(bill.billNumber, 'CE/2026-27/0001')
+  await close(ctx)
+})
+
+test('a stored bill number survives a later format change', async () => {
+  // A reprint must show what the original showed.
+  const ctx = await setup()
+  configureNumbering(ctx, { bill_number_format: '{PREFIX}-{NO}', bill_prefix: 'OLD' })
+  const bill = await makeBill(ctx, await makeOrder(ctx, [{ variantId: ctx.tea, qty: 1 }]))
+  assertEqual(bill.billNumber, 'OLD-0001')
+
+  configureNumbering(ctx, { bill_number_format: '{PREFIX}/{YYYY}/{NO}', bill_prefix: 'NEW' })
+
+  const res = await ctx.app.inject({
+    method: 'GET',
+    url: `/bills/${bill.id}`,
+    headers: ctx.cashier,
+  })
+  assertEqual(
+    (res.json() as { bill: BillPayload }).bill.billNumber,
+    'OLD-0001',
+    'the original formatting is preserved',
+  )
+  await close(ctx)
+})
+
+test('two bills cannot share a number within a period', async () => {
+  const ctx = await setup()
+  const bill = await makeBill(ctx, await makeOrder(ctx, [{ variantId: ctx.tea, qty: 1 }]))
+  const row = ctx.db.prepare('SELECT bill_period FROM bills WHERE id = ?').get(bill.id) as {
+    bill_period: string
+  }
+
+  let threw = false
+  try {
+    ctx.db
+      .prepare(
+        `INSERT INTO bills (id, branch_id, order_id, bill_no, bill_period, bill_number,
+                            business_date, subtotal, total, tax_mode, created_by,
+                            created_at, updated_at)
+         SELECT 'dupe', branch_id, order_id, bill_no, bill_period, bill_number, business_date,
+                subtotal, total, tax_mode, created_by, created_at, updated_at
+         FROM bills WHERE id = ?`,
+      )
+      .run(bill.id)
+  } catch {
+    threw = true
+  }
+  assertEqual(threw, true, `a duplicate bill_no in period ${row.bill_period} must be rejected`)
   await close(ctx)
 })

@@ -4,7 +4,7 @@ import { z } from 'zod'
 import type { Db } from '../db/client.js'
 import { AppError } from '../lib/errors.js'
 import { currentUser, requireAuth } from '../lib/guards.js'
-import { currentBusinessDate, nextDailyNumber } from '../lib/business-date.js'
+import { currentBusinessDate, nextOrderNumber } from '../lib/business-date.js'
 import { getSetting } from '../lib/settings.js'
 import { lineAmounts, orderSubtotal, orderTax, orderTotal, type TaxMode } from '../lib/order-math.js'
 import { refreshTableStatus } from './tables.js'
@@ -133,7 +133,7 @@ export async function orderRoutes(app: FastifyInstance): Promise<void> {
     // Numbering happens inside the transaction that inserts the row, so two
     // terminals cannot allocate the same order number.
     app.db.transaction(() => {
-      const orderNo = nextDailyNumber(app.db, 'orders', 'order_no', me.branchId, businessDate)
+      const orderNo = nextOrderNumber(app.db, me.branchId, businessDate)
       app.db
         .prepare(
           `INSERT INTO orders (id, branch_id, order_no, business_date, type, table_id, seat_label,
