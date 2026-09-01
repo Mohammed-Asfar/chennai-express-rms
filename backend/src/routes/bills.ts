@@ -9,6 +9,8 @@ import { formatBillNumber, periodKey } from '../lib/bill-number.js'
 import { getSetting } from '../lib/settings.js'
 import { BillError, computeBill, type BillResult } from '../lib/bill-math.js'
 import { refreshTableStatus } from './tables.js'
+import { enqueueAndSend, resolvePrinter } from '../print/queue.js'
+import { renderBill } from '../print/tickets.js'
 
 const createBody = z.object({
   orderId: z.string().uuid(),
@@ -70,39 +72,148 @@ interface PaymentRow {
 }
 
 export async function billRoutes(app: FastifyInstance): Promise<void> {
-  app.get<{ Querystring: { businessDate?: string; status?: string; unpaid?: string } }>(
-    '/bills',
-    { preHandler: requireAuth },
-    async (request) => {
-      const me = currentUser(request)
-      const conditions = ['branch_id = ?', 'deleted_at IS NULL']
-      const params: unknown[] = [me.branchId]
+  /**
+   * Bills for a business date or a range of them.
+   *
+   * Filtered on `business_date`, never `created_at`: a restaurant open past
+   * midnight keeps 1 AM sales on the previous trading day, and a day's takings
+   * must match what the till counted.
+   *
+   * `from`/`to` are inclusive. With neither, today is used — the common case is
+   * "what has been billed today".
+   */
+  app.get<{
+    Querystring: {
+      businessDate?: string
+      from?: string
+      to?: string
+      status?: string
+      unpaid?: string
+      all?: string
+    }
+  }>('/bills', { preHandler: requireAuth }, async (request) => {
+    const me = currentUser(request)
+    const conditions = ['branch_id = ?', 'deleted_at IS NULL']
+    const params: unknown[] = [me.branchId]
 
-      if (request.query.businessDate) {
-        conditions.push('business_date = ?')
-        params.push(request.query.businessDate)
+    const { businessDate, from, to } = request.query
+
+    if (businessDate) {
+      conditions.push('business_date = ?')
+      params.push(businessDate)
+    } else if (from || to) {
+      // An open-ended range is still a range: "everything since Monday".
+      if (from) {
+        conditions.push('business_date >= ?')
+        params.push(from)
       }
-      if (request.query.status) {
-        conditions.push('payment_status = ?')
-        params.push(request.query.status)
+      if (to) {
+        conditions.push('business_date <= ?')
+        params.push(to)
       }
-      if (request.query.unpaid === 'true') conditions.push("payment_status != 'paid'")
+    } else if (request.query.all !== 'true') {
+      conditions.push('business_date = ?')
+      params.push(currentBusinessDate(app.db, me.branchId))
+    }
 
-      const rows = app.db
-        .prepare(
-          `SELECT * FROM bills WHERE ${conditions.join(' AND ')} ORDER BY bill_no DESC LIMIT 200`,
-        )
-        .all(...params) as BillRow[]
+    if (request.query.status) {
+      conditions.push('payment_status = ?')
+      params.push(request.query.status)
+    }
+    if (request.query.unpaid === 'true') conditions.push("payment_status != 'paid'")
 
-      const payments = loadPayments(app.db, rows.map((r) => r.id))
-      return { bills: rows.map((row) => present(row, payments.get(row.id) ?? [])) }
-    },
-  )
+    const where = conditions.join(' AND ')
 
+    const rows = app.db
+      .prepare(
+        `SELECT * FROM bills WHERE ${where} ORDER BY business_date DESC, bill_no DESC LIMIT 500`,
+      )
+      .all(...params) as BillRow[]
+
+    // Summed in SQL over the whole match, not over the returned page: a day
+    // with more than 500 bills must still report its real takings.
+    const totals = app.db
+      .prepare(
+        `SELECT COUNT(*) AS count,
+                COALESCE(SUM(total), 0) AS total,
+                COALESCE(SUM(amount_paid), 0) AS collected
+         FROM bills WHERE ${where}`,
+      )
+      .get(...params) as { count: number; total: number; collected: number }
+
+    const payments = loadPayments(app.db, rows.map((r) => r.id))
+
+    return {
+      bills: rows.map((row) => present(row, payments.get(row.id) ?? [])),
+      summary: {
+        count: totals.count,
+        total: totals.total,
+        collected: totals.collected,
+        outstanding: totals.total - totals.collected,
+      },
+    }
+  })
+
+  /**
+   * One bill, with everything needed to show or re-check it.
+   *
+   * Line items come from `order_items`, which snapshotted the name, price and
+   * tax rate when each was added. Reading the menu instead would mean a dish
+   * renamed or repriced today silently rewrites a bill from last month.
+   */
   app.get<{ Params: { id: string } }>('/bills/:id', { preHandler: requireAuth }, async (request) => {
     const me = currentUser(request)
     const bill = findBill(app, me.branchId, request.params.id)
-    return { bill: present(bill, loadPayments(app.db, [bill.id]).get(bill.id) ?? []) }
+
+    const items = app.db
+      .prepare(
+        `SELECT item_name, variant_name, qty, unit_price, tax_rate,
+                line_base, line_tax, line_total
+         FROM order_items
+         WHERE order_id = ? AND deleted_at IS NULL
+         ORDER BY created_at`,
+      )
+      .all(bill.order_id) as {
+      item_name: string
+      variant_name: string
+      qty: number
+      unit_price: number
+      tax_rate: number
+      line_base: number
+      line_tax: number
+      line_total: number
+    }[]
+
+    const order = app.db
+      .prepare('SELECT order_no, type, table_id FROM orders WHERE id = ?')
+      .get(bill.order_id) as
+      | { order_no: number; type: 'dine_in' | 'takeaway'; table_id: string | null }
+      | undefined
+
+    const table = order?.table_id
+      ? (app.db.prepare('SELECT name FROM tables WHERE id = ?').get(order.table_id) as
+          | { name: string }
+          | undefined)
+      : undefined
+
+    return {
+      bill: {
+        ...present(bill, loadPayments(app.db, [bill.id]).get(bill.id) ?? []),
+        orderNo: order?.order_no ?? null,
+        orderType: order?.type ?? null,
+        tableName: table?.name ?? null,
+        items: items.map((item) => ({
+          itemName: item.item_name,
+          variantName: item.variant_name,
+          qty: item.qty,
+          unitPrice: item.unit_price,
+          taxRate: item.tax_rate,
+          lineBase: item.line_base,
+          lineTax: item.line_tax,
+          lineTotal: item.line_total,
+        })),
+      },
+    }
   })
 
   /** Preview without persisting — lets the till show a total before committing. */
@@ -202,6 +313,127 @@ export async function billRoutes(app: FastifyInstance): Promise<void> {
     reply.status(201)
     return { bill: present(findBill(app, me.branchId, id), []) }
   })
+
+  /**
+   * Prints (or reprints) a bill.
+   *
+   * A reprint is marked DUPLICATE on the paper: two identical bills in a till
+   * drawer at closing time is how a cashier ends up counting a sale twice.
+   */
+  app.post<{ Params: { id: string } }>(
+    '/bills/:id/print',
+    { preHandler: requireAuth },
+    async (request) => {
+      const me = currentUser(request)
+      const bill = findBill(app, me.branchId, request.params.id)
+
+      const printer = resolvePrinter(app.db, me.branchId, 'bill')
+      if (!printer) {
+        throw new AppError(
+          400,
+          'NO_BILL_PRINTER',
+          'No billing printer is set up. Add one in printer settings.',
+        )
+      }
+
+      const alreadyPrinted = app.db
+        .prepare(
+          `SELECT COUNT(*) AS n FROM print_jobs
+           WHERE ref_id = ? AND type = 'bill' AND status = 'printed'`,
+        )
+        .get(bill.id) as { n: number }
+
+      const items = app.db
+        .prepare(
+          'SELECT * FROM order_items WHERE order_id = ? AND deleted_at IS NULL ORDER BY created_at',
+        )
+        .all(bill.order_id) as {
+        item_name: string
+        variant_name: string
+        qty: number
+        unit_price: number
+        line_total: number
+      }[]
+
+      const order = app.db
+        .prepare('SELECT order_no, type, table_id FROM orders WHERE id = ?')
+        .get(bill.order_id) as
+        | { order_no: number; type: 'dine_in' | 'takeaway'; table_id: string | null }
+        | undefined
+
+      const table = order?.table_id
+        ? (app.db.prepare('SELECT name FROM tables WHERE id = ?').get(order.table_id) as
+            | { name: string }
+            | undefined)
+        : undefined
+
+      const branch = app.db
+        .prepare('SELECT name, address, gstin FROM branches WHERE id = ?')
+        .get(me.branchId) as
+        | { name: string; address: string | null; gstin: string | null }
+        | undefined
+
+      const payments = app.db
+        .prepare(
+          // Reversed payments are excluded: the receipt should show what the
+          // customer actually paid, not a corrected entry and its correction.
+          `SELECT mode, amount FROM payments
+           WHERE bill_id = ? AND deleted_at IS NULL AND reversed_at IS NULL
+           ORDER BY created_at`,
+        )
+        .all(bill.id) as { mode: string; amount: number }[]
+
+      const payload = renderBill(
+        {
+          billNumber: bill.bill_number,
+          branchName: branch?.name ?? 'Restaurant',
+          branchAddress: branch?.address ?? null,
+          gstin: branch?.gstin ?? null,
+          orderNo: order?.order_no ?? 0,
+          type: order?.type ?? 'dine_in',
+          tableName: table?.name ?? null,
+          printedAt: new Date(),
+          lines: items.map((item) => ({
+            name: item.item_name,
+            variantName: item.variant_name,
+            qty: item.qty,
+            unitPrice: item.unit_price,
+            lineTotal: item.line_total,
+          })),
+          subtotal: bill.subtotal,
+          discountAmount: bill.discount_amount,
+          cgst: bill.cgst,
+          sgst: bill.sgst,
+          roundOff: bill.round_off,
+          total: bill.total,
+          taxMode: bill.tax_mode === 'exclusive' ? 'exclusive' : 'inclusive',
+          payments,
+          footer: getSetting(app.db, me.branchId, 'bill_footer'),
+          isReprint: alreadyPrinted.n > 0,
+        },
+        printer.paper_width,
+      )
+
+      const jobId = enqueueAndSend(app.db, {
+        branchId: me.branchId,
+        printerId: printer.id,
+        type: 'bill',
+        refId: bill.id,
+        payload,
+      })
+
+      await new Promise((resolve) => setTimeout(resolve, 400))
+      const job = app.db
+        .prepare('SELECT status, last_error FROM print_jobs WHERE id = ?')
+        .get(jobId) as { status: string; last_error: string | null } | undefined
+
+      return {
+        ok: job?.status === 'printed',
+        isReprint: alreadyPrinted.n > 0,
+        error: job?.status === 'printed' ? null : job?.last_error ?? null,
+      }
+    },
+  )
 
   // --- payments ---
 

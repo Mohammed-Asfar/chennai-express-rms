@@ -798,3 +798,144 @@ test('two bills cannot share a number within a period', async () => {
   assertEqual(threw, true, `a duplicate bill_no in period ${row.bill_period} must be rejected`)
   await close(ctx)
 })
+
+// --- listing by business date ---
+
+/** Moves a bill onto another trading day, to test date filtering. */
+function backdate(ctx: Ctx, billId: string, businessDate: string): void {
+  ctx.db.prepare('UPDATE bills SET business_date = ? WHERE id = ?').run(businessDate, billId)
+}
+
+interface ListResult {
+  bills: BillPayload[]
+  summary: { count: number; total: number; collected: number; outstanding: number }
+}
+
+async function list(ctx: Ctx, query = ''): Promise<ListResult> {
+  const res = await ctx.app.inject({
+    method: 'GET',
+    url: `/bills${query}`,
+    headers: ctx.cashier,
+  })
+  if (res.statusCode !== 200) throw new Error(`list failed: ${res.statusCode} ${res.body}`)
+  return res.json() as ListResult
+}
+
+test('bills default to today, not everything ever billed', async () => {
+  const ctx = await setup()
+  const today = await makeBill(ctx, await makeOrder(ctx, [{ variantId: ctx.tea, qty: 1 }]))
+  const old = await makeBill(ctx, await makeOrder(ctx, [{ variantId: ctx.tea, qty: 1 }]))
+  backdate(ctx, old.id, '2020-01-01')
+
+  const result = await list(ctx)
+  assertEqual(result.bills.length, 1, 'only today')
+  assertEqual(result.bills[0]!.id, today.id)
+  await close(ctx)
+})
+
+test('a date range is inclusive at both ends', async () => {
+  const ctx = await setup()
+  const a = await makeBill(ctx, await makeOrder(ctx, [{ variantId: ctx.tea, qty: 1 }]))
+  const b = await makeBill(ctx, await makeOrder(ctx, [{ variantId: ctx.tea, qty: 1 }]))
+  const c = await makeBill(ctx, await makeOrder(ctx, [{ variantId: ctx.tea, qty: 1 }]))
+  backdate(ctx, a.id, '2026-03-01')
+  backdate(ctx, b.id, '2026-03-05')
+  backdate(ctx, c.id, '2026-03-10')
+
+  const result = await list(ctx, '?from=2026-03-01&to=2026-03-05')
+  assertEqual(result.bills.length, 2, 'both endpoints are included')
+
+  const single = await list(ctx, '?from=2026-03-05&to=2026-03-05')
+  assertEqual(single.bills.length, 1, 'a one-day range works')
+  await close(ctx)
+})
+
+test('an open-ended range means everything since a date', async () => {
+  const ctx = await setup()
+  const old = await makeBill(ctx, await makeOrder(ctx, [{ variantId: ctx.tea, qty: 1 }]))
+  const recent = await makeBill(ctx, await makeOrder(ctx, [{ variantId: ctx.tea, qty: 1 }]))
+  backdate(ctx, old.id, '2020-01-01')
+  backdate(ctx, recent.id, '2026-06-01')
+
+  const since = await list(ctx, '?from=2026-01-01')
+  assertEqual(since.bills.length, 1)
+  assertEqual(since.bills[0]!.id, recent.id)
+  await close(ctx)
+})
+
+test('the summary totals the whole match, and tracks what is still due', async () => {
+  const ctx = await setup()
+  const first = await makeBill(ctx, await makeOrder(ctx, [{ variantId: ctx.tea, qty: 2 }]))
+  const second = await makeBill(ctx, await makeOrder(ctx, [{ variantId: ctx.tea, qty: 1 }]))
+  await pay(ctx, first.id, { mode: 'cash', amount: first.total })
+
+  const result = await list(ctx)
+  assertEqual(result.summary.count, 2)
+  assertEqual(result.summary.total, first.total + second.total, 'billed')
+  assertEqual(result.summary.collected, first.total, 'only what was actually paid')
+  assertEqual(result.summary.outstanding, second.total, 'the rest is still due')
+  await close(ctx)
+})
+
+test('a voided bill leaves the list and the takings', async () => {
+  const ctx = await setup()
+  const kept = await makeBill(ctx, await makeOrder(ctx, [{ variantId: ctx.tea, qty: 1 }]))
+  const voided = await makeBill(ctx, await makeOrder(ctx, [{ variantId: ctx.tea, qty: 1 }]))
+
+  await ctx.app.inject({
+    method: 'POST',
+    url: `/bills/${voided.id}/void`,
+    headers: ctx.admin,
+    payload: { reason: 'Wrong table' },
+  })
+
+  const result = await list(ctx)
+  assertEqual(result.bills.length, 1, 'the voided bill is gone')
+  assertEqual(result.bills[0]!.id, kept.id)
+  // A voided bill counted in the day's takings would overstate the till.
+  assertEqual(result.summary.total, kept.total)
+  await close(ctx)
+})
+
+test('a bill carries its own line items, snapshotted at the time', async () => {
+  const ctx = await setup()
+  const order = await makeOrder(ctx, [{ variantId: ctx.tea, qty: 3 }])
+  const bill = await makeBill(ctx, order)
+
+  const res = await ctx.app.inject({
+    method: 'GET',
+    url: `/bills/${bill.id}`,
+    headers: ctx.cashier,
+  })
+  const detail = (res.json() as {
+    bill: { items: { itemName: string; qty: number; unitPrice: number }[]; orderNo: number }
+  }).bill
+
+  assertEqual(detail.items.length, 1)
+  assertEqual(detail.items[0]!.qty, 3)
+  assertEqual(typeof detail.orderNo, 'number', 'the order number is shown on the detail')
+
+  const originalName = detail.items[0]!.itemName
+  const originalPrice = detail.items[0]!.unitPrice
+
+  // Renaming and repricing the dish must not rewrite a bill already issued.
+  ctx.db
+    .prepare('UPDATE menu_items SET name = ? WHERE name = ?')
+    .run('Renamed Later', originalName)
+  ctx.db
+    .prepare('UPDATE menu_item_variants SET price = price + 5000 WHERE id = ?')
+    .run(ctx.tea)
+
+  const after = await ctx.app.inject({
+    method: 'GET',
+    url: `/bills/${bill.id}`,
+    headers: ctx.cashier,
+  })
+  const reread = (after.json() as {
+    bill: { items: { itemName: string; unitPrice: number }[] }
+  }).bill
+
+  assertEqual(reread.items[0]!.itemName, originalName, 'the printed name is preserved')
+  assertEqual(reread.items[0]!.unitPrice, originalPrice, 'the charged price is preserved')
+  await close(ctx)
+})
