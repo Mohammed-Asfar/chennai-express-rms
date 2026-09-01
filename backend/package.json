@@ -6,7 +6,9 @@
   "main": "dist/index.js",
   "private": true,
   "license": "UNLICENSED",
-  "engines": { "node": ">=20" },
+  "engines": {
+    "node": ">=20"
+  },
   "scripts": {
     "dev": "tsx watch src/index.ts",
     "build": "tsc",
@@ -14,20 +16,27 @@
     "typecheck": "tsc --noEmit",
     "test": "tsx test/run.ts",
     "db:migrate": "tsx src/db/migrate.ts",
-    "db:status": "tsx src/db/migrate.ts --status"
+    "db:status": "tsx src/db/migrate.ts --status",
+    "db:migrate:cloud": "tsx src/db/migrate-cloud.ts",
+    "db:status:cloud": "tsx src/db/migrate-cloud.ts --status"
   },
   "dependencies": {
     "@fastify/cors": "^11.0.0",
+    "bcryptjs": "^3.0.3",
     "better-sqlite3": "^11.7.0",
     "fastify": "^5.2.0",
+    "jsonwebtoken": "^9.0.3",
     "pino": "^9.6.0",
     "pino-pretty": "^13.0.0",
+    "postgres": "^3.4.9",
     "zod": "^3.24.1"
   },
   "devDependencies": {
     "@types/better-sqlite3": "^7.6.12",
+    "@types/jsonwebtoken": "^9.0.10",
     "@types/node": "^22.10.5",
     "tsx": "^4.19.2",
     "typescript": "^5.7.3"
-  }
+  },
+  "packageManager": "pnpm@11.18.0"
 }

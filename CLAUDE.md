@@ -18,6 +18,7 @@ Flutter Windows frontend, Neon Postgres cloud sync, ESC/POS thermal printing.
 | A feature's behaviour | `PRD.md` §6 requirements |
 | A new edge case or its handling | `PRD.md` §7 |
 | A colour, text style, or spacing value | `core/theme/` only — never a widget |
+| A release | `APP_VERSION` **and** `APP_BUILD_NUMBER` in `src/lib/version.ts`, plus a row in `app_releases` |
 | The stack or a rejected option | `PRD.md` §3 |
 
 `SCHEMA.md` is hand-maintained, not generated. It goes stale unless updated in the
@@ -82,6 +83,9 @@ inclusive to exclusive must not change what last month's bills mean.
 | **A print failure never blocks an order or a bill** | The record saves; the job queues with a retry. A kitchen printer on wifi will go offline. |
 | **Sync never touches the billing path** | Writes go to SQLite and succeed offline. The sync worker is separate and failure-tolerant. |
 | **Validate every request with Zod at the API boundary** | Trust nothing from the client, including a client you wrote. |
+| **An update check never blocks billing** | No internet, no cloud, or a slow response all resolve to "no update". Never an error the user cannot act on. |
+| **An installer's SHA-256 is verified before it runs** | The app executes this binary on the billing PC. An unverified download is remote code execution. |
+| **Version comparison uses `build_number`** | Never parse or compare version strings — a monotonic integer cannot be ambiguous. |
 
 ---
 
@@ -196,6 +200,7 @@ Changing a colour or text style means editing `core/theme/` — never a widget.
 - [ ] Money paths use integers end to end
 - [ ] No hardcoded colours, text styles, or spacing in widgets
 - [ ] No debug logging left in
+- [ ] Version and build number bumped if this is a release
 
 Report what actually happened. If tests fail, say so with the output. If something
 was skipped, say that. Do not describe partial work as complete.

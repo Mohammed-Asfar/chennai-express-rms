@@ -1,6 +1,7 @@
 import { loadEnv } from './lib/env.js'
 import { openDatabase } from './db/client.js'
 import { migrate } from './db/migrate.js'
+import { seedIfEmpty } from './db/seed.js'
 import { buildServer } from './server.js'
 
 const env = loadEnv()
@@ -10,7 +11,16 @@ const db = openDatabase(env.DB_PATH)
 // running against a schema that does not match the code is worse than not starting.
 const applied = migrate(db)
 
+const { seeded } = await seedIfEmpty(db, env)
+
 const app = await buildServer({ db, env })
+
+if (seeded) {
+  app.log.warn(
+    { username: env.SEED_ADMIN_USERNAME },
+    'seeded initial admin account - the password must be changed at first login',
+  )
+}
 
 if (applied.length > 0) {
   app.log.info({ migrations: applied }, 'applied pending migrations')

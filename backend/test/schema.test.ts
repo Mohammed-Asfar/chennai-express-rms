@@ -219,7 +219,7 @@ test('enum columns reject unknown values', () => {
         .prepare(
           `INSERT INTO printers (id, branch_id, name, connection, address, role,
                                  paper_width, is_active, created_at, updated_at)
-           VALUES ('pr1', 'b1', 'Counter', 'bluetooth', 'x', 'bill', '80mm', 1, ?, ?)`,
+           VALUES ('pr1', 'b1', 'Billing', 'bluetooth', 'x', 'bill', '80mm', 1, ?, ?)`,
         )
         .run(now, now),
     'an unsupported connection type should be rejected',

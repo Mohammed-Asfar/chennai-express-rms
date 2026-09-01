@@ -1,0 +1,35 @@
+# Dependencies
+node_modules/
+
+# Build output
+dist/
+build/
+*.exe
+
+# Local databases — never commit billing data
+data/
+*.db
+*.db-shm
+*.db-wal
+
+# Secrets
+.env
+.env.local
+*.local
+
+# Flutter
+desktop/.dart_tool/
+desktop/.flutter-plugins
+desktop/.flutter-plugins-dependencies
+desktop/build/
+desktop/windows/flutter/ephemeral/
+desktop/*.iml
+
+# Editor and OS
+.vscode/
+.idea/
+Thumbs.db
+.DS_Store
+
+# Logs
+*.log

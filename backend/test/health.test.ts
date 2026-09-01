@@ -20,7 +20,8 @@ test('GET /health reports ok when the database is reachable', async () => {
   }
   assertEqual(body.status, 'ok')
   assertEqual(body.database.connected, true)
-  assertEqual(body.database.migrationsApplied, 1)
+  // Not a fixed count — it grows with every migration.
+  if (body.database.migrationsApplied < 1) throw new Error('no migrations were applied')
 
   await app.close()
   db.close()

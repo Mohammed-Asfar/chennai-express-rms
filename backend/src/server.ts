@@ -11,6 +11,12 @@ import type { Db } from './db/client.js'
 import type { Env } from './lib/env.js'
 import { AppError } from './lib/errors.js'
 import { healthRoutes } from './routes/health.js'
+import { authRoutes } from './routes/auth.js'
+import { updateRoutes } from './routes/updates.js'
+import { categoryRoutes } from './routes/categories.js'
+import { menuRoutes } from './routes/menu.js'
+import { tableRoutes } from './routes/tables.js'
+import { orderRoutes } from './routes/orders.js'
 
 export interface BuildOptions {
   db: Db
@@ -41,6 +47,7 @@ export async function buildServer({ db, env }: BuildOptions): Promise<FastifyIns
   })
 
   app.decorate('db', db)
+  app.decorate('env', env)
 
   await app.register(cors, { origin: true })
 
@@ -82,6 +89,12 @@ export async function buildServer({ db, env }: BuildOptions): Promise<FastifyIns
   })
 
   await app.register(healthRoutes)
+  await app.register(authRoutes)
+  await app.register(updateRoutes)
+  await app.register(categoryRoutes)
+  await app.register(menuRoutes)
+  await app.register(tableRoutes)
+  await app.register(orderRoutes)
 
   return app
 }
@@ -89,5 +102,6 @@ export async function buildServer({ db, env }: BuildOptions): Promise<FastifyIns
 declare module 'fastify' {
   interface FastifyInstance {
     db: Db
+    env: Env
   }
 }

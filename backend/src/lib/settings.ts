@@ -1,0 +1,64 @@
+import { z } from 'zod'
+import type { Db } from '../db/client.js'
+
+/**
+ * Settings are key-value, so values arrive as strings and are parsed on read.
+ * The trade-off for not needing a migration per setting is that validation has
+ * to live here.
+ */
+const parsers = {
+  tax_mode: z.enum(['inclusive', 'exclusive']),
+  default_tax_rate: z.coerce.number().int().min(0),
+  business_day_start: z.string().regex(/^\d{2}:\d{2}$/),
+  bill_prefix: z.string(),
+  bill_footer: z.string(),
+  round_off_enabled: z.enum(['0', '1']).transform((v) => v === '1'),
+} as const
+
+export type SettingKey = keyof typeof parsers
+export type SettingValue<K extends SettingKey> = z.infer<(typeof parsers)[K]>
+
+const fallbacks: { [K in SettingKey]: SettingValue<K> } = {
+  tax_mode: 'inclusive',
+  default_tax_rate: 500, // 5% in basis points
+  business_day_start: '05:00',
+  bill_prefix: '',
+  bill_footer: '',
+  round_off_enabled: true,
+}
+
+/**
+ * Reads a setting, falling back to a sane default rather than throwing.
+ *
+ * A missing or corrupt setting must not stop billing — the restaurant would
+ * rather bill at the default rate than not at all.
+ */
+export function getSetting<K extends SettingKey>(
+  db: Db,
+  branchId: string,
+  key: K,
+): SettingValue<K> {
+  const row = db
+    .prepare('SELECT value FROM settings WHERE branch_id = ? AND key = ?')
+    .get(branchId, key) as { value: string } | undefined
+
+  if (!row) return fallbacks[key]
+
+  const parsed = parsers[key].safeParse(row.value)
+  return parsed.success ? (parsed.data as SettingValue<K>) : fallbacks[key]
+}
+
+export function setSetting<K extends SettingKey>(
+  db: Db,
+  branchId: string,
+  key: K,
+  value: string,
+): void {
+  const now = new Date().toISOString()
+  db.prepare(
+    `INSERT INTO settings (branch_id, key, value, created_at, updated_at)
+     VALUES (?, ?, ?, ?, ?)
+     ON CONFLICT (branch_id, key)
+     DO UPDATE SET value = excluded.value, updated_at = excluded.updated_at, synced_at = NULL`,
+  ).run(branchId, key, value, now, now)
+}

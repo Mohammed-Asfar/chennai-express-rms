@@ -1,0 +1,19 @@
+include: package:flutter_lints/flutter.yaml
+
+linter:
+  rules:
+    # Theme and colours are a single source of truth (CLAUDE.md 6.1). These do
+    # not catch a hardcoded Color literal on their own -- see test/theme_test.dart,
+    # which fails the build if a widget declares one.
+    prefer_const_constructors: true
+    prefer_const_declarations: true
+    avoid_print: true
+    require_trailing_commas: true
+    use_super_parameters: true
+    sort_child_properties_last: true
+
+analyzer:
+  errors:
+    invalid_annotation_target: ignore
+  exclude:
+    - build/**

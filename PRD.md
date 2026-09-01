@@ -146,6 +146,7 @@ depend on.
 | `printers` | Configured printers |
 | `print_jobs` | Print queue and failures |
 | `settings` | Restaurant details, tax mode, rates |
+| `app_releases` | Published versions — cloud-only, read by the branch |
 
 ### 5.2 Three rules the requirements depend on
 
@@ -178,6 +179,7 @@ for rates (5% → `500`). Never float — see `SCHEMA.md` §1.
 | `print_jobs.type` | `bill`, `kot`, `kot_additional`, `kot_cancel`, `test` |
 | `print_jobs.status` | `pending`, `printed`, `failed` |
 | `settings.tax_mode` | `inclusive`, `exclusive` |
+| `app_releases.channel` | `stable`, `beta` |
 
 ### 5.4 Numbering
 
@@ -478,15 +480,82 @@ wifi will go offline. Losing the sale because of it is unacceptable.
 | ID | Requirement |
 |---|---|
 | FR-S1 | All writes go to SQLite first and succeed with no internet |
-| FR-S2 | A background worker pushes unsynced rows to Neon on a timer |
+| FR-S2 | A background worker pushes rows where `synced_at IS NULL` to the cloud |
 | FR-S3 | Rows are marked with `synced_at` on success |
-| FR-S4 | Sync failure never affects billing; it retries on the next cycle |
-| FR-S5 | Sync status (last success, pending count) is visible in the UI |
+| FR-S4 | **Sync never blocks billing** — it runs on a separate path and failure is invisible to the till |
+| FR-S5 | Sync status (last success, pending count, quarantined count) is visible in the UI |
 | FR-S6 | Sync is push-only in v1 — the branch is the source of truth |
 | FR-S7 | Rows push in dependency order — a parent never arrives after its child |
-| FR-S8 | A row that fails to sync repeatedly is surfaced rather than retried forever in silence |
+| FR-S8 | Pushes are idempotent upserts — the same row twice does not duplicate |
 | FR-S9 | Soft-deleted and voided rows sync too, so the cloud reflects cancellations |
-| FR-S10 | Sync is safe to re-run — pushing the same row twice does not duplicate it |
+| FR-S10 | Rows push in batches, never the whole backlog at once |
+| FR-S11 | `print_jobs` never syncs — print state is meaningless in the cloud |
+
+#### Trigger
+
+A fixed interval is wrong in both directions: wasteful when idle, laggy right after
+a bill. Sync is event-driven with a safety net.
+
+| ID | Trigger | Detail |
+|---|---|---|
+| FR-S12 | **On write** | Routes signal after committing; a ~2s debounce collapses a burst of edits into one push |
+| FR-S13 | **Idle heartbeat** | If nothing has happened for 5 minutes, check anyway — catches rows missed by a crash mid-cycle |
+| FR-S14 | **On reconnect** | Drain the backlog as soon as connectivity returns, rather than waiting for a tick |
+| FR-S15 | **On startup** | Push whatever was pending when the process last stopped |
+
+#### Failure handling
+
+Sync fails in three genuinely different ways, and treating them alike is the mistake:
+**transient** (no internet — nothing is wrong with the data), **persistent** (a
+constraint violation, or a cloud migration that was never applied), and **poisonous**
+(one bad row while everything behind it is fine).
+
+| ID | Requirement |
+|---|---|
+| FR-S16 | Attempts 1–5 retry with exponential backoff: 30s, 1m, 2m, 4m, 8m |
+| FR-S17 | After 5 failures a row is **quarantined** — skipped, so the queue keeps draining |
+| FR-S18 | The attempt count and last error are stored on the row, for diagnosis without reading logs |
+| FR-S19 | Quarantined rows surface in the UI with a count and a Retry action |
+| FR-S20 | Retrying a quarantined row resets its attempt count |
+
+**Backoff** stops a restaurant offline for a day from hammering a dead connection
+thousands of times. **Quarantine** stops one malformed row from blocking today's
+bills from reaching the cloud. **Surfacing** is the important one — silent failure
+means the owner believes their cloud reports are complete when they are not.
+
+---
+
+### 6.11 Application Updates
+
+| ID | Requirement |
+|---|---|
+| FR-U1 | The app knows its own version and build number, shown in Settings |
+| FR-U2 | It checks the cloud for a newer release on startup and once daily |
+| FR-U3 | A newer release shows a dialog with the version and release notes |
+| FR-U4 | The user chooses when to install — the app downloads the installer and launches it |
+| FR-U5 | Download progress is visible and can be cancelled |
+| FR-U6 | The installer's SHA-256 is verified before it is executed; a mismatch aborts the update |
+| FR-U7 | An optional update can be dismissed, and is not shown again that day |
+| FR-U8 | A release can be marked **mandatory**; its dialog cannot be dismissed |
+| FR-U9 | A build below `min_supported_build` is forced to update before billing continues |
+| FR-U10 | **An update check never blocks billing** — no network, no problem, the app works |
+| FR-U11 | The update prompt does not appear while an order is open or a bill is being taken |
+| FR-U12 | A failed download or install leaves the current version working and reports the reason |
+| FR-U13 | Version comparison uses `build_number`, never a parsed version string |
+| FR-U14 | A release can be withdrawn by deactivating it, without publishing a new build |
+
+**FR-U10 and FR-U11 are the ones that matter operationally.** An update dialog
+appearing mid-transaction, or a check that hangs because the internet is down, turns
+a maintenance feature into a billing outage. The check is best-effort and silent on
+failure.
+
+**FR-U9 exists for billing correctness.** After a tax or rounding fix, an old build
+producing wrong bills must not keep running for months because staff kept dismissing
+a dialog. Forcing is reserved for that class of fix — not for features.
+
+**FR-U6 is a security requirement.** The app downloads a binary and executes it on
+the billing PC. Without checksum verification, anyone who can intercept the download
+runs code on that machine.
 
 ---
 
@@ -557,6 +626,11 @@ Scenarios that occur in a working restaurant and their required behaviour.
 | No internet for days | Billing unaffected; sync resumes when connectivity returns |
 | Same row pushed to cloud twice | Idempotent — no duplicate created |
 | A row repeatedly fails to sync | Surfaced in the UI rather than retried forever in silence |
+| Update check with no internet | Fails silently; the app works normally |
+| Update available while an order is open | The prompt waits until no order is in progress |
+| Installer checksum does not match | Update aborts; the current version keeps running |
+| A published release turns out to be broken | Deactivated in the cloud; clients stop being offered it |
+| A build below the minimum supported version | Forced to update before billing continues |
 
 ### 7.6 Known limitations of v1
 
@@ -569,6 +643,7 @@ Accepted deliberately, listed so they are not mistaken for oversights:
 | Push-only sync | Menu edits made in the cloud do not reach the branch |
 | Reservations cover today only | No advance booking calendar |
 | No inventory | Selling an item with no stock is not prevented |
+| Updates are per-machine | Each billing PC updates itself; there is no central push |
 
 ---
 
@@ -606,7 +681,7 @@ required, not optional.
 | 9 | Reports + restaurant settings |
 | 10 | Flutter UI |
 | 11 | Neon sync worker |
-| 12 | Packaging — installer, Windows service |
+| 12 | Packaging — installer, Windows service, auto-update |
 
 Reservations sit at step 8 rather than beside tables: they depend on orders existing
 (seating a booking creates one) and are not on the critical path to a printed bill.

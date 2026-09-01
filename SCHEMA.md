@@ -32,7 +32,7 @@ local SQLite    Neon cloud
 | **Migrations are append-only** | Once applied to real data, a migration is immutable. Fix forward with a new one. |
 | **Checksums verified at boot** | A modified applied migration is a hard startup error — this makes append-only enforceable rather than a convention. |
 
-There is no code generator. The schema is small enough (16 tables) that generation
+There is no code generator. The schema is small enough (17 tables) that generation
 tooling would cost more than it saves. Keeping this document current is a review
 responsibility — see `CLAUDE.md` §1.
 
@@ -46,10 +46,14 @@ existing rows". This is how most large engineering teams manage financial schema
 ### 0.3 Commands
 
 ```bash
-pnpm db:migrate       # apply pending migrations to local SQLite
-pnpm db:migrate:cloud # apply pending migrations to Neon
-pnpm db:status        # show applied and pending migrations
+pnpm db:migrate        # apply pending migrations to local SQLite
+pnpm db:status         # show applied and pending local migrations
+pnpm db:migrate:cloud  # apply pending migrations to Postgres / Neon
+pnpm db:status:cloud   # show applied and pending cloud migrations
 ```
+
+Both runners are append-only and verify checksums: a migration edited after it was
+applied is a hard error, not a warning.
 
 ### 0.4 Type mapping
 
@@ -546,7 +550,7 @@ payments would leave money recorded against a sale that no longer exists.
 |---|---|---|
 | `id` | `id` | |
 | `branch_id` | `fk` | |
-| `name` | `text` | "Counter", "Kitchen" |
+| `name` | `text` | "Billing", "Kitchen" |
 | `connection` | `enum` | `usb`, `network` |
 | `address` | `text` | USB device path, or `192.168.1.50:9100` |
 | `role` | `enum` | `bill`, `kot`, `both` |
@@ -609,6 +613,43 @@ tradeoff is no type safety, so values are parsed and validated with Zod on read.
 
 ---
 
+### 3.17 `app_releases`
+
+**Cloud-only.** Lives in Neon, never in branch SQLite — a branch cannot tell itself
+about a version it does not have.
+
+| Column | Type | Notes |
+|---|---|---|
+| `id` | `id` | |
+| `version` | `text` | Semantic version, e.g. `1.2.0` |
+| `build_number` | `int` | Monotonic. **This is what version comparison uses.** |
+| `channel` | `enum` | `stable`, `beta` |
+| `download_url` | `text` | Installer location |
+| `file_size` | `int` | Bytes — lets the UI show progress |
+| `sha256` | `text` | Checksum of the installer |
+| `release_notes` | `text` | Shown in the update dialog |
+| `is_mandatory` | `bool` | The dialog cannot be dismissed |
+| `min_supported_build` | `int` | Builds below this are forced to update |
+| `released_at` | `timestamp` | |
+| `is_active` | `bool` | Unset to pull a bad release without deleting it |
+
+**Comparison uses `build_number`, not `version`.** Parsing and comparing semantic
+version strings correctly is fiddly and easy to get subtly wrong; a monotonic integer
+cannot be ambiguous. `version` is for humans.
+
+**`sha256` is not optional.** The app downloads an installer and executes it. Running
+an unverified binary on the billing PC is the worst outcome in this system, so a
+checksum mismatch aborts the update.
+
+**`min_supported_build` handles the case that matters:** a release that fixes billing
+math. An old build producing wrong bills must not keep running for months because
+staff dismissed a dialog.
+
+**`is_active` is the rollback.** A release that turns out to be broken is deactivated
+in one row, and clients stop being offered it — no need to publish another build.
+
+---
+
 ## 4. Indexes
 
 ```sql
@@ -661,14 +702,71 @@ CREATE INDEX idx_print_jobs_pending ON print_jobs(status) WHERE status != 'print
 | `orders`, `order_items`, `bills`, `payments` | Yes |
 | `settings` | Yes |
 | `print_jobs` | **No — branch-local** |
+| `app_releases` | **No — cloud-only**, read by the branch, never written by it |
 
 **Push-only in v1.** The branch is the source of truth; the cloud is a read replica
-for reporting. No conflict resolution is needed, which is why v1 avoids pull entirely.
+for reporting. Nothing flows back down, so there is no "the cloud changed this too"
+case to reconcile — that is the single biggest simplification in the design, and why
+v1 needs no conflict resolution.
 
-**Mechanism:** rows with `synced_at IS NULL` are pushed in `updated_at` order,
-batched, in dependency order (parents before children). `synced_at` is set on
-success. Failure leaves the row pending and the next cycle retries it — sync never
-touches the billing path.
+### 5.1 Mechanism
+
+Rows with `synced_at IS NULL` are pushed in batches, in dependency order, and
+stamped on success. Sync runs on a separate path from billing and its failure is
+invisible to the till.
+
+**Push order** — a child must never arrive before its parent, or the foreign key
+rejects it:
+
+```
+branches → users → sections → tables → categories → menu_items
+         → menu_item_variants → reservations → reservation_tables
+         → orders → order_items → bills → payments → settings
+```
+
+**Every push is an idempotent upsert:**
+
+```sql
+INSERT INTO orders (...) VALUES (...)
+ON CONFLICT (id) DO UPDATE SET ...
+```
+
+If the connection dies after Postgres commits but before SQLite records `synced_at`,
+the next cycle pushes the row again. A plain `INSERT` would fail on the duplicate
+key. UUID primary keys make the re-push harmless — the same row always carries the
+same id, so it overwrites itself.
+
+**Deletions sync like any other change.** A cancelled order sets `deleted_at` and
+clears `synced_at`, so the row pushes again carrying its deletion. The cloud records
+the cancellation rather than the row silently vanishing.
+
+### 5.2 Sync columns
+
+Beyond `synced_at`, every synced table carries:
+
+| Column | Type | Notes |
+|---|---|---|
+| `sync_attempts` | `int` | Consecutive failures. Reset to 0 on success or manual retry. |
+| `sync_error` | `text` | Last failure message, for diagnosis without reading logs |
+
+A row with `sync_attempts >= 5` is **quarantined**: skipped by the worker so it
+cannot block the rows behind it, and surfaced in the UI with a Retry action.
+
+**Why quarantine rather than retry forever:** one malformed row must not stop today's
+bills reaching the cloud. **Why surface it:** silent failure means the owner believes
+their cloud reports are complete when they are not.
+
+### 5.3 Triggers
+
+| Trigger | Timing |
+|---|---|
+| After a write | ~2s debounce, so a burst of order edits becomes one push |
+| Idle heartbeat | Every 5 minutes — catches rows missed by a crash mid-cycle |
+| On reconnect | Immediately, rather than waiting for the next tick |
+| On startup | Whatever was pending when the process last stopped |
+
+Backoff between retries is 30s, 1m, 2m, 4m, 8m. A restaurant offline for a day must
+not hammer a dead connection thousands of times.
 
 ---
 
