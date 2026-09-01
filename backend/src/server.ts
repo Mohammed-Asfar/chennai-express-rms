@@ -21,6 +21,7 @@ import { orderRoutes } from './routes/orders.js'
 import { billRoutes } from './routes/bills.js'
 import { syncRoutes } from './routes/sync.js'
 import { printerRoutes } from './routes/printers.js'
+import { settingsRoutes } from './routes/settings.js'
 import { SyncWorker } from './sync/worker.js'
 
 export interface BuildOptions {
@@ -152,6 +153,7 @@ export async function buildServer({ db, env, sync }: BuildOptions): Promise<Fast
   await app.register(billRoutes)
   await app.register(syncRoutes)
   await app.register(printerRoutes)
+  await app.register(settingsRoutes)
 
   return app
 }

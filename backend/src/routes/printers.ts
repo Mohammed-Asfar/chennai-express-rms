@@ -255,11 +255,11 @@ export async function printerRoutes(app: FastifyInstance): Promise<void> {
         payload: renderTest(printer.name, printer.paper_width),
       })
 
-      // Give the send a moment to settle so the response can say what happened.
-      await new Promise((resolve) => setTimeout(resolve, 600))
-      const job = app.db
-        .prepare('SELECT status, last_error FROM print_jobs WHERE id = ?')
-        .get(jobId) as { status: string; last_error: string | null } | undefined
+      // Wait for the send to settle so the response can say what happened. A
+      // USB queue goes through the Windows spooler, which takes noticeably
+      // longer than a socket — too short a wait reports a working printer as
+      // failed, and someone goes looking for a fault that is not there.
+      const job = await settleJob(app, jobId, 4_000)
 
       return {
         ok: job?.status === 'printed',
@@ -316,6 +316,32 @@ export async function printerRoutes(app: FastifyInstance): Promise<void> {
     },
   )
 
+}
+
+/**
+ * Waits for a queued job to stop being pending, up to a limit.
+ *
+ * Polls rather than sleeping a fixed time: a socket printer answers in
+ * milliseconds while a Windows spool takes seconds, and a single delay long
+ * enough for the slow case would make the fast one feel broken.
+ */
+async function settleJob(
+  app: FastifyInstance,
+  jobId: string,
+  timeoutMs: number,
+): Promise<{ status: string; last_error: string | null } | undefined> {
+  const deadline = Date.now() + timeoutMs
+  let job: { status: string; last_error: string | null } | undefined
+
+  while (Date.now() < deadline) {
+    job = app.db
+      .prepare('SELECT status, last_error FROM print_jobs WHERE id = ?')
+      .get(jobId) as { status: string; last_error: string | null } | undefined
+
+    if (job === undefined || job.status !== 'pending') return job
+    await new Promise((resolve) => setTimeout(resolve, 150))
+  }
+  return job
 }
 
 function findOrThrow(app: FastifyInstance, branchId: string, id: string): PrinterRow {

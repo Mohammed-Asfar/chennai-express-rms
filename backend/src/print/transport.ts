@@ -77,12 +77,116 @@ export function sendNetwork(address: string, data: Buffer): Promise<void> {
  * like `\\.\COM3`, `LPT1`, or a UNC share.
  */
 export async function sendUsb(address: string, data: Buffer): Promise<void> {
+  // A bare name like "TVSE RP3200 Lite" is a Windows print queue, not a path.
+  // Writing to it directly creates a file in the working directory — the job
+  // reports success and no paper ever comes out.
+  if (isWindowsQueueName(address)) {
+    return sendToWindowsQueue(address, data)
+  }
+
   try {
     await writeFile(address, data)
   } catch (error) {
     const message = error instanceof Error ? error.message : String(error)
     // A missing device is worth retrying — someone may plug it back in.
     throw new PrintError(`Cannot write to printer at ${address}: ${message}`)
+  }
+}
+
+/**
+ * Whether this is a printer's share name rather than a device path.
+ *
+ * Device paths look like `\\.\COM3`, `LPT1`, `COM1`, or a UNC share. Anything
+ * else with spaces or ordinary words is a queue name as Windows reports it.
+ */
+function isWindowsQueueName(address: string): boolean {
+  if (process.platform !== 'win32') return false
+  if (address.startsWith('\\\\') || address.startsWith('//')) return false
+  if (/^(\\\\\.\\)?(COM|LPT)\d+:?$/i.test(address)) return false
+  return true
+}
+
+/**
+ * Sends raw bytes to a Windows print queue.
+ *
+ * The bytes are already ESC/POS, so they must reach the printer untouched —
+ * hence a RAW job rather than anything that would render them as text. Written
+ * to a temp file and handed to the spooler, because there is no way to stream
+ * raw data to a queue from Node without a native binding.
+ */
+async function sendToWindowsQueue(queue: string, data: Buffer): Promise<void> {
+  const { tmpdir } = await import('node:os')
+  const { join } = await import('node:path')
+  const { randomUUID } = await import('node:crypto')
+  const { unlink } = await import('node:fs/promises')
+  const { execFile } = await import('node:child_process')
+  const { promisify } = await import('node:util')
+  const run = promisify(execFile)
+
+  const file = join(tmpdir(), `ce-print-${randomUUID()}.bin`)
+
+  try {
+    await writeFile(file, data)
+
+    // `Out-Printer` would reformat the bytes as text; the spooler's RAW
+    // datatype passes them through as the printer expects.
+    const script = `
+      $ErrorActionPreference = 'Stop'
+      Add-Type -AssemblyName System.Drawing
+      $bytes = [System.IO.File]::ReadAllBytes('${file.replace(/\\/g, '\\\\')}')
+      $printer = '${queue.replace(/'/g, "''")}'
+      Add-Type -TypeDefinition @'
+using System;
+using System.IO;
+using System.Runtime.InteropServices;
+public class RawPrinter {
+  [StructLayout(LayoutKind.Sequential, CharSet=CharSet.Unicode)]
+  public class DOCINFO { public string pDocName; public string pOutputFile; public string pDataType; }
+  [DllImport("winspool.drv", CharSet=CharSet.Unicode, SetLastError=true)]
+  public static extern bool OpenPrinter(string src, out IntPtr hPrinter, IntPtr pd);
+  [DllImport("winspool.drv", SetLastError=true)] public static extern bool ClosePrinter(IntPtr hPrinter);
+  [DllImport("winspool.drv", CharSet=CharSet.Unicode, SetLastError=true)]
+  public static extern bool StartDocPrinter(IntPtr hPrinter, int level, [In, MarshalAs(UnmanagedType.LPStruct)] DOCINFO di);
+  [DllImport("winspool.drv", SetLastError=true)] public static extern bool EndDocPrinter(IntPtr hPrinter);
+  [DllImport("winspool.drv", SetLastError=true)] public static extern bool StartPagePrinter(IntPtr hPrinter);
+  [DllImport("winspool.drv", SetLastError=true)] public static extern bool EndPagePrinter(IntPtr hPrinter);
+  [DllImport("winspool.drv", SetLastError=true)]
+  public static extern bool WritePrinter(IntPtr hPrinter, IntPtr pBytes, int dwCount, out int dwWritten);
+
+  public static void Send(string printer, byte[] bytes) {
+    IntPtr h;
+    if (!OpenPrinter(printer, out h, IntPtr.Zero)) throw new Exception("Cannot open printer " + printer);
+    try {
+      DOCINFO di = new DOCINFO();
+      di.pDocName = "Chennai Express receipt";
+      di.pDataType = "RAW";
+      if (!StartDocPrinter(h, 1, di)) throw new Exception("Cannot start the print job");
+      try {
+        if (!StartPagePrinter(h)) throw new Exception("Cannot start the page");
+        IntPtr buf = Marshal.AllocCoTaskMem(bytes.Length);
+        try {
+          Marshal.Copy(bytes, 0, buf, bytes.Length);
+          int written;
+          if (!WritePrinter(h, buf, bytes.Length, out written)) throw new Exception("The printer rejected the data");
+        } finally { Marshal.FreeCoTaskMem(buf); }
+        EndPagePrinter(h);
+      } finally { EndDocPrinter(h); }
+    } finally { ClosePrinter(h); }
+  }
+}
+'@
+      [RawPrinter]::Send($printer, $bytes)
+    `
+
+    await run('powershell', ['-NoProfile', '-NonInteractive', '-Command', script], {
+      timeout: 15_000,
+      windowsHide: true,
+    })
+  } catch (error) {
+    const message = error instanceof Error ? error.message : String(error)
+    throw new PrintError(`Cannot print to "${queue}": ${message.trim()}`)
+  } finally {
+    await unlink(file).catch(() => {})
   }
 }
 

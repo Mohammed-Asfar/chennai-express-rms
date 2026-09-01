@@ -158,6 +158,27 @@ abstract final class AppTheme {
         prefixIconColor: AppColors.inkMuted,
       ),
 
+      // Material's default switch is nearly invisible on a light ground: a pale
+      // thumb on a pale track reads as disabled rather than off. Off gets a
+      // solid thumb and a visible outline, on gets the accent.
+      switchTheme: SwitchThemeData(
+        thumbColor: WidgetStateProperty.resolveWith((states) {
+          if (states.contains(WidgetState.disabled)) return AppColors.disabled;
+          if (states.contains(WidgetState.selected)) return AppColors.onAccent;
+          return AppColors.inkMuted;
+        }),
+        trackColor: WidgetStateProperty.resolveWith((states) {
+          if (states.contains(WidgetState.disabled)) return AppColors.surfaceSunken;
+          if (states.contains(WidgetState.selected)) return AppColors.accent;
+          return AppColors.surfaceSunken;
+        }),
+        trackOutlineColor: WidgetStateProperty.resolveWith((states) {
+          if (states.contains(WidgetState.disabled)) return AppColors.border;
+          if (states.contains(WidgetState.selected)) return AppColors.accent;
+          return AppColors.borderStrong;
+        }),
+      ),
+
       chipTheme: ChipThemeData(
         backgroundColor: AppColors.surfaceSunken,
         selectedColor: AppColors.accent,

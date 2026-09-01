@@ -2,6 +2,8 @@ import 'package:flutter/material.dart';
 import '../../../core/theme/app_colors.dart';
 import '../../../core/theme/app_spacing.dart';
 import '../../printers/presentation/printer_settings_screen.dart';
+import 'branch_screen.dart';
+import 'tax_billing_screen.dart';
 
 /// The settings index.
 ///
@@ -37,18 +39,26 @@ class SettingsScreen extends StatelessWidget {
           ),
         ),
 
-        // Shown but not built, so it is clear what the system will do rather
-        // than leaving someone hunting for a screen that does not exist.
-        const _SettingsRow(
+        _SettingsRow(
           icon: Icons.percent,
           title: 'Tax and billing',
           subtitle: 'GST mode, default rate, bill numbering',
+          onTap: () => Navigator.of(context).push(
+            MaterialPageRoute<void>(builder: (_) => const TaxBillingScreen()),
+          ),
         ),
-        const _SettingsRow(
+
+        _SettingsRow(
           icon: Icons.storefront_outlined,
           title: 'Branch',
-          subtitle: 'Name, address, GSTIN, logo',
+          subtitle: 'Name, address and GSTIN, as printed on the bill',
+          onTap: () => Navigator.of(
+            context,
+          ).push(MaterialPageRoute<void>(builder: (_) => const BranchScreen())),
         ),
+
+        // Shown but not built, so it is clear what the system will do rather
+        // than leaving someone hunting for a screen that does not exist.
         const _SettingsRow(
           icon: Icons.people_outline,
           title: 'Users',
