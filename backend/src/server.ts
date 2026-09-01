@@ -17,6 +17,7 @@ import { categoryRoutes } from './routes/categories.js'
 import { menuRoutes } from './routes/menu.js'
 import { tableRoutes } from './routes/tables.js'
 import { orderRoutes } from './routes/orders.js'
+import { billRoutes } from './routes/bills.js'
 import { syncRoutes } from './routes/sync.js'
 import { SyncWorker } from './sync/worker.js'
 
@@ -113,6 +114,7 @@ export async function buildServer({ db, env, sync }: BuildOptions): Promise<Fast
   await app.register(menuRoutes)
   await app.register(tableRoutes)
   await app.register(orderRoutes)
+  await app.register(billRoutes)
   await app.register(syncRoutes)
 
   return app

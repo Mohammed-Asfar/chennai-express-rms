@@ -1,0 +1,665 @@
+import type { FastifyInstance } from 'fastify'
+import { openDatabase, type Db } from '../src/db/client.js'
+import { migrate } from '../src/db/migrate.js'
+import { seedIfEmpty } from '../src/db/seed.js'
+import { buildServer } from '../src/server.js'
+import { loadEnv } from '../src/lib/env.js'
+import { setSetting } from '../src/lib/settings.js'
+import { test, assertEqual } from './helpers.js'
+
+const env = loadEnv({ NODE_ENV: 'test', DB_PATH: ':memory:', SEED_ADMIN_PASSWORD: 'admin123' })
+
+interface Ctx {
+  app: FastifyInstance
+  db: Db
+  admin: Record<string, string>
+  cashier: Record<string, string>
+  tableId: string
+  full: string
+  tea: string
+  water: string
+}
+
+async function setup(
+  taxMode: 'inclusive' | 'exclusive' = 'exclusive',
+  roundOff = false,
+): Promise<Ctx> {
+  const db = openDatabase(':memory:')
+  migrate(db)
+  const { branchId } = await seedIfEmpty(db, env)
+  setSetting(db, branchId, 'tax_mode', taxMode)
+  setSetting(db, branchId, 'round_off_enabled', roundOff ? '1' : '0')
+
+  const app = await buildServer({ db, env })
+  const admin = await login(app, 'admin', 'admin123')
+  await app.inject({
+    method: 'POST',
+    url: '/users',
+    headers: admin,
+    payload: { username: 'cash', password: 'cash123', fullName: 'Cash', role: 'cashier' },
+  })
+  const cashier = await login(app, 'cash', 'cash123')
+
+  const sections = await app.inject({ method: 'GET', url: '/sections', headers: admin })
+  const sectionId = (sections.json() as { sections: { id: string }[] }).sections[0]!.id
+  const table = await app.inject({
+    method: 'POST',
+    url: '/tables',
+    headers: admin,
+    payload: { sectionId, name: 'T1' },
+  })
+  const tableId = (table.json() as { table: { id: string } }).table.id
+
+  const category = await app.inject({
+    method: 'POST',
+    url: '/categories',
+    headers: admin,
+    payload: { name: 'Food' },
+  })
+  const categoryId = (category.json() as { category: { id: string } }).category.id
+
+  const make = async (name: string, price: number, taxRate?: number): Promise<string> => {
+    const res = await app.inject({
+      method: 'POST',
+      url: '/menu-items',
+      headers: admin,
+      payload: { categoryId, name, price, ...(taxRate ? { taxRate } : {}) },
+    })
+    return (res.json() as { item: { variants: { id: string }[] } }).item.variants[0]!.id
+  }
+
+  return {
+    app,
+    db,
+    admin,
+    cashier,
+    tableId,
+    full: await make('Chicken Biryani', 32_000),
+    tea: await make('Masala Tea', 2_000),
+    water: await make('Bottled Water', 4_000, 1_800),
+  }
+}
+
+async function login(app: FastifyInstance, username: string, password: string) {
+  const res = await app.inject({ method: 'POST', url: '/auth/login', payload: { username, password } })
+  return { authorization: `Bearer ${(res.json() as { token: string }).token}` }
+}
+
+interface BillPayload {
+  id: string
+  billNo: number
+  subtotal: number
+  discountAmount: number
+  cgst: number
+  sgst: number
+  roundOff: number
+  total: number
+  amountPaid: number
+  outstanding: number
+  paymentStatus: string
+  reprintCount: number
+  settledAt: string | null
+  taxBreakdown: { rate: number; base: number; cgst: number; sgst: number }[]
+  payments: { id: string; mode: string; amount: number; reversedAt: string | null }[]
+}
+
+/** An open order with the given lines. */
+async function makeOrder(
+  ctx: Ctx,
+  lines: { variantId: string; qty: number }[],
+  options: { dineIn?: boolean } = {},
+): Promise<string> {
+  const res = await ctx.app.inject({
+    method: 'POST',
+    url: '/orders',
+    headers: ctx.cashier,
+    payload: options.dineIn
+      ? { type: 'dine_in', tableId: ctx.tableId }
+      : { type: 'takeaway' },
+  })
+  const orderId = (res.json() as { order: { id: string } }).order.id
+
+  for (const line of lines) {
+    await ctx.app.inject({
+      method: 'POST',
+      url: `/orders/${orderId}/items`,
+      headers: ctx.cashier,
+      payload: { variantId: line.variantId, qty: line.qty },
+    })
+  }
+  return orderId
+}
+
+async function makeBill(
+  ctx: Ctx,
+  orderId: string,
+  payload: Record<string, unknown> = {},
+): Promise<BillPayload> {
+  const res = await ctx.app.inject({
+    method: 'POST',
+    url: '/bills',
+    headers: ctx.cashier,
+    payload: { orderId, ...payload },
+  })
+  if (res.statusCode !== 201) throw new Error(`bill failed: ${res.statusCode} ${res.body}`)
+  return (res.json() as { bill: BillPayload }).bill
+}
+
+async function pay(
+  ctx: Ctx,
+  billId: string,
+  payload: Record<string, unknown>,
+): Promise<BillPayload> {
+  const res = await ctx.app.inject({
+    method: 'POST',
+    url: `/bills/${billId}/payments`,
+    headers: ctx.cashier,
+    payload,
+  })
+  if (res.statusCode !== 201) throw new Error(`payment failed: ${res.statusCode} ${res.body}`)
+  return (res.json() as { bill: BillPayload }).bill
+}
+
+const close = async (ctx: Ctx) => {
+  await ctx.app.close()
+  ctx.db.close()
+}
+
+// --- generating a bill ---
+
+test('a bill totals the order, exclusive tax', async () => {
+  const ctx = await setup('exclusive')
+  const order = await makeOrder(ctx, [{ variantId: ctx.full, qty: 2 }])
+  const bill = await makeBill(ctx, order)
+
+  assertEqual(bill.billNo, 1)
+  assertEqual(bill.subtotal, 64_000)
+  assertEqual(bill.cgst + bill.sgst, 3_200)
+  assertEqual(bill.total, 67_200)
+  assertEqual(bill.paymentStatus, 'unpaid')
+  await close(ctx)
+})
+
+test('a bill totals the order, inclusive tax', async () => {
+  const ctx = await setup('inclusive')
+  const order = await makeOrder(ctx, [{ variantId: ctx.full, qty: 2 }])
+  const bill = await makeBill(ctx, order)
+
+  assertEqual(bill.total, 64_000, 'the customer pays the menu price')
+  assertEqual(bill.subtotal + bill.cgst + bill.sgst, bill.total)
+  await close(ctx)
+})
+
+test('bill numbers increment per day', async () => {
+  const ctx = await setup()
+  assertEqual((await makeBill(ctx, await makeOrder(ctx, [{ variantId: ctx.tea, qty: 1 }]))).billNo, 1)
+  assertEqual((await makeBill(ctx, await makeOrder(ctx, [{ variantId: ctx.tea, qty: 1 }]))).billNo, 2)
+  await close(ctx)
+})
+
+test('billing closes the order and frees the table', async () => {
+  const ctx = await setup()
+  const order = await makeOrder(ctx, [{ variantId: ctx.full, qty: 1 }], { dineIn: true })
+  await makeBill(ctx, order)
+
+  const table = await ctx.app.inject({
+    method: 'GET',
+    url: `/tables/${ctx.tableId}`,
+    headers: ctx.cashier,
+  })
+  assertEqual((table.json() as { table: { status: string } }).table.status, 'free')
+
+  const orderRow = ctx.db.prepare('SELECT status FROM orders WHERE id = ?').get(order) as {
+    status: string
+  }
+  assertEqual(orderRow.status, 'billed')
+  await close(ctx)
+})
+
+test('an unpaid bill does not hold its table', async () => {
+  // The balance follows the bill, not the table — a guest who leaves owing
+  // money must not block seating.
+  const ctx = await setup()
+  const order = await makeOrder(ctx, [{ variantId: ctx.full, qty: 1 }], { dineIn: true })
+  const bill = await makeBill(ctx, order)
+  assertEqual(bill.paymentStatus, 'unpaid')
+
+  const table = await ctx.app.inject({
+    method: 'GET',
+    url: `/tables/${ctx.tableId}`,
+    headers: ctx.cashier,
+  })
+  assertEqual((table.json() as { table: { status: string } }).table.status, 'free')
+  await close(ctx)
+})
+
+test('an empty order cannot be billed', async () => {
+  const ctx = await setup()
+  const res = await ctx.app.inject({
+    method: 'POST',
+    url: '/orders',
+    headers: ctx.cashier,
+    payload: { type: 'takeaway' },
+  })
+  const orderId = (res.json() as { order: { id: string } }).order.id
+
+  const bill = await ctx.app.inject({
+    method: 'POST',
+    url: '/bills',
+    headers: ctx.cashier,
+    payload: { orderId },
+  })
+  assertEqual(bill.statusCode, 400)
+  assertEqual((bill.json() as { error: { code: string } }).error.code, 'EMPTY_ORDER')
+  await close(ctx)
+})
+
+test('an order cannot be billed twice', async () => {
+  const ctx = await setup()
+  const order = await makeOrder(ctx, [{ variantId: ctx.tea, qty: 1 }])
+  await makeBill(ctx, order)
+
+  const second = await ctx.app.inject({
+    method: 'POST',
+    url: '/bills',
+    headers: ctx.cashier,
+    payload: { orderId: order },
+  })
+  assertEqual(second.statusCode, 409)
+  await close(ctx)
+})
+
+test('preview does not create a bill', async () => {
+  const ctx = await setup()
+  const order = await makeOrder(ctx, [{ variantId: ctx.full, qty: 1 }])
+
+  const preview = await ctx.app.inject({
+    method: 'POST',
+    url: '/bills/preview',
+    headers: ctx.cashier,
+    payload: { orderId: order, discountType: 'percent', discountValue: 1_000 },
+  })
+  assertEqual(preview.statusCode, 200)
+  assertEqual((preview.json() as { preview: { discountAmount: number } }).preview.discountAmount, 3_200)
+
+  const bills = ctx.db.prepare('SELECT COUNT(*) AS n FROM bills').get() as { n: number }
+  assertEqual(bills.n, 0, 'nothing was persisted')
+  await close(ctx)
+})
+
+// --- discounts ---
+
+test('a fixed discount is applied before tax', async () => {
+  const ctx = await setup('exclusive')
+  const order = await makeOrder(ctx, [{ variantId: ctx.full, qty: 1 }])
+  const bill = await makeBill(ctx, order, { discountType: 'fixed', discountValue: 2_000 })
+
+  assertEqual(bill.discountAmount, 2_000)
+  assertEqual(bill.subtotal, 30_000, 'taxable base is discounted')
+  assertEqual(bill.cgst + bill.sgst, 1_500, '5% of Rs300, not Rs320')
+  assertEqual(bill.total, 31_500)
+  await close(ctx)
+})
+
+test('a percentage discount uses basis points', async () => {
+  const ctx = await setup('exclusive')
+  const order = await makeOrder(ctx, [{ variantId: ctx.full, qty: 1 }])
+  const bill = await makeBill(ctx, order, { discountType: 'percent', discountValue: 1_000 })
+  assertEqual(bill.discountAmount, 3_200, '10% of Rs320')
+  await close(ctx)
+})
+
+test('a discount larger than the bill is rejected', async () => {
+  const ctx = await setup()
+  const order = await makeOrder(ctx, [{ variantId: ctx.tea, qty: 1 }])
+  const res = await ctx.app.inject({
+    method: 'POST',
+    url: '/bills',
+    headers: ctx.cashier,
+    payload: { orderId: order, discountType: 'fixed', discountValue: 999_999 },
+  })
+  assertEqual(res.statusCode, 400)
+  await close(ctx)
+})
+
+// --- mixed rates ---
+
+test('a bill with two tax rates groups them for the printout', async () => {
+  const ctx = await setup('exclusive')
+  const order = await makeOrder(ctx, [
+    { variantId: ctx.full, qty: 1 },
+    { variantId: ctx.water, qty: 1 },
+  ])
+  const bill = await makeBill(ctx, order)
+
+  assertEqual(bill.taxBreakdown.length, 2)
+  const five = bill.taxBreakdown.find((g) => g.rate === 500)!
+  const eighteen = bill.taxBreakdown.find((g) => g.rate === 1_800)!
+  assertEqual(five.base, 32_000)
+  assertEqual(eighteen.base, 4_000)
+  assertEqual(bill.cgst + bill.sgst, 1_600 + 720)
+  await close(ctx)
+})
+
+// --- round off ---
+
+test('round off applies when enabled', async () => {
+  const ctx = await setup('exclusive', true)
+  const order = await makeOrder(ctx, [{ variantId: ctx.tea, qty: 3 }])
+  const bill = await makeBill(ctx, order)
+  assertEqual(bill.total % 100, 0, 'rounded to a whole rupee')
+  assertEqual(bill.subtotal + bill.cgst + bill.sgst + bill.roundOff, bill.total)
+  await close(ctx)
+})
+
+// --- payments ---
+
+test('a single payment settles the bill', async () => {
+  const ctx = await setup('inclusive')
+  const order = await makeOrder(ctx, [{ variantId: ctx.full, qty: 1 }])
+  const bill = await makeBill(ctx, order)
+
+  const paid = await pay(ctx, bill.id, { mode: 'cash', amount: bill.total })
+  assertEqual(paid.paymentStatus, 'paid')
+  assertEqual(paid.amountPaid, bill.total)
+  assertEqual(paid.outstanding, 0)
+  if (paid.settledAt === null) throw new Error('settledAt was not set')
+  await close(ctx)
+})
+
+test('a bill can be split across cash and card', async () => {
+  const ctx = await setup('inclusive')
+  const order = await makeOrder(ctx, [{ variantId: ctx.full, qty: 1 }]) // Rs320
+  const bill = await makeBill(ctx, order)
+
+  const partial = await pay(ctx, bill.id, { mode: 'cash', amount: 20_000 })
+  assertEqual(partial.paymentStatus, 'partial')
+  assertEqual(partial.outstanding, 12_000)
+
+  const settled = await pay(ctx, bill.id, { mode: 'card', amount: 12_000 })
+  assertEqual(settled.paymentStatus, 'paid')
+  assertEqual(settled.payments.length, 2)
+  assertEqual(settled.payments.map((p) => p.mode).join(','), 'cash,card')
+  await close(ctx)
+})
+
+test('a bill can be left partly paid', async () => {
+  const ctx = await setup('inclusive')
+  const order = await makeOrder(ctx, [{ variantId: ctx.full, qty: 1 }])
+  const bill = await makeBill(ctx, order)
+  const partial = await pay(ctx, bill.id, { mode: 'cash', amount: 10_000 })
+
+  assertEqual(partial.paymentStatus, 'partial')
+  assertEqual(partial.settledAt, null, 'not settled while money is outstanding')
+
+  const outstanding = await ctx.app.inject({
+    method: 'GET',
+    url: '/bills?unpaid=true',
+    headers: ctx.cashier,
+  })
+  assertEqual((outstanding.json() as { bills: unknown[] }).bills.length, 1)
+  await close(ctx)
+})
+
+test('overpayment is rejected', async () => {
+  // Change is handled at the drawer, not recorded as a payment.
+  const ctx = await setup('inclusive')
+  const order = await makeOrder(ctx, [{ variantId: ctx.tea, qty: 1 }])
+  const bill = await makeBill(ctx, order)
+
+  const res = await ctx.app.inject({
+    method: 'POST',
+    url: `/bills/${bill.id}/payments`,
+    headers: ctx.cashier,
+    payload: { mode: 'cash', amount: bill.total + 1 },
+  })
+  assertEqual(res.statusCode, 400)
+  assertEqual((res.json() as { error: { code: string } }).error.code, 'OVERPAYMENT')
+  await close(ctx)
+})
+
+test('a payment is reversed, never deleted', async () => {
+  const ctx = await setup('inclusive')
+  const order = await makeOrder(ctx, [{ variantId: ctx.full, qty: 1 }])
+  const bill = await makeBill(ctx, order)
+  const paid = await pay(ctx, bill.id, { mode: 'cash', amount: bill.total })
+
+  const res = await ctx.app.inject({
+    method: 'POST',
+    url: `/bills/${bill.id}/payments/${paid.payments[0]!.id}/reverse`,
+    headers: ctx.cashier,
+    payload: { reason: 'Recorded as cash, was card' },
+  })
+  const after = (res.json() as { bill: BillPayload }).bill
+
+  assertEqual(after.paymentStatus, 'unpaid', 'the reversal is not counted')
+  assertEqual(after.amountPaid, 0)
+  assertEqual(after.payments.length, 1, 'the row stays for audit')
+  if (after.payments[0]!.reversedAt === null) throw new Error('reversal not recorded')
+  await close(ctx)
+})
+
+test('the corrected payment settles the bill after a reversal', async () => {
+  const ctx = await setup('inclusive')
+  const order = await makeOrder(ctx, [{ variantId: ctx.full, qty: 1 }])
+  const bill = await makeBill(ctx, order)
+  const paid = await pay(ctx, bill.id, { mode: 'cash', amount: bill.total })
+
+  await ctx.app.inject({
+    method: 'POST',
+    url: `/bills/${bill.id}/payments/${paid.payments[0]!.id}/reverse`,
+    headers: ctx.cashier,
+    payload: { reason: 'Wrong mode' },
+  })
+  const corrected = await pay(ctx, bill.id, { mode: 'card', amount: bill.total })
+
+  assertEqual(corrected.paymentStatus, 'paid')
+  assertEqual(corrected.payments.length, 2, 'both the reversal and the correction remain')
+  await close(ctx)
+})
+
+test('a payment cannot be reversed twice', async () => {
+  const ctx = await setup('inclusive')
+  const order = await makeOrder(ctx, [{ variantId: ctx.tea, qty: 1 }])
+  const bill = await makeBill(ctx, order)
+  const paid = await pay(ctx, bill.id, { mode: 'cash', amount: bill.total })
+  const url = `/bills/${bill.id}/payments/${paid.payments[0]!.id}/reverse`
+
+  await ctx.app.inject({ method: 'POST', url, headers: ctx.cashier, payload: { reason: 'a' } })
+  const second = await ctx.app.inject({
+    method: 'POST',
+    url,
+    headers: ctx.cashier,
+    payload: { reason: 'b' },
+  })
+  assertEqual(second.statusCode, 409)
+  await close(ctx)
+})
+
+// --- voiding ---
+
+test('an admin can void a bill, reopening its order', async () => {
+  const ctx = await setup()
+  const order = await makeOrder(ctx, [{ variantId: ctx.full, qty: 1 }], { dineIn: true })
+  const bill = await makeBill(ctx, order)
+
+  const res = await ctx.app.inject({
+    method: 'POST',
+    url: `/bills/${bill.id}/void`,
+    headers: ctx.admin,
+    payload: { reason: 'Wrong table' },
+  })
+  assertEqual(res.statusCode, 200)
+
+  const orderRow = ctx.db.prepare('SELECT status FROM orders WHERE id = ?').get(order) as {
+    status: string
+  }
+  assertEqual(orderRow.status, 'open', 'the order reopens for correction')
+
+  const billRow = ctx.db
+    .prepare('SELECT voided_at, deleted_at, bill_no FROM bills WHERE id = ?')
+    .get(bill.id) as { voided_at: string | null; deleted_at: string | null; bill_no: number }
+  if (billRow.voided_at === null) throw new Error('void not recorded')
+  if (billRow.deleted_at === null) throw new Error('a voided bill should be soft-deleted')
+  assertEqual(billRow.bill_no, 1, 'the number stays consumed, leaving no gap')
+  await close(ctx)
+})
+
+test('a cashier cannot void a bill', async () => {
+  const ctx = await setup()
+  const order = await makeOrder(ctx, [{ variantId: ctx.tea, qty: 1 }])
+  const bill = await makeBill(ctx, order)
+
+  const res = await ctx.app.inject({
+    method: 'POST',
+    url: `/bills/${bill.id}/void`,
+    headers: ctx.cashier,
+    payload: { reason: 'Nope' },
+  })
+  assertEqual(res.statusCode, 403)
+  await close(ctx)
+})
+
+test('a bill with live payments cannot be voided', async () => {
+  // Money must not sit recorded against a sale that no longer exists.
+  const ctx = await setup('inclusive')
+  const order = await makeOrder(ctx, [{ variantId: ctx.full, qty: 1 }])
+  const bill = await makeBill(ctx, order)
+  await pay(ctx, bill.id, { mode: 'cash', amount: bill.total })
+
+  const res = await ctx.app.inject({
+    method: 'POST',
+    url: `/bills/${bill.id}/void`,
+    headers: ctx.admin,
+    payload: { reason: 'Mistake' },
+  })
+  assertEqual(res.statusCode, 409)
+  assertEqual((res.json() as { error: { code: string } }).error.code, 'BILL_HAS_PAYMENTS')
+  await close(ctx)
+})
+
+test('a voided bill accepts no further payment', async () => {
+  const ctx = await setup()
+  const order = await makeOrder(ctx, [{ variantId: ctx.tea, qty: 1 }])
+  const bill = await makeBill(ctx, order)
+  await ctx.app.inject({
+    method: 'POST',
+    url: `/bills/${bill.id}/void`,
+    headers: ctx.admin,
+    payload: { reason: 'Cancelled' },
+  })
+
+  const res = await ctx.app.inject({
+    method: 'POST',
+    url: `/bills/${bill.id}/payments`,
+    headers: ctx.cashier,
+    payload: { mode: 'cash', amount: 100 },
+  })
+  assertEqual(res.statusCode, 409)
+  await close(ctx)
+})
+
+test('a voided bill is excluded from listings', async () => {
+  const ctx = await setup()
+  const order = await makeOrder(ctx, [{ variantId: ctx.tea, qty: 1 }])
+  const bill = await makeBill(ctx, order)
+  await ctx.app.inject({
+    method: 'POST',
+    url: `/bills/${bill.id}/void`,
+    headers: ctx.admin,
+    payload: { reason: 'Test' },
+  })
+
+  const list = await ctx.app.inject({ method: 'GET', url: '/bills', headers: ctx.cashier })
+  assertEqual((list.json() as { bills: unknown[] }).bills.length, 0)
+  await close(ctx)
+})
+
+test('a reopened order can be corrected and re-billed', async () => {
+  const ctx = await setup()
+  const order = await makeOrder(ctx, [{ variantId: ctx.full, qty: 1 }])
+  const first = await makeBill(ctx, order)
+  await ctx.app.inject({
+    method: 'POST',
+    url: `/bills/${first.id}/void`,
+    headers: ctx.admin,
+    payload: { reason: 'Wrong item' },
+  })
+
+  await ctx.app.inject({
+    method: 'POST',
+    url: `/orders/${order}/items`,
+    headers: ctx.cashier,
+    payload: { variantId: ctx.tea, qty: 1 },
+  })
+  const second = await makeBill(ctx, order)
+
+  assertEqual(second.billNo, 2, 'a new number, the old one stays consumed')
+  assertEqual(second.subtotal, 34_000)
+  await close(ctx)
+})
+
+// --- reprint ---
+
+test('a reprint is counted and marked as a duplicate', async () => {
+  // A reprint that looks identical to the original is a way to present one
+  // sale as two.
+  const ctx = await setup()
+  const order = await makeOrder(ctx, [{ variantId: ctx.tea, qty: 1 }])
+  const bill = await makeBill(ctx, order)
+
+  const res = await ctx.app.inject({
+    method: 'POST',
+    url: `/bills/${bill.id}/reprint`,
+    headers: ctx.cashier,
+  })
+  const body = res.json() as { bill: BillPayload; isDuplicate: boolean }
+  assertEqual(body.isDuplicate, true)
+  assertEqual(body.bill.reprintCount, 1)
+  await close(ctx)
+})
+
+// --- snapshots ---
+
+test('repricing the menu never changes an existing bill', async () => {
+  const ctx = await setup('exclusive')
+  const order = await makeOrder(ctx, [{ variantId: ctx.full, qty: 1 }])
+  const bill = await makeBill(ctx, order)
+
+  const item = ctx.db
+    .prepare('SELECT menu_item_id FROM menu_item_variants WHERE id = ?')
+    .get(ctx.full) as { menu_item_id: string }
+  await ctx.app.inject({
+    method: 'PATCH',
+    url: `/menu-items/${item.menu_item_id}/variants/${ctx.full}`,
+    headers: ctx.admin,
+    payload: { price: 99_000 },
+  })
+
+  const res = await ctx.app.inject({
+    method: 'GET',
+    url: `/bills/${bill.id}`,
+    headers: ctx.cashier,
+  })
+  assertEqual((res.json() as { bill: BillPayload }).bill.total, bill.total)
+  await close(ctx)
+})
+
+test('changing tax mode never changes an existing bill', async () => {
+  const ctx = await setup('exclusive')
+  const order = await makeOrder(ctx, [{ variantId: ctx.full, qty: 1 }])
+  const bill = await makeBill(ctx, order)
+
+  const branchId = (ctx.db.prepare('SELECT id FROM branches LIMIT 1').get() as { id: string }).id
+  setSetting(ctx.db, branchId, 'tax_mode', 'inclusive')
+
+  const res = await ctx.app.inject({
+    method: 'GET',
+    url: `/bills/${bill.id}`,
+    headers: ctx.cashier,
+  })
+  const after = (res.json() as { bill: BillPayload & { taxMode: string } }).bill
+  assertEqual(after.total, bill.total)
+  assertEqual((after as unknown as { taxMode: string }).taxMode, 'exclusive', 'snapshotted')
+  await close(ctx)
+})

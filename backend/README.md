@@ -125,9 +125,47 @@ test/
 | `PATCH /orders/:id/items/:itemId` | any | Change quantity or notes |
 | `DELETE /orders/:id/items/:itemId` | any | Remove a line |
 | `POST /orders/:id/cancel` | any | Cancel with a reason |
+| `POST /bills/preview` | any | Total without persisting |
+| `GET /bills` | any | `?businessDate=` `?status=` `?unpaid=true` |
+| `GET /bills/:id` | any | One bill with its payments |
+| `POST /bills` | any | Generate from an open order |
+| `POST /bills/:id/payments` | any | Take a payment (split supported) |
+| `POST /bills/:id/payments/:pid/reverse` | any | Reverse a wrong payment |
+| `POST /bills/:id/void` | admin | Void with a reason; reopens the order |
+| `POST /bills/:id/reprint` | any | Marks the printout as a duplicate |
 | `GET /sync/status` | any | Pending count, quarantined count, last success |
 | `POST /sync/now` | admin | Force a cycle |
 | `POST /sync/retry` | admin | Clear quarantine and retry |
+
+## Billing
+
+Order of operations is fixed and must not be rearranged:
+
+```
+line gross -> discount -> tax -> CGST/SGST split -> round off
+```
+
+Taxing before the discount charges GST on money the customer never pays.
+
+**Tax is grouped per rate, then split.** Halving each line and summing drifts —
+three lines taxed 7 paise give 12 and 9 instead of 10 and 11. GST also requires the
+rate-wise breakdown on the printout, which `tax_breakdown` carries.
+
+**Payments are separate rows**, so a bill can be split across cash, card and UPI, or
+left partly paid. `amount_paid` and `payment_status` are derived from live payments
+inside the same transaction — never set directly. A wrong payment is **reversed**,
+never deleted; both rows stay for audit.
+
+**A payment carries its own business date.** A Monday bill settled Wednesday has its
+sale on Monday and its cash on Wednesday; conflating them makes the drawer disagree
+with the sales figure.
+
+**Voiding** requires an admin and a reason, reopens the order for correction, and
+leaves the bill number consumed — a gap in the sequence looks worse to an auditor
+than a number marked void. A bill with live payments cannot be voided until they are
+reversed.
+
+**An unpaid bill does not hold its table.** The balance follows the bill.
 
 ## Sync
 
