@@ -31,7 +31,4 @@ abstract final class AppSpacing {
 
   static const double borderWidth = 1;
   static const double borderWidthFocus = 2;
-
-  /// The left edge of a card that carries status, e.g. a table's state.
-  static const double statusBarWidth = 4;
 }
