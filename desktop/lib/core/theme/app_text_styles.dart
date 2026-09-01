@@ -90,6 +90,19 @@ abstract final class AppTextStyles {
     letterSpacing: 1.2,
   );
 
+  /// A line of a printed receipt, shown on screen.
+  ///
+  /// Monospaced because a receipt is laid out in columns of fixed width — in a
+  /// proportional face the prices would not line up, and the preview would show
+  /// something the paper never does.
+  static const TextStyle receipt = TextStyle(
+    fontFamily: numeric,
+    fontSize: 11,
+    height: 1.35,
+    color: AppColors.ink,
+    fontFeatures: _tabular,
+  );
+
   // --- money ----------------------------------------------------------------
 
   static const TextStyle money = TextStyle(

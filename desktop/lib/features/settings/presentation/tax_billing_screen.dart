@@ -9,6 +9,7 @@ import '../../../core/widgets/app_loading.dart';
 import '../../../core/widgets/app_text_field.dart';
 import '../../../core/widgets/error_banner.dart';
 import '../data/settings_repository.dart';
+import 'bill_preview_card.dart';
 
 /// How bills are taxed, numbered and closed off.
 ///
@@ -394,17 +395,35 @@ class _TaxBillingScreenState extends ConsumerState<TaxBillingScreen> {
                   validator: _validateTime,
                 ),
                 const SizedBox(height: AppSpacing.md),
-                SwitchListTile(
-                  contentPadding: EdgeInsets.zero,
-                  title: const Text('Round totals to the rupee'),
-                  subtitle: Text(
-                    'A total of ₹180.50 is billed as ₹181.00.',
-                    style: theme.textTheme.bodySmall,
-                  ),
-                  value: _roundOff,
-                  onChanged: _saving
-                      ? null
-                      : (v) => setState(() => _roundOff = v),
+                // A plain row rather than SwitchListTile: that widget makes the
+                // whole strip tappable and paints its own band across the card,
+                // which reads as a separate surface. Only the switch toggles.
+                Row(
+                  children: [
+                    Expanded(
+                      child: Column(
+                        crossAxisAlignment: CrossAxisAlignment.start,
+                        children: [
+                          Text(
+                            'Round totals to the rupee',
+                            style: theme.textTheme.bodyLarge,
+                          ),
+                          const SizedBox(height: 2),
+                          Text(
+                            'A total of ₹180.50 is billed as ₹181.00.',
+                            style: theme.textTheme.bodySmall,
+                          ),
+                        ],
+                      ),
+                    ),
+                    const SizedBox(width: AppSpacing.md),
+                    Switch(
+                      value: _roundOff,
+                      onChanged: _saving
+                          ? null
+                          : (v) => setState(() => _roundOff = v),
+                    ),
+                  ],
                 ),
               ],
             ),
@@ -422,6 +441,12 @@ class _TaxBillingScreenState extends ConsumerState<TaxBillingScreen> {
               enabled: !_saving,
             ),
           ),
+
+          const SizedBox(height: AppSpacing.md),
+
+          // Last, because it reflects everything above it — and only what has
+          // been saved, so it is a check rather than a live echo of the form.
+          const BillPreviewCard(),
         ],
       ),
     );
@@ -485,6 +510,8 @@ class _TaxBillingScreenState extends ConsumerState<TaxBillingScreen> {
 
       if (!mounted) return;
       ref.invalidate(branchSettingsProvider);
+      // The sample bill reflects saved settings, so it has to be rebuilt.
+      ref.invalidate(billPreviewProvider);
       setState(() => _saving = false);
       ScaffoldMessenger.of(
         context,
