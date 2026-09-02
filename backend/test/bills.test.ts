@@ -976,3 +976,53 @@ test('a bill carries its own line items, snapshotted at the time', async () => {
   assertEqual(reread.items[0]!.unitPrice, originalPrice, 'the charged price is preserved')
   await close(ctx)
 })
+
+test('a bill printed unpaid can be settled afterwards', async () => {
+  // The table is handed its bill, then pays at the counter later. Nothing about
+  // having printed it may stop the payment being taken.
+  const ctx = await setup('inclusive')
+  const order = await makeOrder(ctx, [{ variantId: ctx.full, qty: 1 }])
+  const bill = await makeBill(ctx, order)
+
+  assertEqual(bill.paymentStatus, 'unpaid')
+  assertEqual(bill.outstanding, bill.total)
+
+  const settled = await pay(ctx, bill.id, { mode: 'cash', amount: bill.total })
+  assertEqual(settled.paymentStatus, 'paid')
+  assertEqual(settled.outstanding, 0)
+  await close(ctx)
+})
+
+test('an unpaid bill can be settled in stages', async () => {
+  // Two people splitting the bill after it was printed for the table.
+  const ctx = await setup('inclusive')
+  const order = await makeOrder(ctx, [{ variantId: ctx.full, qty: 1 }]) // Rs320
+  const bill = await makeBill(ctx, order)
+
+  const first = await pay(ctx, bill.id, { mode: 'cash', amount: 15_000 })
+  assertEqual(first.paymentStatus, 'partial')
+  assertEqual(first.outstanding, 17_000)
+
+  const second = await pay(ctx, bill.id, { mode: 'upi', amount: 17_000 })
+  assertEqual(second.paymentStatus, 'paid')
+  assertEqual(second.outstanding, 0)
+  await close(ctx)
+})
+
+test('paying more than is left on a part-paid bill is refused', async () => {
+  // The dialog prefills the outstanding amount, but it can be edited. The rule
+  // belongs to the backend, so the reason reaches the cashier.
+  const ctx = await setup('inclusive')
+  const order = await makeOrder(ctx, [{ variantId: ctx.full, qty: 1 }])
+  const bill = await makeBill(ctx, order)
+  await pay(ctx, bill.id, { mode: 'cash', amount: 20_000 })
+
+  const res = await ctx.app.inject({
+    method: 'POST',
+    url: `/bills/${bill.id}/payments`,
+    headers: ctx.cashier,
+    payload: { mode: 'card', amount: 20_000 },
+  })
+  assertEqual(res.statusCode, 400, 'only 120.00 was still due')
+  await close(ctx)
+})

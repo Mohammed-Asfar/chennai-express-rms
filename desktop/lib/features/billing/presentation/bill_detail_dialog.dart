@@ -9,6 +9,8 @@ import '../../../core/widgets/error_banner.dart';
 import '../../printers/data/printer_repository.dart';
 import '../data/bill_models.dart';
 import '../data/bill_repository.dart';
+import 'bills_screen.dart';
+import 'take_payment_dialog.dart';
 
 final _billDetailProvider = FutureProvider.family<Bill, String>((ref, billId) {
   return ref.watch(billRepositoryProvider).fetch(billId);
@@ -203,14 +205,42 @@ class _Content extends ConsumerWidget {
             border: Border(top: BorderSide(color: AppColors.border)),
           ),
           padding: const EdgeInsets.all(AppSpacing.lg),
-          child: SizedBox(
-            height: AppSpacing.minTapTarget,
-            child: OutlinedButton.icon(
-              onPressed: () => _print(context, ref),
-              icon: const Icon(Icons.print_outlined, size: 18),
-              // Any print from here is a second copy, and the paper says so.
-              label: const Text('Print a duplicate'),
-            ),
+          child: Row(
+            children: [
+              Expanded(
+                child: SizedBox(
+                  height: AppSpacing.minTapTarget,
+                  child: OutlinedButton.icon(
+                    onPressed: () => _print(context, ref),
+                    icon: const Icon(Icons.print_outlined, size: 18),
+                    // A bill printed here has printed before, so the paper
+                    // says duplicate. One never printed is still an original,
+                    // which the backend decides from the print history.
+                    label: const Text('Print'),
+                  ),
+                ),
+              ),
+
+              // Settling later is the point of being able to print a bill
+              // before it is paid: by then the billing dialog is long closed.
+              if (bill.outstanding > 0) ...[
+                const SizedBox(width: AppSpacing.sm),
+                Expanded(
+                  flex: 2,
+                  child: SizedBox(
+                    height: AppSpacing.minTapTarget,
+                    child: ElevatedButton.icon(
+                      onPressed: () => _takePayment(context, ref),
+                      icon: const Icon(Icons.payments_outlined, size: 18),
+                      label: Text(
+                        'Take payment '
+                        '${Money.formatWithSymbol(bill.outstanding)}',
+                      ),
+                    ),
+                  ),
+                ),
+              ],
+            ],
           ),
         ),
       ],
@@ -243,6 +273,17 @@ class _Content extends ConsumerWidget {
       ],
     ),
   );
+
+  /// Takes a payment, then reloads so the status and balance follow.
+  Future<void> _takePayment(BuildContext context, WidgetRef ref) async {
+    final paid = await TakePaymentDialog.show(context, bill);
+    if (paid != true) return;
+
+    // Both the detail and the list behind it are now stale: the bill's status
+    // changed, and so did the range's takings.
+    ref.invalidate(_billDetailProvider(bill.id));
+    ref.invalidate(billListProvider);
+  }
 
   Future<void> _print(BuildContext context, WidgetRef ref) async {
     final messenger = ScaffoldMessenger.of(context);

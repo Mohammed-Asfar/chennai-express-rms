@@ -317,6 +317,8 @@ a picker. Every "the table's order" assumption in the UI must handle several.
 | FR-B29 | An order with no items cannot be billed |
 | FR-B30 | A bill can be generated and printed **without taking payment**, so a table can be shown what it owes |
 | FR-B31 | An unpaid printout is an original, not a duplicate — the duplicate mark tracks prints, not payment |
+| FR-B32 | Payment can be taken against an existing bill from the bills list, not only at billing time |
+| FR-B33 | A part payment leaves the bill open, and the balance can be taken later in any mode |
 
 #### Tax calculation
 
@@ -594,6 +596,8 @@ Scenarios that occur in a working restaurant and their required behaviour.
 | Bill left unpaid | `payment_status` stays `unpaid`; the table still frees |
 | Unpaid bill printed for the table | Prints `*** UNPAID ***` with the total; the bill stays open for payment |
 | Part-paid bill printed | Lists what was taken and prints `BALANCE DUE`, so the table can settle the rest |
+| Bill settled after the billing dialog closed | Taken from the bill's detail in the bills list; status and takings both follow |
+| Amount edited above what is due | Refused by the backend with the outstanding figure, not silently clamped |
 | Bill raised Monday, paid Wednesday | Sale reports on Monday, cash collection on Wednesday |
 | Wrong payment mode recorded | Reversed with a reason, correct payment added; both rows stay |
 | Voiding a bill that has payments | Blocked until the payments are reversed |
