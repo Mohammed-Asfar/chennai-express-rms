@@ -540,12 +540,15 @@ wifi will go offline. Losing the sale because of it is unacceptable.
 | FR-S3 | Rows are marked with `synced_at` on success |
 | FR-S4 | **Sync never blocks billing** — it runs on a separate path and failure is invisible to the till |
 | FR-S5 | Sync status (last success, pending count, quarantined count) is visible in the UI |
-| FR-S6 | Sync is push-only in v1 — the branch is the source of truth |
+| FR-S6 | Sync is push-only while the till is in service — the branch is the source of truth |
 | FR-S7 | Rows push in dependency order — a parent never arrives after its child |
 | FR-S8 | Pushes are idempotent upserts — the same row twice does not duplicate |
 | FR-S9 | Soft-deleted and voided rows sync too, so the cloud reflects cancellations |
 | FR-S10 | Rows push in batches, never the whole backlog at once |
 | FR-S11 | `print_jobs` never syncs — print state is meaningless in the cloud |
+| FR-S12 | If the local database is lost, it is restored from the cloud at boot, before seeding |
+| FR-S13 | Restore runs only into a completely empty database, never over existing data |
+| FR-S14 | Restore is best-effort — no cloud, no network, or an empty cloud all fall through to normal first-run seeding |
 
 #### Trigger
 
@@ -710,6 +713,9 @@ Scenarios that occur in a working restaurant and their required behaviour.
 | Backend not running | UI shows a clear, actionable error, not a blank screen |
 | Backend crashes mid-service | Auto-restarts; no committed order is lost |
 | Power cut mid-bill | SQLite WAL means the last committed transaction survives |
+| SQLite file deleted, disk replaced, or Windows reinstalled | Restored from the cloud at boot, before seeding, with its branch id intact |
+| SQLite lost **and** no internet | Falls through to a normal first run; the cloud copy is restored on a later boot only if the database is still empty |
+| SQLite lost after billing offline for days | Anything that never reached the cloud is not recoverable — restore returns the last pushed state |
 | No internet for days | Billing unaffected; sync resumes when connectivity returns |
 | Same row pushed to cloud twice | Idempotent — no duplicate created |
 | A row repeatedly fails to sync | Surfaced in the UI rather than retried forever in silence |
@@ -728,6 +734,7 @@ Accepted deliberately, listed so they are not mistaken for oversights:
 | One bill per order | Splitting a bill between guests means creating separate orders up front |
 | No table merge | A large party across three tables needs three orders, or one order on one table |
 | Push-only sync | Menu edits made in the cloud do not reach the branch |
+| Restore is automatic and unprompted | A fresh install pointed at a cloud database that already holds a branch inherits that branch's data instead of starting clean |
 | Bookings step a day at a time | No month calendar; a distant date takes many taps |
 | No inventory | Selling an item with no stock is not prevented |
 | Updates are per-machine | Each billing PC updates itself; there is no central push |

@@ -2,6 +2,7 @@ import { loadEnv } from './lib/env.js'
 import { openDatabase } from './db/client.js'
 import { migrate } from './db/migrate.js'
 import { seedIfEmpty } from './db/seed.js'
+import { restoreIfEmpty } from './db/restore.js'
 import { buildServer } from './server.js'
 
 const env = loadEnv()
@@ -11,9 +12,27 @@ const db = openDatabase(env.DB_PATH)
 // running against a schema that does not match the code is worse than not starting.
 const applied = migrate(db)
 
+// Before seeding, never after: seeding an empty database mints a new branch id,
+// and from that point the branch already in the cloud is unreachable.
+const restore = await restoreIfEmpty(db, env)
+
 const { seeded } = await seedIfEmpty(db, env)
 
 const app = await buildServer({ db, env })
+
+if (restore.restored) {
+  app.log.warn(
+    {
+      branch: restore.branchName,
+      bills: restore.billCount,
+      rows: restore.result?.restored,
+      errors: restore.result?.errors,
+    },
+    'restored the local database from the cloud',
+  )
+} else if (restore.attempted) {
+  app.log.info({ reason: restore.reason }, 'no cloud restore performed')
+}
 
 if (seeded) {
   app.log.warn(

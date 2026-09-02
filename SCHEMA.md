@@ -746,10 +746,13 @@ CREATE INDEX idx_print_jobs_pending ON print_jobs(status)
 | `print_jobs` | **No — branch-local** |
 | `app_releases` | **No — cloud-only**, read by the branch, never written by it |
 
-**Push-only in v1.** The branch is the source of truth; the cloud is a read replica
-for reporting. Nothing flows back down, so there is no "the cloud changed this too"
-case to reconcile — that is the single biggest simplification in the design, and why
-v1 needs no conflict resolution.
+**Push-only during normal operation.** The branch is the source of truth; the cloud
+is a read replica for reporting. Nothing flows back down while the till is in
+service, so there is no "the cloud changed this too" case to reconcile — that is the
+single biggest simplification in the design, and why v1 needs no conflict resolution.
+
+**One exception: disaster recovery.** If the local SQLite file is lost, the cloud is
+pulled back down once, at boot, into an empty database. See §5.4.
 
 ### 5.1 Mechanism
 
@@ -803,12 +806,43 @@ their cloud reports are complete when they are not.
 | Trigger | Timing |
 |---|---|
 | After a write | ~2s debounce, so a burst of order edits becomes one push |
-| Idle heartbeat | Every 5 minutes — catches rows missed by a crash mid-cycle |
+| Idle heartbeat | Every 60s — catches rows missed by a crash mid-cycle |
 | On reconnect | Immediately, rather than waiting for the next tick |
 | On startup | Whatever was pending when the process last stopped |
 
 Backoff between retries is 30s, 1m, 2m, 4m, 8m. A restaurant offline for a day must
 not hammer a dead connection thousands of times.
+
+### 5.4 Restore — the one downward path
+
+Runs at boot, from `restoreIfEmpty`, **before seeding**. The order matters: seeding
+an empty database mints a new branch UUID, and once that exists the branch already in
+the cloud can never be reclaimed — the till would push a second branch alongside its
+own history, and every past bill would be orphaned.
+
+**It runs only when the local database is completely empty** (no row in `branches`).
+`pullAll` throws otherwise. Pulling into a database that already holds rows would
+have to reconcile edits made on both sides, and for a financial record there is no
+correct answer to "the same bill was changed in two places".
+
+| Step | Detail |
+|---|---|
+| Detect | No row in `branches` — the same test `seedIfEmpty` uses |
+| Find | Oldest non-deleted branch in the cloud. Oldest, not newest: repeated installs against one cloud database leave several, and the first is the real one |
+| Pull | Every synced table, in the same parent-first order push uses, paged 500 rows at a time ordered by primary key |
+| Stamp | Restored rows get `synced_at` set, `sync_attempts = 0`. Without this the first cycle would push the whole history straight back up |
+| Verify | `PRAGMA foreign_key_check` after the pull; violations are reported, not swallowed |
+
+Foreign keys are disabled during the pull and re-enabled after — a parent row can be
+legitimately absent mid-restore. Postgres booleans are converted back to SQLite
+integers on the way down, the mirror of the conversion push performs.
+
+**Best-effort.** No cloud configured, no network, or a cloud with no branch all fall
+through to normal seeding. A restaurant reinstalling on a morning with no internet
+must still be able to open.
+
+**Known limit:** a fresh install pointed at a cloud database that already holds a
+branch will inherit that branch's data rather than starting clean.
 
 ---
 
