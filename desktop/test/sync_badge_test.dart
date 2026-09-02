@@ -1,6 +1,7 @@
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:flutter_test/flutter_test.dart';
+import 'package:chennai_express_pos/core/theme/app_colors.dart';
 import 'package:chennai_express_pos/core/theme/app_theme.dart';
 import 'package:chennai_express_pos/features/sync/data/sync_repository.dart';
 import 'package:chennai_express_pos/features/sync/presentation/sync_badge.dart';
@@ -91,6 +92,55 @@ void main() {
 
     expect(find.text('31 records stuck'), findsOneWidget);
     expect(find.textContaining('of 512 MB used'), findsNothing);
+  });
+
+  /// The colour of the badge's title line.
+  Color titleColour(WidgetTester tester, String text) =>
+      tester.widget<Text>(find.text(text)).style!.color!;
+
+  testWidgets('a working backup is green', (tester) async {
+    await tester.pumpWidget(
+      harness(
+        status(lastSuccessAt: DateTime.now().subtract(const Duration(minutes: 3))),
+        storage: space(),
+      ),
+    );
+    await tester.pumpAndSettle();
+
+    expect(
+      titleColour(tester, 'Backed up 3 minutes ago'),
+      AppColors.successOnShell,
+    );
+  });
+
+  testWidgets('a stopped backup is red', (tester) async {
+    // Its own test rather than a second pump: swapping the ProviderScope
+    // mid-test leaves the first scope's cached value in place.
+    await tester.pumpWidget(
+      harness(status(healthy: false, quarantined: 3, problem: 'refused')),
+    );
+    await tester.pumpAndSettle();
+
+    expect(titleColour(tester, 'Backup stopped'), AppColors.dangerOnShell);
+  });
+
+  testWidgets('a backlog is amber, not the same red as records refused', (
+    tester,
+  ) async {
+    // An unreachable cloud fixes itself when the internet returns. Painting it
+    // the same red as rows the cloud has refused would cry wolf.
+    await tester.pumpWidget(
+      harness(
+        status(
+          healthy: false,
+          pending: 12,
+          lastSuccessAt: DateTime.now().subtract(const Duration(hours: 2)),
+        ),
+      ),
+    );
+    await tester.pumpAndSettle();
+
+    expect(titleColour(tester, 'Backup behind'), AppColors.warningOnShell);
   });
 
   testWidgets('records the cloud refused are called stopped, not behind', (

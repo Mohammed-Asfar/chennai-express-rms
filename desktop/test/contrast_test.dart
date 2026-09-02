@@ -57,6 +57,17 @@ void main() {
       });
     });
 
+    test('the synced colour is readable on the sidebar', () {
+      grounds.forEach((name, ground) {
+        final ratio = contrast(AppColors.successOnShell, ground);
+        expect(
+          ratio,
+          greaterThanOrEqualTo(4.5),
+          reason: 'successOnShell on $name is ${ratio.toStringAsFixed(2)}:1',
+        );
+      });
+    });
+
     test('the light-ground status colours are still unusable here', () {
       // Not a wish, a fact worth pinning: if someone later "simplifies" the
       // badge back to AppColors.danger, this says why that was wrong.
@@ -64,6 +75,13 @@ void main() {
         contrast(AppColors.danger, AppColors.shellHover),
         lessThan(4.5),
         reason: 'danger is mixed for a light ground and must not be used on the shell',
+      );
+      // The one that prompted successOnShell: at 2.28:1 the "synced" state
+      // would have been the least legible thing in the sidebar.
+      expect(
+        contrast(AppColors.success, AppColors.shellHover),
+        lessThan(4.5),
+        reason: 'success is mixed for a light ground and must not be used on the shell',
       );
     });
 

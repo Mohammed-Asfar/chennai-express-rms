@@ -62,10 +62,12 @@ abstract final class AppColors {
 
   /// Status colours for use *on the charcoal spine*.
   ///
-  /// [danger] and [warning] below are mixed for a light ground and turn muddy
-  /// on the sidebar — #B3261E on #2A2926 measures 2.23:1, well under the 4.5
-  /// minimum, so a warning there is harder to read than the text around it.
-  /// These are the same hues lifted until they carry: 6.4:1 and 8.3:1.
+  /// [success], [danger] and [warning] below are mixed for a light ground and
+  /// turn muddy on the sidebar — #B3261E on #2A2926 measures 2.23:1 and
+  /// #2E6B3E only 2.28:1, both well under the 4.5 minimum, so a status there
+  /// is harder to read than the plain text around it. These are the same hues
+  /// lifted until they carry: 7.2:1, 6.4:1 and 8.3:1.
+  static const Color successOnShell = Color(0xFF81C784);
   static const Color dangerOnShell = Color(0xFFFF8A80);
   static const Color warningOnShell = Color(0xFFF5B860);
 

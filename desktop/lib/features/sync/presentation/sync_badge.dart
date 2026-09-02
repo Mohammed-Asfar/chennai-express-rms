@@ -64,10 +64,14 @@ class _SyncBadgeState extends ConsumerState<SyncBadge> {
     final stuck =
         value.quarantined > 0 || (value.hasNeverSynced && value.pending > 0);
 
-    // The light-ground danger and warning are unreadable here — see the note
-    // on these in app_colors.dart.
+    // Green synced, red not. The light-ground versions of these are unreadable
+    // on charcoal — see the note on the OnShell colours in app_colors.dart.
+    //
+    // Amber sits between the two for a backlog that is merely waiting: an
+    // unreachable cloud fixes itself when the internet returns, and painting
+    // that the same red as records the cloud has refused would cry wolf.
     final tone = healthy
-        ? AppColors.onShellMuted
+        ? AppColors.successOnShell
         : stuck
         ? AppColors.dangerOnShell
         : AppColors.warningOnShell;
@@ -104,10 +108,8 @@ class _SyncBadgeState extends ConsumerState<SyncBadge> {
                       Text(
                         _title(value, stuck),
                         style: AppTextStyles.bodySmall.copyWith(
-                          color: healthy ? AppColors.onShell : tone,
-                          fontWeight: healthy
-                              ? FontWeight.w400
-                              : FontWeight.w600,
+                          color: tone,
+                          fontWeight: FontWeight.w600,
                         ),
                       ),
                       const SizedBox(height: 2),
