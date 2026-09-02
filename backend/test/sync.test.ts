@@ -16,11 +16,16 @@ import {
 import { SYNC_TABLES, NEVER_SYNCED, MAX_SYNC_ATTEMPTS, backoffMs } from '../src/sync/tables.js'
 import { SyncWorker } from '../src/sync/worker.js'
 import { test, serialTest, assertEqual } from './helpers.js'
+import { testCloudUrl } from './cloud-guard.js'
 
 const env = loadEnv({ NODE_ENV: 'test', DB_PATH: ':memory:', SEED_ADMIN_PASSWORD: 'admin123' })
 
-/** Cloud tests need a reachable Postgres; they are skipped without one. */
-const CLOUD_URL = process.env.CLOUD_DATABASE_URL
+/**
+ * Cloud tests need a Postgres of their own — they truncate every synced table.
+ * Skipped unless TEST_CLOUD_DATABASE_URL is set. Never CLOUD_DATABASE_URL: that is
+ * the database the app syncs to, and truncating it has cost real data before.
+ */
+const CLOUD_URL = testCloudUrl()
 const silentLog = { info: () => {}, warn: () => {}, debug: () => {} }
 
 // --- registry rules, no database needed ---

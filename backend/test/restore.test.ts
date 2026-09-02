@@ -12,12 +12,16 @@ import { pushPending } from '../src/sync/push.js'
 import { isEmptyDatabase, findCloudBranch, pullAll } from '../src/sync/pull.js'
 import { SYNC_TABLES } from '../src/sync/tables.js'
 import { test, serialTest, assertEqual } from './helpers.js'
+import { testCloudUrl } from './cloud-guard.js'
 
 const env = loadEnv({ NODE_ENV: 'test', DB_PATH: ':memory:', SEED_ADMIN_PASSWORD: 'admin123' })
 
-// Read through loadEnv so `.env` is loaded: the call above passes an explicit
-// source, which deliberately skips the dotenv read.
-const CLOUD_URL = loadEnv().CLOUD_DATABASE_URL
+/**
+ * Cloud tests need a Postgres of their own — they truncate every synced table.
+ * Skipped unless TEST_CLOUD_DATABASE_URL is set. Never CLOUD_DATABASE_URL: that is
+ * the database the app syncs to, and truncating it has cost real data before.
+ */
+const CLOUD_URL = testCloudUrl()
 
 // --- no database needed ---
 
