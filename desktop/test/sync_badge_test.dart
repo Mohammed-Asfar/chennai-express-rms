@@ -22,8 +22,23 @@ SyncStatus status({
   lastSuccessAt: lastSuccessAt ?? (healthy ? DateTime.now() : null),
 );
 
-Widget harness(SyncStatus value) => ProviderScope(
-  overrides: [syncStatusProvider.overrideWith((ref) async => value)],
+const _mb = 1024 * 1024;
+
+CloudStorage space({int usedBytes = 10 * _mb, int limitBytes = 512 * _mb}) =>
+    CloudStorage(
+      usedBytes: usedBytes,
+      limitBytes: limitBytes,
+      bytesPerBill: 3000,
+      billsPerDay: 100,
+      daysMeasured: 30,
+      largest: const [],
+    );
+
+Widget harness(SyncStatus value, {CloudStorage? storage}) => ProviderScope(
+  overrides: [
+    syncStatusProvider.overrideWith((ref) async => value),
+    cloudStorageProvider.overrideWith((ref) async => storage),
+  ],
   child: MaterialApp(
     theme: AppTheme.light,
     home: const Scaffold(body: SyncBadge()),
@@ -31,14 +46,51 @@ Widget harness(SyncStatus value) => ProviderScope(
 );
 
 void main() {
-  testWidgets('a healthy backup shows nothing at all', (tester) async {
-    // A green tick every day trains people to ignore the spot, and then the
-    // red one is ignored too.
-    await tester.pumpWidget(harness(status()));
+  testWidgets('a healthy backup says when, and how much room is left', (
+    tester,
+  ) async {
+    // Always present so the sidebar answers "is my data safe" without anyone
+    // opening a settings page to ask.
+    await tester.pumpWidget(
+      harness(
+        status(lastSuccessAt: DateTime.now().subtract(const Duration(minutes: 3))),
+        storage: space(),
+      ),
+    );
     await tester.pumpAndSettle();
 
+    expect(find.text('Backed up 3 minutes ago'), findsOneWidget);
+    expect(find.text('10 MB of 512 MB used'), findsOneWidget);
+    // Not an alarm: the healthy state uses the done icon, not the off one.
+    expect(find.byIcon(Icons.cloud_done_outlined), findsOneWidget);
     expect(find.byIcon(Icons.cloud_off_outlined), findsNothing);
-    expect(find.textContaining('Backup'), findsNothing);
+  });
+
+  testWidgets('a healthy backup still reads sensibly without a size', (
+    tester,
+  ) async {
+    // The size costs a cloud round trip and may not have arrived, or may have
+    // failed. The line must not go blank because of it.
+    await tester.pumpWidget(harness(status(), storage: null));
+    await tester.pumpAndSettle();
+
+    expect(find.byIcon(Icons.cloud_done_outlined), findsOneWidget);
+    expect(find.text('Cloud storage'), findsOneWidget);
+  });
+
+  testWidgets('a problem outranks the space figure', (tester) async {
+    // Nobody needs to know they have 500 MB free while their sales are not
+    // leaving the building.
+    await tester.pumpWidget(
+      harness(
+        status(healthy: false, quarantined: 31, problem: 'refused'),
+        storage: space(),
+      ),
+    );
+    await tester.pumpAndSettle();
+
+    expect(find.text('31 records stuck'), findsOneWidget);
+    expect(find.textContaining('of 512 MB used'), findsNothing);
   });
 
   testWidgets('records the cloud refused are called stopped, not behind', (

@@ -20,9 +20,9 @@ class SyncScreen extends ConsumerStatefulWidget {
   /// Relative, because "3 hours ago" answers the question and a timestamp
   /// makes the reader do the subtraction.
   ///
-  /// Exposed for tests: the wording is the whole point of the line, and
-  /// "1 minutes ago" is the kind of thing nobody notices until a client does.
-  @visibleForTesting
+  /// Public because the sidebar badge shows the same phrase, and because the
+  /// wording is the whole point of the line — "1 minutes ago" is the kind of
+  /// thing nobody notices until a client does.
   static String relativeTime(DateTime at, {DateTime? now}) {
     final gap = (now ?? DateTime.now()).difference(at);
 
