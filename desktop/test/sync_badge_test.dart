@@ -37,7 +37,7 @@ CloudStorage space({int usedBytes = 10 * _mb, int limitBytes = 512 * _mb}) =>
 
 Widget harness(SyncStatus value, {CloudStorage? storage}) => ProviderScope(
   overrides: [
-    syncStatusProvider.overrideWith((ref) async => value),
+    syncStreamProvider.overrideWith((ref) => Stream.value(value)),
     cloudStorageProvider.overrideWith((ref) async => storage),
   ],
   child: MaterialApp(
@@ -207,8 +207,8 @@ void main() {
     await tester.pumpWidget(
       ProviderScope(
         overrides: [
-          syncStatusProvider.overrideWith(
-            (ref) async => throw Exception('backend down'),
+          syncStreamProvider.overrideWith(
+            (ref) => Stream<SyncStatus>.error(Exception('backend down')),
           ),
         ],
         child: MaterialApp(

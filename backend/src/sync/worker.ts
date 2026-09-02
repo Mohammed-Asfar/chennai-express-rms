@@ -59,6 +59,9 @@ export class SyncWorker {
   private lastError: string | null = null
   private consecutiveFailures = 0
 
+  /** Screens waiting to be told the state changed. */
+  private readonly listeners = new Set<(status: SyncStatus) => void>()
+
   constructor(
     private readonly db: Db,
     private readonly env: Env,
@@ -147,6 +150,40 @@ export class SyncWorker {
       this.retryTimer = null
       void this.runCycle('retry')
     }, delay)
+  }
+
+  /**
+   * Watches for state changes, pushed rather than polled.
+   *
+   * Returns the unsubscribe. The current status is not sent here — the caller
+   * sends it once on connect, so a listener always has something to draw
+   * before the first change arrives.
+   */
+  watch(listener: (status: SyncStatus) => void): () => void {
+    this.listeners.add(listener)
+    return () => this.listeners.delete(listener)
+  }
+
+  /**
+   * Tells every watcher the state moved.
+   *
+   * Never throws into a cycle: a screen that has gone away, or a socket that
+   * fails mid-write, must not abort a backup.
+   */
+  private broadcast(): void {
+    if (this.listeners.size === 0) return
+
+    const status = this.status()
+    for (const listener of this.listeners) {
+      try {
+        listener(status)
+      } catch (error) {
+        this.log.warn(
+          { err: error instanceof Error ? error.message : String(error) },
+          'a sync watcher threw',
+        )
+      }
+    }
   }
 
   /** Forces a cycle now, for the manual retry action. */
@@ -253,6 +290,10 @@ export class SyncWorker {
 
     this.running = true
     this.lastAttemptAt = new Date().toISOString()
+    // Before the attempt as well as after: a cycle can take seconds against a
+    // dead connection, and a screen showing "checking" beats one that looks
+    // frozen until the timeout expires.
+    this.broadcast()
 
     let sql: Sql | null = null
     try {
@@ -321,6 +362,10 @@ export class SyncWorker {
       if (sql) await sql.end({ timeout: 5 }).catch(() => undefined)
       this.running = false
 
+      // In `finally`, so a screen is told the outcome whether the cycle
+      // succeeded, was rejected, or threw.
+      this.broadcast()
+
       if (this.pendingSignal && !this.stopped) {
         this.pendingSignal = false
         this.signal()
@@ -355,8 +400,14 @@ function later(a: string | null, b: string | null): string | null {
   return a > b ? a : b
 }
 
-/** First retry delay after a failed cycle. Doubles up to [RETRY_MAX_MS]. */
-const RETRY_BASE_MS = 15_000
+/**
+ * First retry delay after a failed cycle. Doubles up to [RETRY_MAX_MS].
+ *
+ * Five seconds because most failures are a blink — a wifi router restarting,
+ * a laptop waking. Recovering from those should feel instant rather than
+ * leaving someone staring at a red screen wondering if it is stuck.
+ */
+const RETRY_BASE_MS = 5_000
 
 /** A cloud down for the night must not be dialled every fifteen seconds. */
 const RETRY_MAX_MS = 120_000

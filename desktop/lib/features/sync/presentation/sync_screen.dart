@@ -48,19 +48,16 @@ class _SyncScreenState extends ConsumerState<SyncScreen> {
   String? _error;
   Timer? _tick;
 
-  /// Fast enough that "1 minute ago" is never stale for long, cheap because the
-  /// status read is local — only the storage figure costs a cloud round trip,
-  /// and that is deliberately not refreshed here.
-  static const _interval = Duration(seconds: 30);
+  /// The status arrives pushed, but the relative times on screen are computed
+  /// from the clock — "1 minute ago" has to become "2 minutes ago" with no new
+  /// data at all. This tick only rebuilds; it fetches nothing.
+  static const _interval = Duration(seconds: 20);
 
   @override
   void initState() {
     super.initState();
     _tick = Timer.periodic(_interval, (_) {
-      // Two jobs at once: re-reads the status, and rebuilds so the relative
-      // time recomputes. Without it the screen froze at whatever it said when
-      // it opened — "1 minute ago" an hour later.
-      if (mounted && !_busy) ref.invalidate(syncStatusProvider);
+      if (mounted) setState(() {});
     });
   }
 
@@ -72,7 +69,7 @@ class _SyncScreenState extends ConsumerState<SyncScreen> {
 
   @override
   Widget build(BuildContext context) {
-    final status = ref.watch(syncStatusProvider);
+    final status = ref.watch(syncStreamProvider);
 
     return Scaffold(
       appBar: AppBar(title: const Text('Cloud backup')),
@@ -163,8 +160,9 @@ class _SyncScreenState extends ConsumerState<SyncScreen> {
 
     try {
       await action(ref.read(syncRepositoryProvider));
-      ref.invalidate(syncStatusProvider);
-      // A push that landed changed the size, so the figure on screen is stale.
+      // The status arrives on its own — the cycle this triggered broadcasts
+      // when it finishes. Only the size needs asking for, because a push that
+      // landed changed it and nothing pushes that.
       ref.invalidate(cloudStorageProvider);
     } catch (error) {
       if (mounted) setState(() => _error = '$error');

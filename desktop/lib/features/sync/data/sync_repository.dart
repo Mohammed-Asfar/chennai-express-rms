@@ -1,4 +1,6 @@
+import 'dart:convert';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
+import 'package:web_socket_channel/web_socket_channel.dart';
 import '../../../core/api/api_client.dart';
 import '../../../core/api/providers.dart';
 
@@ -139,6 +141,31 @@ class SyncRepository {
     return SyncStatus.fromJson(await _api.get('/sync/status'));
   }
 
+  /// The status, pushed as it changes.
+  ///
+  /// The backend sends the current state on connect and again whenever a cycle
+  /// starts, succeeds or fails, so an outage reaches the screen in the time it
+  /// takes the worker to notice rather than on top of a polling interval.
+  ///
+  /// Errors are not surfaced: a socket that drops is a transport problem, and
+  /// the caller falls back to asking over HTTP rather than showing the user a
+  /// message about websockets.
+  Stream<SyncStatus> watch() {
+    final token = _api.token ?? '';
+    final wsUrl = _api.baseUrl.replaceFirst(RegExp(r'^http'), 'ws');
+    final channel = WebSocketChannel.connect(
+      Uri.parse('$wsUrl/sync/stream?token=$token'),
+    );
+
+    return channel.stream
+        .map((raw) => jsonDecode(raw as String) as Map<String, dynamic>)
+        .where((message) => message['type'] == 'status')
+        .map(
+          (message) =>
+              SyncStatus.fromJson(message['status'] as Map<String, dynamic>),
+        );
+  }
+
   /// Cloud usage, or null when it could not be measured. Not knowing the size
   /// is not a fault worth an error in front of someone.
   Future<CloudStorage?> storage() async {
@@ -169,6 +196,53 @@ final syncRepositoryProvider = Provider<SyncRepository>((ref) {
 
 final syncStatusProvider = FutureProvider<SyncStatus>((ref) {
   return ref.watch(syncRepositoryProvider).status();
+});
+
+/// The live status, pushed over a websocket.
+///
+/// Seeded from the REST endpoint so there is something to draw before the
+/// socket opens, and so a screen still works when the socket cannot be
+/// established at all.
+///
+/// Reconnects on a drop. A socket that dies silently would leave the screen
+/// showing a stale reading while looking live, which is worse than polling —
+/// so the failure is treated as expected rather than exceptional.
+final syncStreamProvider = StreamProvider<SyncStatus>((ref) async* {
+  final repository = ref.watch(syncRepositoryProvider);
+
+  try {
+    yield await repository.status();
+  } catch (_) {
+    // The backend may not be up yet. The socket attempt below will report the
+    // real state once it is, and the screen shows its loading state until then.
+  }
+
+  var attempt = 0;
+  while (true) {
+    try {
+      await for (final status in repository.watch()) {
+        attempt = 0;
+        yield status;
+      }
+    } catch (_) {
+      // Dropped or refused. Fall through to the backoff below.
+    }
+
+    // Backs off to four seconds. The backend is on this same machine, so a
+    // failure here is usually a restart mid-development rather than a network
+    // problem, and coming back quickly is what makes it invisible.
+    attempt += 1;
+    final delay = Duration(seconds: (1 << (attempt - 1)).clamp(1, 4));
+    await Future<void>.delayed(delay);
+
+    // One REST read on the way round, so a long outage still refreshes the
+    // screen even while the socket refuses to open.
+    try {
+      yield await repository.status();
+    } catch (_) {
+      // Still down. The loop will try the socket again.
+    }
+  }
 });
 
 /// Cloud usage. Its own provider because it costs a round trip to the cloud —

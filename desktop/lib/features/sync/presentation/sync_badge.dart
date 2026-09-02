@@ -26,8 +26,9 @@ class SyncBadge extends ConsumerStatefulWidget {
 class _SyncBadgeState extends ConsumerState<SyncBadge> {
   Timer? _timer;
 
-  /// Slow on purpose. This is a background health check, not a live readout,
-  /// and the till has better things to do during service.
+  /// The status is pushed, so this only refreshes the size — which costs a
+  /// cloud round trip and has nothing to push it — and rebuilds so the
+  /// relative time on the line moves on.
   static const _interval = Duration(minutes: 2);
 
   @override
@@ -35,10 +36,8 @@ class _SyncBadgeState extends ConsumerState<SyncBadge> {
     super.initState();
     _timer = Timer.periodic(_interval, (_) {
       if (!mounted) return;
-      ref.invalidate(syncStatusProvider);
-      // Storage costs a cloud round trip, so it rides the slow timer rather
-      // than the screen's faster one.
       ref.invalidate(cloudStorageProvider);
+      setState(() {});
     });
   }
 
@@ -50,7 +49,7 @@ class _SyncBadgeState extends ConsumerState<SyncBadge> {
 
   @override
   Widget build(BuildContext context) {
-    final value = ref.watch(syncStatusProvider).valueOrNull;
+    final value = ref.watch(syncStreamProvider).valueOrNull;
     final storage = ref.watch(cloudStorageProvider).valueOrNull;
 
     // Nothing known yet. The backend being unreachable is already reported

@@ -1,3 +1,4 @@
+import 'dart:async';
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:flutter_test/flutter_test.dart';
@@ -44,7 +45,7 @@ Future<void> pump(WidgetTester tester, CloudStorage? value) async {
   await tester.pumpWidget(
     ProviderScope(
       overrides: [
-        syncStatusProvider.overrideWith((_) async => healthy()),
+        syncStreamProvider.overrideWith((_) => Stream.value(healthy())),
         cloudStorageProvider.overrideWith((_) async => value),
       ],
       child: MaterialApp(theme: AppTheme.light, home: const SyncScreen()),
@@ -196,7 +197,7 @@ void main() {
       await tester.pumpWidget(
         ProviderScope(
           overrides: [
-            syncStatusProvider.overrideWith((_) async => value),
+            syncStreamProvider.overrideWith((_) => Stream.value(value)),
             cloudStorageProvider.overrideWith((_) async => null),
           ],
           child: MaterialApp(theme: AppTheme.light, home: const SyncScreen()),
@@ -252,8 +253,13 @@ void main() {
   });
 
   group('the screen keeps itself current', () {
-    testWidgets('it refetches the status while left open', (tester) async {
-      var fetches = 0;
+    testWidgets('a pushed change reaches the screen without asking', (
+      tester,
+    ) async {
+      // The point of the socket: the screen no longer polls, so a change has
+      // to arrive on its own or it never arrives at all.
+      final pushes = StreamController<SyncStatus>();
+      addTearDown(pushes.close);
 
       tester.view.physicalSize = const Size(1400, 900);
       tester.view.devicePixelRatio = 1.0;
@@ -262,30 +268,65 @@ void main() {
       await tester.pumpWidget(
         ProviderScope(
           overrides: [
-            syncStatusProvider.overrideWith((_) async {
-              fetches++;
-              return healthy();
-            }),
+            syncStreamProvider.overrideWith((_) => pushes.stream),
             cloudStorageProvider.overrideWith((_) async => null),
           ],
           child: MaterialApp(theme: AppTheme.light, home: const SyncScreen()),
         ),
       );
-      await tester.pumpAndSettle();
-      final first = fetches;
 
-      // Past the 30s tick. pump rather than pumpAndSettle: a periodic timer
-      // never settles, and pumpAndSettle would time out waiting for it.
-      await tester.pump(const Duration(seconds: 31));
+      pushes.add(healthy());
+      await tester.pumpAndSettle();
+      expect(find.textContaining('backed up to the cloud'), findsOneWidget);
+
+      // The cloud goes down. Nothing on the screen asked for this.
+      pushes.add(
+        SyncStatus(
+          enabled: true,
+          running: false,
+          healthy: false,
+          pending: 4,
+          quarantined: 0,
+          problem: 'Cannot reach the cloud.',
+          lastSuccessAt: DateTime.now(),
+        ),
+      );
+      await tester.pumpAndSettle();
+
+      expect(find.textContaining('only on this PC'), findsOneWidget);
+      await tester.pumpWidget(const SizedBox());
+    });
+
+    testWidgets('the clock keeps moving with no new data', (tester) async {
+      // Relative times are computed from the clock, so "1 minute ago" has to
+      // become "2 minutes ago" even when nothing is pushed.
+      tester.view.physicalSize = const Size(1400, 900);
+      tester.view.devicePixelRatio = 1.0;
+      addTearDown(tester.view.reset);
+
+      var builds = 0;
+      await tester.pumpWidget(
+        ProviderScope(
+          overrides: [
+            syncStreamProvider.overrideWith((_) => Stream.value(healthy())),
+            cloudStorageProvider.overrideWith((_) async {
+              builds++;
+              return null;
+            }),
+          ],
+          child: MaterialApp(theme: AppTheme.light, home: const SyncScreen()),
+        ),
+      );
+      await tester.pumpAndSettle();
+
+      // Past the rebuild tick. pump, not pumpAndSettle: a periodic timer never
+      // settles and pumpAndSettle would time out on it.
+      await tester.pump(const Duration(seconds: 21));
       await tester.pump();
 
-      expect(
-        fetches,
-        greaterThan(first),
-        reason: 'the screen asked again rather than freezing on first paint',
-      );
-
-      // Let the timer be cancelled cleanly by the teardown.
+      // It rebuilt without refetching the status — the storage provider, which
+      // is the only thing that would refetch, was not asked again.
+      expect(builds, 1);
       await tester.pumpWidget(const SizedBox());
     });
   });
