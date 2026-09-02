@@ -146,6 +146,46 @@ class _BillingDialogState extends ConsumerState<BillingDialog> {
     }
   }
 
+  /// Generates the bill and prints it without taking payment.
+  ///
+  /// What a table is handed before they pay. The printout says UNPAID and
+  /// carries the balance due, so it doubles as the record of what is owed.
+  ///
+  /// The bill is real once this runs — its number is allocated and it appears
+  /// in the bills list as unpaid. The dialog moves on to the payment step
+  /// rather than closing, because the table is still sitting there.
+  Future<void> _printUnpaid() async {
+    setState(() {
+      _isBusy = true;
+      _error = null;
+    });
+
+    try {
+      final bill = await ref
+          .read(billRepositoryProvider)
+          .create(
+            widget.order.id,
+            discountType: _discountType,
+            discountValue: _discountValue(),
+          );
+      if (!mounted) return;
+      setState(() {
+        _bill = bill;
+        _isBusy = false;
+      });
+
+      // Not silent: this print is the whole point of the button, so a failure
+      // and a success are both worth confirming.
+      await _printBill();
+    } catch (error) {
+      if (!mounted) return;
+      setState(() {
+        _isBusy = false;
+        _error = '$error';
+      });
+    }
+  }
+
   /// Sends the bill to the billing printer.
   ///
   /// Never throws into the billing path: a bill that is paid and recorded is
@@ -432,21 +472,38 @@ class _BillingDialogState extends ConsumerState<BillingDialog> {
               ),
               padding: const EdgeInsets.all(AppSpacing.lg),
               child: bill == null
-                  ? SizedBox(
-                      width: double.infinity,
-                      height: AppSpacing.primaryActionHeight,
-                      child: ElevatedButton.icon(
-                        onPressed: _isBusy ? null : _settle,
-                        icon: const Icon(Icons.receipt_long, size: 18),
-                        label: Text(
-                          _preview == null
-                              ? 'Generate bill'
-                              : _split
-                              ? 'Generate bill ${Money.formatWithSymbol(_preview!.total)}'
-                              : 'Take ${_mode.label.toLowerCase()} '
-                                    '${Money.formatWithSymbol(_preview!.total)}',
+                  ? Row(
+                      children: [
+                        // The table wants to see what they owe before they pay.
+                        // Generates the bill and prints it unpaid, leaving it
+                        // open for payment when they are ready.
+                        SizedBox(
+                          height: AppSpacing.primaryActionHeight,
+                          child: OutlinedButton.icon(
+                            onPressed: _isBusy ? null : _printUnpaid,
+                            icon: const Icon(Icons.print_outlined, size: 18),
+                            label: const Text('Print unpaid'),
+                          ),
                         ),
-                      ),
+                        const SizedBox(width: AppSpacing.sm),
+                        Expanded(
+                          child: SizedBox(
+                            height: AppSpacing.primaryActionHeight,
+                            child: ElevatedButton.icon(
+                              onPressed: _isBusy ? null : _settle,
+                              icon: const Icon(Icons.receipt_long, size: 18),
+                              label: Text(
+                                _preview == null
+                                    ? 'Generate bill'
+                                    : _split
+                                    ? 'Generate bill ${Money.formatWithSymbol(_preview!.total)}'
+                                    : 'Take ${_mode.label.toLowerCase()} '
+                                          '${Money.formatWithSymbol(_preview!.total)}',
+                              ),
+                            ),
+                          ),
+                        ),
+                      ],
                     )
                   : _PaymentSection(
                       bill: bill,

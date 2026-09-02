@@ -315,6 +315,8 @@ a picker. Every "the table's order" assumption in the UI must handle several.
 | FR-B27 | Round-off, when enabled, adjusts the total to the nearest rupee and is stored in `round_off` |
 | FR-B28 | A reprint is marked as a **duplicate** on the printout, not passed off as an original |
 | FR-B29 | An order with no items cannot be billed |
+| FR-B30 | A bill can be generated and printed **without taking payment**, so a table can be shown what it owes |
+| FR-B31 | An unpaid printout is an original, not a duplicate — the duplicate mark tracks prints, not payment |
 
 #### Tax calculation
 
@@ -590,6 +592,8 @@ Scenarios that occur in a working restaurant and their required behaviour.
 | Bill paid ₹500 cash + ₹300 card | Two payment rows; reports count each mode separately |
 | Payment exceeding the bill total | Rejected — change is handled at the drawer, not recorded |
 | Bill left unpaid | `payment_status` stays `unpaid`; the table still frees |
+| Unpaid bill printed for the table | Prints `*** UNPAID ***` with the total; the bill stays open for payment |
+| Part-paid bill printed | Lists what was taken and prints `BALANCE DUE`, so the table can settle the rest |
 | Bill raised Monday, paid Wednesday | Sale reports on Monday, cash collection on Wednesday |
 | Wrong payment mode recorded | Reversed with a reason, correct payment added; both rows stay |
 | Voiding a bill that has payments | Blocked until the payments are reversed |

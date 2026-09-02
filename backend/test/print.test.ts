@@ -501,3 +501,36 @@ test('no tagline prints no blank line', () => {
   const withEmpty = readable(renderBill({ ...billBase, branchTagline: null, logo: null }))
   assertEqual(without, withEmpty)
 })
+
+// --- printing a bill before it is paid ---
+
+test('a bill with no payments prints UNPAID', () => {
+  // Handed to a table so they can see what they owe. Without this the bill is
+  // indistinguishable from a settled one, and a paid bill gets asked for twice.
+  const text = readable(renderBill({ ...billBase, payments: [] }))
+  assertEqual(text.includes('*** UNPAID ***'), true)
+  assertEqual(text.includes('*** PAID ***'), false)
+})
+
+test('an unpaid bill still shows its total', () => {
+  // The whole reason for printing it: the table needs the amount.
+  const text = readable(renderBill({ ...billBase, payments: [] }))
+  assertEqual(text.includes('760.00'), true)
+})
+
+test('a part-paid bill prints the balance, not UNPAID', () => {
+  const text = readable(
+    renderBill({ ...billBase, payments: [{ mode: 'cash', amount: 30_000 }] }),
+  )
+  assertEqual(text.includes('BALANCE DUE'), true)
+  assertEqual(text.includes('460.00'), true, '760.00 less 300.00')
+  assertEqual(text.includes('*** UNPAID ***'), false, 'something was paid')
+  assertEqual(text.includes('*** PAID ***'), false, 'but not all of it')
+})
+
+test('an unpaid bill is not marked a duplicate', () => {
+  // The first copy is the original whether or not it has been paid. Stamping
+  // DUPLICATE on it would make a legitimate bill look like a reprint.
+  const text = readable(renderBill({ ...billBase, payments: [], isReprint: false }))
+  assertEqual(text.includes('DUPLICATE'), false)
+})
