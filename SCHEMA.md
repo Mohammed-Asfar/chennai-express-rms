@@ -162,6 +162,7 @@ The anchor. v1 has exactly one row.
 |---|---|---|
 | `id` | `id` | |
 | `name` | `text` | "Chennai Express" |
+| `tagline` | `text` | Nullable — a line under the name on the bill, "Since 1998" |
 | `address` | `text` | Printed on the bill |
 | `phone` | `text` | |
 | `gstin` | `text` | Nullable — unregistered restaurants have none |
@@ -176,6 +177,10 @@ The anchor. v1 has exactly one row.
 the UI and kept so the bitmap can be regenerated. `logo_bitmap` is the monochrome
 1-bit raster the thermal printer actually needs, converted once at upload rather
 than on every bill.
+
+**`tagline` is separate from `name`** because `name` is also what the app shows in
+its own UI, where a tagline would be noise. An emptied field stores `NULL`, not
+`''` — an empty string would print a blank line on every bill.
 
 Conversion (grayscale → resize to paper width → dither to 1-bit) is slow enough to
 matter against the 3-second print target, and it depends on `printers.paper_width`:

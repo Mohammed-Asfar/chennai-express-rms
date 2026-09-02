@@ -26,7 +26,7 @@ export const SYNC_TABLES: SyncTable[] = [
   {
     name: 'branches',
     columns: [
-      'id', 'name', 'address', 'phone', 'gstin', 'logo', 'logo_bitmap',
+      'id', 'name', 'tagline', 'address', 'phone', 'gstin', 'logo', 'logo_bitmap',
       'logo_width', 'logo_height', 'print_logo', 'is_active',
       'created_at', 'updated_at', 'deleted_at',
     ],

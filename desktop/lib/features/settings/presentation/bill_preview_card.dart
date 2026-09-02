@@ -167,14 +167,16 @@ class _Line extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    // Every line stays the same size. The printer's double-height command makes
-    // characters taller, not wider — it still fits 48 columns — so scaling the
-    // font here would push the amount off the end of a line that prints fine.
-    // Emphasis is carried by weight and height instead.
     final style = AppTextStyles.receipt.copyWith(
       fontWeight: line.bold || line.large ? FontWeight.w700 : FontWeight.w400,
-      height: line.large ? 1.9 : null,
       color: AppColors.ink,
+    );
+
+    final text = Text(
+      // A blank line still occupies its height on paper.
+      line.text.isEmpty ? ' ' : line.text,
+      style: style,
+      softWrap: false,
     );
 
     return Align(
@@ -183,12 +185,35 @@ class _Line extends StatelessWidget {
         'right' => Alignment.centerRight,
         _ => Alignment.centerLeft,
       },
-      child: Text(
-        // A blank line still occupies its height on paper.
-        line.text.isEmpty ? ' ' : line.text,
-        style: style,
-        softWrap: false,
-      ),
+      // Stretched vertically, never horizontally.
+      //
+      // This is exactly what the printer's height scaling does: the glyph gets
+      // taller while still occupying one column. Scaling the font size instead
+      // would widen it too, and a name wrapped to the 22 columns double-width
+      // leaves would then overflow a 48-column paper box that prints fine.
+      child: line.heightScale > 1
+          ? SizedBox(
+              // Transform paints outside its bounds, so the row has to reserve
+              // the taller height itself or the next line is overlapped.
+              height: _lineHeight(context, style) * line.heightScale,
+              child: Transform.scale(
+                scaleY: line.heightScale.toDouble(),
+                scaleX: 1,
+                alignment: Alignment.center,
+                child: text,
+              ),
+            )
+          : text,
     );
+  }
+
+  /// The height one line of this style occupies, measured rather than assumed.
+  double _lineHeight(BuildContext context, TextStyle style) {
+    final painter = TextPainter(
+      text: TextSpan(text: 'Ag', style: style),
+      textDirection: TextDirection.ltr,
+      textScaler: MediaQuery.textScalerOf(context),
+    )..layout();
+    return painter.height;
   }
 }

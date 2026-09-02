@@ -79,6 +79,19 @@ export class EscPosBuilder {
     return this.raw(GS, 0x21, n)
   }
 
+  /**
+   * Character size as explicit multipliers, 1-8.
+   *
+   * `size()` only reaches 2×. A restaurant name standing in for a logo needs
+   * to be taller than that, and height and width must be set independently:
+   * widening halves the usable columns, which is how an amount silently falls
+   * off the edge of the paper.
+   */
+  scale(height: number, width: number): this {
+    const clamp = (value: number) => Math.min(8, Math.max(1, Math.round(value))) - 1
+    return this.raw(GS, 0x21, (clamp(width) << 4) | clamp(height))
+  }
+
   underline(on: boolean): this {
     return this.raw(ESC, 0x2d, on ? 1 : 0)
   }
@@ -119,6 +132,31 @@ export class EscPosBuilder {
       }
     }
     if (current.length > 0) this.line(' '.repeat(indent) + current)
+    return this
+  }
+
+  /**
+   * Wraps to the columns left after widening the characters.
+   *
+   * At double width the paper holds half as many characters, so wrapping at
+   * the nominal width would run a long restaurant name off the edge.
+   */
+  wrappedAtScale(value: string, widthScale: number): this {
+    const usable = Math.max(1, Math.floor(this.width / Math.max(1, widthScale)))
+    const words = value.split(/\s+/).filter((w) => w.length > 0)
+    let current = ''
+
+    for (const word of words) {
+      if (current.length === 0) {
+        current = word
+      } else if (current.length + 1 + word.length <= usable) {
+        current += ' ' + word
+      } else {
+        this.line(current)
+        current = word
+      }
+    }
+    if (current.length > 0) this.line(current)
     return this
   }
 

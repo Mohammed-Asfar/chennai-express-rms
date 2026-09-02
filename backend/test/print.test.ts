@@ -414,3 +414,90 @@ test('the phone prints under the address', async () => {
   // A restaurant that has not set one gets no empty line.
   assertEqual(readable(renderBill(billBase)).includes('Ph:'), false)
 })
+
+// --- the bill header ---
+
+/** Reads the GS ! byte in force when `needle` is printed. */
+function scaleAt(buffer: Buffer, needle: string): { height: number; width: number } {
+  const text = Buffer.from(needle, 'ascii')
+  let n = 0
+  for (let i = 0; i < buffer.length; i++) {
+    if (buffer[i] === 0x1d && buffer[i + 1] === 0x21) {
+      n = buffer[i + 2] ?? 0
+      continue
+    }
+    if (buffer.subarray(i, i + text.length).equals(text)) {
+      return { height: (n & 0x07) + 1, width: ((n >> 4) & 0x07) + 1 }
+    }
+  }
+  throw new Error(`${needle} never printed`)
+}
+
+test('with no logo the name takes the space the logo would have used', () => {
+  // The name is the only thing identifying the bill at a glance, so it has to
+  // carry the top of the receipt on its own.
+  const { height } = scaleAt(renderBill({ ...billBase, logo: null }), 'Chennai Express')
+  assertEqual(height, 3)
+})
+
+test('with a logo the name stays at double height', () => {
+  // Competing with the image would look crowded rather than emphatic.
+  const logo = { data: Buffer.alloc(48).toString('base64'), width: 48, height: 8 }
+  const { height } = scaleAt(renderBill({ ...billBase, logo }), 'Chennai Express')
+  assertEqual(height, 2)
+})
+
+test('the name never doubles past double width', () => {
+  // Width is what costs columns. Height is free.
+  for (const logo of [null, { data: Buffer.alloc(48).toString('base64'), width: 48, height: 8 }]) {
+    const { width } = scaleAt(renderBill({ ...billBase, logo }), 'Chennai Express')
+    assertEqual(width, 2, 'two is the most a 48-column line can carry')
+  }
+})
+
+test('the size is put back before the address', () => {
+  // Left at triple height, every line below it would print enormous.
+  const { height, width } = scaleAt(renderBill({ ...billBase, logo: null }), '12 Mount Road')
+  assertEqual(height, 1)
+  assertEqual(width, 1)
+})
+
+test('a long name wraps at the width the wider characters leave', () => {
+  // At double width a 48-column line holds 24 characters. Wrapping at 48 would
+  // run the name off the paper.
+  const long = 'Chennai Express Family Restaurant And Banquet Hall'
+  const text = readable(renderBill({ ...billBase, branchName: long, logo: null }))
+  for (const line of text.split('\n')) {
+    if (line.includes('Chennai') || line.includes('Banquet')) {
+      assertEqual(line.trimEnd().length <= 24, true, `too wide: "${line}"`)
+    }
+  }
+  // Every word still survives the wrap.
+  for (const word of long.split(' ')) {
+    assertEqual(text.includes(word), true, `lost "${word}"`)
+  }
+})
+
+test('a tagline prints under the name, in normal type', () => {
+  const buffer = renderBill({ ...billBase, branchTagline: 'Since 1998', logo: null })
+  const text = readable(buffer)
+  assertEqual(text.includes('Since 1998'), true)
+
+  // Normal size: a second large line would fight the name rather than support it.
+  const { height, width } = scaleAt(buffer, 'Since 1998')
+  assertEqual(height, 1)
+  assertEqual(width, 1)
+
+  const lines = text.split('\n').map((l) => l.trim())
+  const name = lines.findIndex((l) => l.includes('Chennai Express'))
+  const tagline = lines.findIndex((l) => l.includes('Since 1998'))
+  const address = lines.findIndex((l) => l.includes('12 Mount Road'))
+  assertEqual(name < tagline && tagline < address, true, 'sits between name and address')
+})
+
+test('no tagline prints no blank line', () => {
+  // An empty setting must not push the whole bill down by a line.
+  const without = readable(renderBill({ ...billBase, logo: null }))
+  const withEmpty = readable(renderBill({ ...billBase, branchTagline: null, logo: null }))
+  assertEqual(without, withEmpty)
+})

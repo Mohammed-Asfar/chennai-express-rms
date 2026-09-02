@@ -1,6 +1,6 @@
 import { renderBill } from '../src/print/tickets.js'
 import { decodeTicket } from '../src/print/preview.js'
-import { CHARS_PER_LINE } from '../src/print/escpos.js'
+import { CHARS_PER_LINE, EscPosBuilder } from '../src/print/escpos.js'
 import { test, assertEqual } from './helpers.js'
 
 const sample = {
@@ -107,4 +107,60 @@ test('the trailing feed before the cut is trimmed', async () => {
   const preview = decodeTicket(renderBill(sample), CHARS_PER_LINE['80mm'])
   const last = preview.lines[preview.lines.length - 1]
   assertEqual(last!.text.trim().length > 0, true, 'ends on real content')
+})
+
+test('the decoder reports how much taller a line prints', () => {
+  // A boolean was not enough: the preview drew a triple-height name the same as
+  // a double-height one, so the screen said the size setting did nothing.
+  const b = new EscPosBuilder('80mm')
+  b.scale(3, 2).line('CHENNAI EXPRESS').scale(1, 1).line('normal')
+
+  const { lines } = decodeTicket(b.build(), 48)
+  const name = lines.find((l) => l.text.includes('CHENNAI'))!
+  const normal = lines.find((l) => l.text.includes('normal'))!
+
+  assertEqual(name.heightScale, 3)
+  assertEqual(name.widthScale, 2)
+  assertEqual(normal.heightScale, 1)
+  assertEqual(normal.widthScale, 1)
+})
+
+test('height and width are read independently', () => {
+  // GS ! packs them in separate nibbles; reading one for the other would show
+  // a line as enlarged in the wrong direction.
+  const b = new EscPosBuilder('80mm')
+  b.scale(4, 1).line('tall').scale(1, 4).line('wide')
+
+  const { lines } = decodeTicket(b.build(), 48)
+  const tall = lines.find((l) => l.text === 'tall')!
+  const wide = lines.find((l) => l.text === 'wide')!
+
+  assertEqual(tall.heightScale, 4)
+  assertEqual(tall.widthScale, 1)
+  assertEqual(wide.heightScale, 1)
+  assertEqual(wide.widthScale, 4)
+})
+
+test('the old double-size command still reads as 2x', () => {
+  // size() is still what the total uses; it must decode the same as before.
+  const b = new EscPosBuilder('80mm')
+  b.size(true, false).line('TOTAL').size(false)
+
+  const { lines } = decodeTicket(b.build(), 48)
+  const total = lines.find((l) => l.text === 'TOTAL')!
+  assertEqual(total.heightScale, 2)
+  assertEqual(total.widthScale, 1)
+  assertEqual(total.large, true, 'large stays true for anything enlarged')
+})
+
+test('scale is clamped to what the command can carry', () => {
+  // GS ! has three bits per axis. Asking for 20x must not wrap around to a
+  // small number and silently print the name tiny.
+  const b = new EscPosBuilder('80mm')
+  b.scale(20, 0).line('clamped')
+
+  const { lines } = decodeTicket(b.build(), 48)
+  const line = lines.find((l) => l.text === 'clamped')!
+  assertEqual(line.heightScale, 8, 'capped at the maximum')
+  assertEqual(line.widthScale, 1, 'floored at the minimum')
 })

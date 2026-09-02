@@ -21,6 +21,7 @@ class BranchScreen extends ConsumerStatefulWidget {
 class _BranchScreenState extends ConsumerState<BranchScreen> {
   final _formKey = GlobalKey<FormState>();
   final _nameController = TextEditingController();
+  final _taglineController = TextEditingController();
   final _addressController = TextEditingController();
   final _phoneController = TextEditingController();
   final _gstinController = TextEditingController();
@@ -35,6 +36,7 @@ class _BranchScreenState extends ConsumerState<BranchScreen> {
   @override
   void dispose() {
     _nameController.dispose();
+    _taglineController.dispose();
     _addressController.dispose();
     _phoneController.dispose();
     _gstinController.dispose();
@@ -43,6 +45,7 @@ class _BranchScreenState extends ConsumerState<BranchScreen> {
 
   void _fill(Branch branch) {
     _nameController.text = branch.name;
+    _taglineController.text = branch.tagline ?? '';
     _addressController.text = branch.address ?? '';
     _phoneController.text = branch.phone ?? '';
     _gstinController.text = branch.gstin ?? '';
@@ -145,6 +148,14 @@ class _BranchScreenState extends ConsumerState<BranchScreen> {
                   const SizedBox(height: AppSpacing.md),
 
                   AppTextField(
+                    controller: _taglineController,
+                    label: 'Tagline',
+                    hintText: 'Authentic Chennai Cuisine',
+                    enabled: !_saving,
+                  ),
+                  const SizedBox(height: AppSpacing.md),
+
+                  AppTextField(
                     controller: _addressController,
                     label: 'Address',
                     hintText: '12 Mount Road, Chennai 600002',
@@ -217,6 +228,7 @@ class _BranchScreenState extends ConsumerState<BranchScreen> {
     try {
       await ref.read(settingsRepositoryProvider).updateBranch({
         'name': _nameController.text.trim(),
+        'tagline': orNull(_taglineController.text),
         'address': orNull(_addressController.text),
         'phone': orNull(_phoneController.text),
         'gstin': orNull(_gstinController.text),

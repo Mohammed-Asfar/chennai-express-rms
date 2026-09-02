@@ -35,6 +35,8 @@ export interface KotData {
 export interface BillData {
   billNumber: string
   branchName: string
+  /** A line under the name — "Authentic Chennai Cuisine", "Since 1998". */
+  branchTagline?: string | null
   branchAddress?: string | null
   branchPhone?: string | null
   gstin?: string | null
@@ -131,7 +133,20 @@ export function renderBill(data: BillData, paper: PaperWidth = '80mm'): Buffer {
     b.align('center').raw(...rasterCommand(data.logo)).line()
   }
 
-  b.align('center').size(true).bold(true).line(data.branchName).size(false).bold(false)
+  // With no logo the name is the only thing identifying the bill at a glance,
+  // so it takes the space the logo would have used. With one, it stays at
+  // double height — competing with the image would just look crowded.
+  const nameHeight = data.logo ? 2 : 3
+  const nameWidth = 2
+
+  b.align('center').scale(nameHeight, nameWidth).bold(true)
+  b.wrappedAtScale(data.branchName, nameWidth)
+  b.scale(1, 1).bold(false)
+
+  // A tagline under the name, in normal type: the name is what must stand out,
+  // and a second large line would fight it rather than support it.
+  if (data.branchTagline) b.wrapped(data.branchTagline)
+
   if (data.branchAddress) b.wrapped(data.branchAddress)
   // Under the address, where a customer looks for it to call back about an
   // order — not beside the GSTIN, which is a tax reference, not a contact.

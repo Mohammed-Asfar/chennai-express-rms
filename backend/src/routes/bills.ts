@@ -376,12 +376,14 @@ export async function billRoutes(app: FastifyInstance): Promise<void> {
 
       const branch = app.db
         .prepare(
-          `SELECT name, address, phone, gstin, logo_bitmap, logo_width, logo_height, print_logo
+          `SELECT name, tagline, address, phone, gstin, logo_bitmap, logo_width,
+                  logo_height, print_logo
            FROM branches WHERE id = ?`,
         )
         .get(me.branchId) as
         | {
             name: string
+            tagline: string | null
             address: string | null
             phone: string | null
             gstin: string | null
@@ -420,6 +422,7 @@ export async function billRoutes(app: FastifyInstance): Promise<void> {
         {
           billNumber: bill.bill_number,
           branchName: branch?.name ?? 'Restaurant',
+          branchTagline: branch?.tagline ?? null,
           branchAddress: branch?.address ?? null,
           branchPhone: branch?.phone ?? null,
           gstin: branch?.gstin ?? null,

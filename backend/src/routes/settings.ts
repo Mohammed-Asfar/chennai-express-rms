@@ -35,6 +35,8 @@ const updateSettingsBody = z.object({
 
 const updateBranchBody = z.object({
   name: z.string().min(1).max(64).trim().optional(),
+  /** A line under the name on the bill. Empty clears it. */
+  tagline: z.string().max(64).trim().nullable().optional(),
   address: z.string().max(200).trim().nullable().optional(),
   phone: z.string().max(20).trim().nullable().optional(),
   gstin: z.string().max(15).trim().nullable().optional(),
@@ -45,6 +47,7 @@ const updateBranchBody = z.object({
 interface BranchRow {
   id: string
   name: string
+  tagline: string | null
   address: string | null
   phone: string | null
   gstin: string | null
@@ -140,12 +143,14 @@ export async function settingsRoutes(app: FastifyInstance): Promise<void> {
 
     const branch = app.db
       .prepare(
-        `SELECT name, address, phone, gstin, logo_bitmap, logo_width, logo_height, print_logo
+        `SELECT name, tagline, address, phone, gstin, logo_bitmap, logo_width,
+                logo_height, print_logo
          FROM branches WHERE id = ?`,
       )
       .get(me.branchId) as
       | {
           name: string
+          tagline: string | null
           address: string | null
           phone: string | null
           gstin: string | null
@@ -188,6 +193,7 @@ export async function settingsRoutes(app: FastifyInstance): Promise<void> {
       {
         billNumber,
         branchName: branch?.name ?? 'Restaurant',
+        branchTagline: branch?.tagline ?? null,
         branchAddress: branch?.address ?? null,
         branchPhone: branch?.phone ?? null,
         gstin: branch?.gstin ?? null,
@@ -243,7 +249,7 @@ export async function settingsRoutes(app: FastifyInstance): Promise<void> {
   app.get('/branch', { preHandler: requireAuth }, async (request) => {
     const me = currentUser(request)
     const row = app.db
-      .prepare(`SELECT id, name, address, phone, gstin, logo_bitmap, print_logo
+      .prepare(`SELECT id, name, tagline, address, phone, gstin, logo_bitmap, print_logo
          FROM branches WHERE id = ?`)
       .get(me.branchId) as BranchRow | undefined
     if (!row) throw new AppError(404, 'BRANCH_NOT_FOUND', 'Branch not found')
@@ -361,6 +367,11 @@ export async function settingsRoutes(app: FastifyInstance): Promise<void> {
     }
 
     if (body.name !== undefined) push('name', body.name)
+    if (body.tagline !== undefined) {
+      // An emptied field means "no tagline", not an empty line printed on every
+      // bill, so it is stored as null rather than ''.
+      push('tagline', body.tagline === null || body.tagline === '' ? null : body.tagline)
+    }
     if (body.address !== undefined) push('address', body.address)
     if (body.phone !== undefined) push('phone', body.phone)
     if (body.printLogo !== undefined) push('print_logo', body.printLogo ? 1 : 0)
@@ -379,7 +390,7 @@ export async function settingsRoutes(app: FastifyInstance): Promise<void> {
     }
 
     const row = app.db
-      .prepare(`SELECT id, name, address, phone, gstin, logo_bitmap, print_logo
+      .prepare(`SELECT id, name, tagline, address, phone, gstin, logo_bitmap, print_logo
          FROM branches WHERE id = ?`)
       .get(me.branchId) as BranchRow
     return { branch: toPublicBranch(row) }
@@ -397,6 +408,7 @@ function toPublicBranch(row: BranchRow) {
   return {
     id: row.id,
     name: row.name,
+    tagline: row.tagline,
     address: row.address,
     phone: row.phone,
     gstin: row.gstin,

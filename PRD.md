@@ -177,7 +177,7 @@ for rates (5% → `500`). Never float — see `SCHEMA.md` §1.
 | `printers.connection` | `usb`, `network` |
 | `printers.role` | `bill`, `kot`, `both` |
 | `print_jobs.type` | `bill`, `kot`, `kot_additional`, `kot_cancel`, `test` |
-| `print_jobs.status` | `pending`, `printed`, `failed` |
+| `print_jobs.status` | `pending`, `printed`, `failed`, `cancelled` |
 | `settings.tax_mode` | `inclusive`, `exclusive` |
 | `app_releases.channel` | `stable`, `beta` |
 
@@ -423,6 +423,10 @@ a negative total; it is rejected at validation.
 | FR-P24 | A queued or failed job can be cancelled, so a ticket dealt with by hand leaves the queue |
 | FR-P25 | Cancelling keeps the job row — the queue shows outstanding work, not history |
 | FR-P26 | An already-printed job cannot be cancelled |
+| FR-P27 | With no logo printing, the restaurant name prints at triple height — it is then the only thing identifying the bill at a glance |
+| FR-P28 | The name never exceeds double width, whatever its height: widening halves the usable columns |
+| FR-P29 | A long name wraps at the columns the widened characters leave, never off the edge of the paper |
+| FR-P30 | An optional tagline prints under the name, in normal type |
 
 **FR-P17 matters in practice.** A table orders drinks, then food twenty minutes later.
 Reprinting the whole ticket would make the kitchen cook the drinks again. Only the new
@@ -615,6 +619,8 @@ Scenarios that occur in a working restaurant and their required behaviour.
 | Cancel pressed twice | Second press succeeds quietly — a slow connection must not produce an error to interpret |
 | Cancelled job and the retry sweep | Never picked up again; `drainPending` takes only pending jobs |
 | Long item name on 58mm paper | Wraps or truncates cleanly; never garbled |
+| Long restaurant name with the logo off | Wraps at the columns double-width leaves (24 on 80mm, 16 on 58mm), never off the paper |
+| Tagline left empty | Nothing prints — no blank line pushing the bill down |
 | Logo missing or corrupt | Bill prints without it |
 | Bill reprinted | Marked **DUPLICATE** on the printout |
 

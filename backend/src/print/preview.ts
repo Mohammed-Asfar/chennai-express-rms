@@ -28,6 +28,15 @@ export interface PreviewLine {
   large: boolean
   bold: boolean
   align: 'left' | 'center' | 'right'
+  /**
+   * The real multipliers from `GS !`, 1-8.
+   *
+   * Carried separately from `large` because height and width are independent
+   * and only height can be shown safely on screen: a wider glyph would push a
+   * 48-column line off the preview even though it prints correctly.
+   */
+  heightScale: number
+  widthScale: number
 }
 
 export interface TicketPreview {
@@ -49,11 +58,19 @@ export function decodeTicket(buffer: Buffer, width: number): TicketPreview {
   let current = ''
   let align: PreviewLine['align'] = 'left'
   let bold = false
-  let large = false
+  let heightScale = 1
+  let widthScale = 1
   let hasLogo = false
 
   const flush = () => {
-    lines.push({ text: current, large, bold, align })
+    lines.push({
+      text: current,
+      large: heightScale > 1 || widthScale > 1,
+      bold,
+      align,
+      heightScale,
+      widthScale,
+    })
     current = ''
   }
 
@@ -70,7 +87,16 @@ export function decodeTicket(buffer: Buffer, width: number): TicketPreview {
       if (next === 0x45) bold = value === 1
       if (next === 0x64) {
         // A feed is blank lines, which matter to the shape of the receipt.
-        for (let n = 0; n < value; n++) lines.push({ text: '', large: false, bold: false, align })
+        for (let n = 0; n < value; n++) {
+          lines.push({
+            text: '',
+            large: false,
+            bold: false,
+            align,
+            heightScale: 1,
+            widthScale: 1,
+          })
+        }
       }
 
       i += 2 + args
@@ -90,7 +116,13 @@ export function decodeTicket(buffer: Buffer, width: number): TicketPreview {
 
       const args = GS_ARGS[next]
       if (args !== undefined) {
-        if (next === 0x21) large = (buffer[i + 2] ?? 0) !== 0
+        if (next === 0x21) {
+          // GS ! packs width in the high nibble and height in the low one, each
+          // as "times minus one" — 0x11 is double both ways, not 17×.
+          const n = buffer[i + 2] ?? 0
+          widthScale = ((n >> 4) & 0x07) + 1
+          heightScale = (n & 0x07) + 1
+        }
         i += 2 + args
         continue
       }
