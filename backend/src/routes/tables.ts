@@ -1,31 +1,32 @@
 import { randomUUID } from 'node:crypto'
 import type { FastifyInstance } from 'fastify'
 import { z } from 'zod'
+import { requiredText } from '../lib/validation.js'
 import type { Db } from '../db/client.js'
 import { AppError } from '../lib/errors.js'
 import { currentUser, requireAuth, requireRole } from '../lib/guards.js'
 
 const createSectionBody = z.object({
-  name: z.string().min(1).max(48).trim(),
+  name: requiredText(48),
   sortOrder: z.number().int().min(0).optional(),
 })
 
 const updateSectionBody = z.object({
-  name: z.string().min(1).max(48).trim().optional(),
+  name: requiredText(48).optional(),
   sortOrder: z.number().int().min(0).optional(),
   isActive: z.boolean().optional(),
 })
 
 const createTableBody = z.object({
   sectionId: z.string().uuid(),
-  name: z.string().min(1).max(32).trim(),
+  name: requiredText(32),
   seats: z.number().int().min(1).max(64).optional(),
   sortOrder: z.number().int().min(0).optional(),
 })
 
 const updateTableBody = z.object({
   sectionId: z.string().uuid().optional(),
-  name: z.string().min(1).max(32).trim().optional(),
+  name: requiredText(32).optional(),
   seats: z.number().int().min(1).max(64).optional(),
   sortOrder: z.number().int().min(0).optional(),
   isActive: z.boolean().optional(),

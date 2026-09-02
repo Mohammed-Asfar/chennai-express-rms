@@ -1,6 +1,7 @@
 import { randomUUID } from 'node:crypto'
 import type { FastifyInstance } from 'fastify'
 import { z } from 'zod'
+import { requiredText } from '../lib/validation.js'
 import { AppError } from '../lib/errors.js'
 import { currentUser, requireAuth, requireRole } from '../lib/guards.js'
 import { enqueueAndSend, resolvePrinter, runJob, type PrinterRow } from '../print/queue.js'
@@ -9,17 +10,17 @@ import { discoverAll, discoverNetwork, discoverUsb, type Discovered } from '../p
 import { verifyToken } from '../lib/auth.js'
 
 const createBody = z.object({
-  name: z.string().min(1).max(48).trim(),
+  name: requiredText(48),
   connection: z.enum(['usb', 'network']),
-  address: z.string().min(1).max(128).trim(),
+  address: requiredText(128),
   role: z.enum(['bill', 'kot', 'both']),
   paperWidth: z.enum(['58mm', '80mm']),
 })
 
 const updateBody = z.object({
-  name: z.string().min(1).max(48).trim().optional(),
+  name: requiredText(48).optional(),
   connection: z.enum(['usb', 'network']).optional(),
-  address: z.string().min(1).max(128).trim().optional(),
+  address: requiredText(128).optional(),
   role: z.enum(['bill', 'kot', 'both']).optional(),
   paperWidth: z.enum(['58mm', '80mm']).optional(),
   isActive: z.boolean().optional(),

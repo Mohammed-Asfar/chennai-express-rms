@@ -56,6 +56,16 @@ class BillRepository {
     return Bill.fromJson(json['bill'] as Map<String, dynamic>);
   }
 
+  /// Voids a bill raised in error. Admin only.
+  ///
+  /// Refused while any live payment stands: money must not sit recorded
+  /// against a sale that no longer exists. The order reopens so it can be
+  /// corrected and billed again, and the bill number stays consumed — a gap in
+  /// the sequence looks worse to an auditor than a number marked void.
+  Future<void> voidBill(String billId, String reason) async {
+    await _api.post('/bills/$billId/void', {'reason': reason});
+  }
+
   Future<Bill> reversePayment(String billId, String paymentId, String reason) async {
     final json = await _api.post(
       '/bills/$billId/payments/$paymentId/reverse',

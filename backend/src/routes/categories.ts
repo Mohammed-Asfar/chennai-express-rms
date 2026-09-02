@@ -1,16 +1,17 @@
 import { randomUUID } from 'node:crypto'
 import type { FastifyInstance } from 'fastify'
 import { z } from 'zod'
+import { requiredText } from '../lib/validation.js'
 import { AppError } from '../lib/errors.js'
 import { currentUser, requireAuth, requireRole } from '../lib/guards.js'
 
 const createBody = z.object({
-  name: z.string().min(1).max(64).trim(),
+  name: requiredText(64),
   sortOrder: z.number().int().min(0).optional(),
 })
 
 const updateBody = z.object({
-  name: z.string().min(1).max(64).trim().optional(),
+  name: requiredText(64).optional(),
   sortOrder: z.number().int().min(0).optional(),
   isActive: z.boolean().optional(),
 })

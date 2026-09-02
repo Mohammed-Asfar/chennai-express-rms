@@ -1,6 +1,7 @@
 import { randomUUID } from 'node:crypto'
 import type { FastifyInstance } from 'fastify'
 import { z } from 'zod'
+import { requiredText } from '../lib/validation.js'
 import { AppError } from '../lib/errors.js'
 import { currentUser, requireAuth, requireRole } from '../lib/guards.js'
 import { getSetting } from '../lib/settings.js'
@@ -9,7 +10,7 @@ import { getSetting } from '../lib/settings.js'
 const DEFAULT_VARIANT_NAME = 'Standard'
 
 const variantInput = z.object({
-  name: z.string().min(1).max(32).trim(),
+  name: requiredText(32),
   /** Paise. The client converts rupees at the boundary. */
   price: z.number().int().min(0),
   isAvailable: z.boolean().optional(),
@@ -17,7 +18,7 @@ const variantInput = z.object({
 
 const createBody = z.object({
   categoryId: z.string().uuid(),
-  name: z.string().min(1).max(96).trim(),
+  name: requiredText(96),
   description: z.string().max(256).trim().optional(),
   /** Basis points. Omitted means inherit the branch default. */
   taxRate: z.number().int().min(0).max(10_000).optional(),
@@ -29,7 +30,7 @@ const createBody = z.object({
 
 const updateBody = z.object({
   categoryId: z.string().uuid().optional(),
-  name: z.string().min(1).max(96).trim().optional(),
+  name: requiredText(96).optional(),
   description: z.string().max(256).trim().nullable().optional(),
   taxRate: z.number().int().min(0).max(10_000).optional(),
   isAvailable: z.boolean().optional(),
@@ -37,7 +38,7 @@ const updateBody = z.object({
 })
 
 const updateVariantBody = z.object({
-  name: z.string().min(1).max(32).trim().optional(),
+  name: requiredText(32).optional(),
   price: z.number().int().min(0).optional(),
   isAvailable: z.boolean().optional(),
   sortOrder: z.number().int().min(0).optional(),

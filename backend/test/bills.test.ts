@@ -1026,3 +1026,104 @@ test('paying more than is left on a part-paid bill is refused', async () => {
   assertEqual(res.statusCode, 400, 'only 120.00 was still due')
   await close(ctx)
 })
+
+test('a reversed payment stays on the bill, marked', async () => {
+  // The detail dialog lists it struck through. If the backend dropped it, a
+  // corrected bill would look like it was always right — the audit trail is
+  // the whole reason reversal exists rather than deletion.
+  const ctx = await setup('inclusive')
+  const order = await makeOrder(ctx, [{ variantId: ctx.full, qty: 1 }])
+  const bill = await makeBill(ctx, order)
+  const paid = await pay(ctx, bill.id, { mode: 'cash', amount: bill.total })
+
+  const reversed = await ctx.app.inject({
+    method: 'POST',
+    url: `/bills/${bill.id}/payments/${paid.payments[0]!.id}/reverse`,
+    headers: ctx.cashier,
+    payload: { reason: 'Recorded as cash, was card' },
+  })
+  assertEqual(reversed.statusCode, 200)
+
+  const after = (reversed.json() as { bill: { payments: { reversedAt: string | null }[] } }).bill
+  assertEqual(after.payments.length, 1, 'the row is kept')
+  assertEqual(after.payments[0]!.reversedAt !== null, true, 'and marked reversed')
+  await close(ctx)
+})
+
+test('reversing a payment reopens the bill for payment', async () => {
+  const ctx = await setup('inclusive')
+  const order = await makeOrder(ctx, [{ variantId: ctx.full, qty: 1 }])
+  const bill = await makeBill(ctx, order)
+  const paid = await pay(ctx, bill.id, { mode: 'cash', amount: bill.total })
+  assertEqual(paid.paymentStatus, 'paid')
+
+  const res = await ctx.app.inject({
+    method: 'POST',
+    url: `/bills/${bill.id}/payments/${paid.payments[0]!.id}/reverse`,
+    headers: ctx.cashier,
+    payload: { reason: 'Wrong mode' },
+  })
+  const after = (res.json() as { bill: { paymentStatus: string; outstanding: number } }).bill
+  assertEqual(after.paymentStatus, 'unpaid')
+  assertEqual(after.outstanding, bill.total, 'the money is owed again')
+  await close(ctx)
+})
+
+test('a bill can be voided once its payments are reversed', async () => {
+  // The order the UI walks a cashier through: reverse, then void.
+  const ctx = await setup('inclusive')
+  const order = await makeOrder(ctx, [{ variantId: ctx.full, qty: 1 }])
+  const bill = await makeBill(ctx, order)
+  const paid = await pay(ctx, bill.id, { mode: 'cash', amount: bill.total })
+
+  await ctx.app.inject({
+    method: 'POST',
+    url: `/bills/${bill.id}/payments/${paid.payments[0]!.id}/reverse`,
+    headers: ctx.cashier,
+    payload: { reason: 'Billed the wrong table' },
+  })
+
+  const voided = await ctx.app.inject({
+    method: 'POST',
+    url: `/bills/${bill.id}/void`,
+    headers: ctx.admin,
+    payload: { reason: 'Billed the wrong table' },
+  })
+  assertEqual(voided.statusCode, 200)
+  await close(ctx)
+})
+
+test('a cashier cannot void a bill', async () => {
+  // Voiding erases a sale from the day's takings, so it is the owner's call.
+  const ctx = await setup('inclusive')
+  const order = await makeOrder(ctx, [{ variantId: ctx.full, qty: 1 }])
+  const bill = await makeBill(ctx, order)
+
+  const res = await ctx.app.inject({
+    method: 'POST',
+    url: `/bills/${bill.id}/void`,
+    headers: ctx.cashier,
+    payload: { reason: 'Mistake' },
+  })
+  assertEqual(res.statusCode, 403)
+  await close(ctx)
+})
+
+test('voiding without a reason is refused', async () => {
+  // "Voided" with no explanation is what an auditor asks about, and by then
+  // nobody remembers.
+  const ctx = await setup('inclusive')
+  const order = await makeOrder(ctx, [{ variantId: ctx.full, qty: 1 }])
+  const bill = await makeBill(ctx, order)
+
+  for (const payload of [{}, { reason: '' }, { reason: '   ' }]) {
+    const res = await ctx.app.inject({
+      method: 'POST',
+      url: `/bills/${bill.id}/void`,
+      headers: ctx.admin,
+      payload,
+    })
+    assertEqual(res.statusCode, 400, `accepted ${JSON.stringify(payload)}`)
+  }
+  await close(ctx)
+})

@@ -9,7 +9,9 @@ import '../../../core/widgets/error_banner.dart';
 import '../../printers/data/printer_repository.dart';
 import '../data/bill_models.dart';
 import '../data/bill_repository.dart';
+import '../../auth/presentation/auth_controller.dart';
 import 'bills_screen.dart';
+import 'reason_dialog.dart';
 import 'take_payment_dialog.dart';
 
 final _billDetailProvider = FutureProvider.family<Bill, String>((ref, billId) {
@@ -165,9 +167,17 @@ class _Content extends ConsumerWidget {
                 title: 'Payment',
                 child: Column(
                   children: [
-                    for (final payment in bill.livePayments)
-                      _row(theme, payment.mode.label, payment.amount),
-                    if (bill.livePayments.isEmpty)
+                    for (final payment in bill.payments)
+                      _PaymentRow(
+                        payment: payment,
+                        // Reversing is pointless once the bill is void — it
+                        // cannot be voided while a payment stands, so by then
+                        // they are already reversed.
+                        onReverse: payment.isReversed
+                            ? null
+                            : () => _reverse(context, ref, payment),
+                      ),
+                    if (bill.payments.isEmpty)
                       Text(
                         'Nothing has been paid on this bill.',
                         style: theme.textTheme.bodySmall,
@@ -220,6 +230,24 @@ class _Content extends ConsumerWidget {
                   ),
                 ),
               ),
+
+              // Voiding is admin-only and refused while money stands against
+              // the bill, so it is offered only when it can actually be done.
+              // Showing it otherwise would be a button that only ever errors.
+              if (ref.watch(authControllerProvider).user?.isAdmin == true &&
+                  bill.livePayments.isEmpty) ...[
+                const SizedBox(width: AppSpacing.sm),
+                SizedBox(
+                  height: AppSpacing.minTapTarget,
+                  child: TextButton(
+                    onPressed: () => _void(context, ref),
+                    style: TextButton.styleFrom(
+                      foregroundColor: theme.colorScheme.error,
+                    ),
+                    child: const Text('Void'),
+                  ),
+                ),
+              ],
 
               // Settling later is the point of being able to print a bill
               // before it is paid: by then the billing dialog is long closed.
@@ -274,15 +302,78 @@ class _Content extends ConsumerWidget {
     ),
   );
 
+  /// Reverses a payment recorded in error.
+  ///
+  /// The row is kept and marked, never deleted — a cashier who recorded cash
+  /// when it was card leaves both rows, and the bill's paid amount follows.
+  Future<void> _reverse(
+    BuildContext context,
+    WidgetRef ref,
+    BillPayment payment,
+  ) async {
+    final reason = await ReasonDialog.show(
+      context,
+      title: 'Reverse this payment?',
+      message:
+          '${payment.mode.label} ${Money.formatWithSymbol(payment.amount)} '
+          'will stop counting towards this bill. The record of it stays.',
+      confirmLabel: 'Reverse it',
+      hint: 'Recorded as cash, was card',
+    );
+    if (reason == null || !context.mounted) return;
+
+    final messenger = ScaffoldMessenger.of(context);
+    try {
+      await ref
+          .read(billRepositoryProvider)
+          .reversePayment(bill.id, payment.id, reason);
+      _refresh(ref);
+      messenger.showSnackBar(const SnackBar(content: Text('Payment reversed')));
+    } on ApiException catch (error) {
+      messenger.showSnackBar(SnackBar(content: Text(error.message)));
+    }
+  }
+
+  /// Voids a bill raised in error, reopening its order to be corrected.
+  Future<void> _void(BuildContext context, WidgetRef ref) async {
+    final reason = await ReasonDialog.show(
+      context,
+      title: 'Void ${bill.billNumber}?',
+      message:
+          'It stops counting as a sale and its order reopens so it can be '
+          'corrected and billed again. The bill number stays used.',
+      confirmLabel: 'Void it',
+      hint: 'Billed to the wrong table',
+    );
+    if (reason == null || !context.mounted) return;
+
+    final messenger = ScaffoldMessenger.of(context);
+    final navigator = Navigator.of(context);
+    try {
+      await ref.read(billRepositoryProvider).voidBill(bill.id, reason);
+      // The bill is gone from the list, so there is nothing left to show.
+      ref.invalidate(billListProvider);
+      navigator.pop();
+      messenger.showSnackBar(
+        SnackBar(content: Text('${bill.billNumber} voided')),
+      );
+    } on ApiException catch (error) {
+      messenger.showSnackBar(SnackBar(content: Text(error.message)));
+    }
+  }
+
+  /// Both the detail and the list behind it go stale together.
+  void _refresh(WidgetRef ref) {
+    ref.invalidate(_billDetailProvider(bill.id));
+    ref.invalidate(billListProvider);
+  }
+
   /// Takes a payment, then reloads so the status and balance follow.
   Future<void> _takePayment(BuildContext context, WidgetRef ref) async {
     final paid = await TakePaymentDialog.show(context, bill);
     if (paid != true) return;
 
-    // Both the detail and the list behind it are now stale: the bill's status
-    // changed, and so did the range's takings.
-    ref.invalidate(_billDetailProvider(bill.id));
-    ref.invalidate(billListProvider);
+    _refresh(ref);
   }
 
   Future<void> _print(BuildContext context, WidgetRef ref) async {
@@ -303,6 +394,56 @@ class _Content extends ConsumerWidget {
     } on ApiException catch (error) {
       messenger.showSnackBar(SnackBar(content: Text(error.message)));
     }
+  }
+}
+
+/// One payment on the bill, with a way to undo it.
+///
+/// Reversed payments stay listed but struck through: they are the audit trail,
+/// and hiding them makes a corrected bill look like it was always right.
+class _PaymentRow extends StatelessWidget {
+  const _PaymentRow({required this.payment, required this.onReverse});
+
+  final BillPayment payment;
+
+  /// Null once it has been reversed — there is nothing left to undo.
+  final VoidCallback? onReverse;
+
+  @override
+  Widget build(BuildContext context) {
+    final theme = Theme.of(context);
+    final off = payment.isReversed;
+
+    final style = theme.textTheme.bodyMedium?.copyWith(
+      color: off ? theme.colorScheme.onSurfaceVariant : null,
+      decoration: off ? TextDecoration.lineThrough : null,
+    );
+
+    return Padding(
+      padding: const EdgeInsets.symmetric(vertical: 2),
+      child: Row(
+        children: [
+          Expanded(
+            child: Text(
+              off ? '${payment.mode.label} (reversed)' : payment.mode.label,
+              style: style,
+            ),
+          ),
+          Text(Money.formatWithSymbol(payment.amount), style: style),
+          SizedBox(
+            width: 40,
+            child: onReverse == null
+                ? null
+                : IconButton(
+                    icon: const Icon(Icons.undo, size: 16),
+                    tooltip: 'Reverse this payment',
+                    visualDensity: VisualDensity.compact,
+                    onPressed: onReverse,
+                  ),
+          ),
+        ],
+      ),
+    );
   }
 }
 

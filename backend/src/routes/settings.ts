@@ -1,5 +1,6 @@
 import type { FastifyInstance } from 'fastify'
 import { z } from 'zod'
+import { requiredText } from '../lib/validation.js'
 import { AppError } from '../lib/errors.js'
 import { currentUser, requireAuth, requireRole } from '../lib/guards.js'
 import { getSetting, setSetting, type SettingKey } from '../lib/settings.js'
@@ -34,7 +35,7 @@ const updateSettingsBody = z.object({
 })
 
 const updateBranchBody = z.object({
-  name: z.string().min(1).max(64).trim().optional(),
+  name: requiredText(64).optional(),
   /** A line under the name on the bill. Empty clears it. */
   tagline: z.string().max(64).trim().nullable().optional(),
   address: z.string().max(200).trim().nullable().optional(),

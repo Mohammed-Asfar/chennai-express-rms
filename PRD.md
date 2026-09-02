@@ -319,6 +319,10 @@ a picker. Every "the table's order" assumption in the UI must handle several.
 | FR-B31 | An unpaid printout is an original, not a duplicate — the duplicate mark tracks prints, not payment |
 | FR-B32 | Payment can be taken against an existing bill from the bills list, not only at billing time |
 | FR-B33 | A part payment leaves the bill open, and the balance can be taken later in any mode |
+| FR-B34 | A payment recorded in error can be reversed from the bill's detail, with a reason |
+| FR-B35 | Reversed payments stay listed, struck through — they are the audit trail |
+| FR-B36 | Void is offered only to an admin, and only once no live payment stands |
+| FR-B37 | Both void and reversal require a reason; whitespace alone is not a reason |
 
 #### Tax calculation
 
@@ -599,6 +603,9 @@ Scenarios that occur in a working restaurant and their required behaviour.
 | Bill settled after the billing dialog closed | Taken from the bill's detail in the bills list; status and takings both follow |
 | Bill taken while another screen was open | The bills list and reports refetch when opened, so neither shows a stale figure |
 | Amount edited above what is due | Refused by the backend with the outstanding figure, not silently clamped |
+| Cash recorded when it was card | Reversed with a reason, correct payment added; the bill reopens for the amount |
+| Void attempted on a paid bill | Refused — its payments must be reversed first, so the button is hidden until they are |
+| Reason field holding only spaces | Rejected. Trimming happens before the length check, not after |
 | Bill raised Monday, paid Wednesday | Sale reports on Monday, cash collection on Wednesday |
 | Wrong payment mode recorded | Reversed with a reason, correct payment added; both rows stay |
 | Voiding a bill that has payments | Blocked until the payments are reversed |

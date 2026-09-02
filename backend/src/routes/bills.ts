@@ -1,6 +1,7 @@
 import { randomUUID } from 'node:crypto'
 import type { FastifyInstance } from 'fastify'
 import { z } from 'zod'
+import { requiredText } from '../lib/validation.js'
 import type { Db } from '../db/client.js'
 import { AppError } from '../lib/errors.js'
 import { currentUser, requireAuth, requireRole } from '../lib/guards.js'
@@ -27,8 +28,8 @@ const paymentBody = z.object({
   reference: z.string().max(64).trim().optional(),
 })
 
-const voidBody = z.object({ reason: z.string().min(1).max(200).trim() })
-const reverseBody = z.object({ reason: z.string().min(1).max(200).trim() })
+const voidBody = z.object({ reason: requiredText(200) })
+const reverseBody = z.object({ reason: requiredText(200) })
 
 interface BillRow {
   id: string

@@ -1,6 +1,7 @@
 import { randomUUID } from 'node:crypto'
 import type { FastifyInstance } from 'fastify'
 import { z } from 'zod'
+import { requiredText } from '../lib/validation.js'
 import type { Db } from '../db/client.js'
 import { AppError } from '../lib/errors.js'
 import { currentUser, requireAuth } from '../lib/guards.js'
@@ -44,7 +45,7 @@ const updateOrderBody = z.object({
 })
 
 const cancelBody = z.object({
-  reason: z.string().min(1).max(200).trim(),
+  reason: requiredText(200),
 })
 
 interface OrderRow {
