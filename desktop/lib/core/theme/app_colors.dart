@@ -93,4 +93,40 @@ abstract final class AppColors {
 
   static const Color disabled = Color(0xFFDEDBD5);
   static const Color overlay = Color(0x661F1E1C);
+
+  // --- charts ---------------------------------------------------------------
+  //
+  // A categorical series needs colours that stay distinct from each other and
+  // from the accent, which already means "active". These are muted rather than
+  // saturated: a report is read for minutes at a time, and a bright chart on a
+  // warm ground fatigues quickly.
+  //
+  // Ordered by how far apart they read. A chart uses them in sequence, so a
+  // two-series chart gets the two most separable. They are never the only
+  // carrier of meaning — every chart on the reports screen prints its figures
+  // as text beside the colour, because this is financial data and hue alone
+  // fails anyone who cannot separate it.
+
+  static const Color chart1 = Color(0xFF3A6EA5);
+  static const Color chart2 = Color(0xFF2E6B3E);
+  static const Color chart3 = Color(0xFFB07D2B);
+  static const Color chart4 = Color(0xFF7A4E8C);
+  static const Color chart5 = Color(0xFF9C4A2F);
+  static const Color chart6 = Color(0xFF3F7F7A);
+
+  /// The categorical sequence, for a chart that colours N series by index.
+  static const List<Color> chartSeries = [
+    chart1,
+    chart2,
+    chart3,
+    chart4,
+    chart5,
+    chart6,
+  ];
+
+  /// The fill under the sales trend line. The line itself is [chart1].
+  static const Color chartAreaFill = Color(0x1F3A6EA5);
+
+  /// The unfilled remainder of a proportional bar.
+  static const Color chartTrack = Color(0xFFEAE8E3);
 }

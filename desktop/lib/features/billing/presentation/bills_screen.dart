@@ -8,7 +8,7 @@ import '../../../core/widgets/error_banner.dart';
 import '../data/bill_models.dart';
 import '../data/bill_repository.dart';
 import 'bill_detail_dialog.dart';
-import 'date_range_dialog.dart';
+import '../../../core/widgets/date_range_dialog.dart';
 
 /// The range being listed. Business dates, inclusive at both ends.
 class BillRange {
