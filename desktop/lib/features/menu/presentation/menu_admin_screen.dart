@@ -5,6 +5,7 @@ import '../../../core/theme/app_colors.dart';
 import '../../../core/theme/app_spacing.dart';
 import '../../../core/widgets/app_loading.dart';
 import '../../../core/widgets/error_banner.dart';
+import '../../../core/widgets/search_field.dart';
 import '../data/menu_admin_models.dart';
 import '../data/menu_admin_repository.dart';
 import '../data/menu_repository.dart';
@@ -345,7 +346,7 @@ class _CategoryTileState extends State<_CategoryTile> {
 }
 
 /// The right pane: the dishes in the selected category.
-class _ItemPane extends ConsumerWidget {
+class _ItemPane extends ConsumerStatefulWidget {
   const _ItemPane({
     required this.categories,
     required this.categoryId,
@@ -359,10 +360,26 @@ class _ItemPane extends ConsumerWidget {
   final VoidCallback onChanged;
 
   @override
-  Widget build(BuildContext context, WidgetRef ref) {
+  ConsumerState<_ItemPane> createState() => _ItemPaneState();
+}
+
+class _ItemPaneState extends ConsumerState<_ItemPane> {
+  String _search = '';
+
+  @override
+  Widget build(BuildContext context) {
     final theme = Theme.of(context);
+    final categories = widget.categories;
+    final items = widget.items;
     final categoryName =
-        categories.firstWhere((c) => c.id == categoryId).name;
+        categories.firstWhere((c) => c.id == widget.categoryId).name;
+
+    // Name or portion: "half" is as reasonable a thing to type as "biryani".
+    final shown = items.where((item) {
+      if (_search.isEmpty) return true;
+      if (item.name.toLowerCase().contains(_search)) return true;
+      return item.variants.any((v) => v.name.toLowerCase().contains(_search));
+    }).toList();
 
     return Column(
       crossAxisAlignment: CrossAxisAlignment.stretch,
@@ -392,9 +409,27 @@ class _ItemPane extends ConsumerWidget {
           ),
         ),
 
+        // Hidden when the category holds nothing: a search box over an empty
+        // list is furniture, and the empty state has the useful action on it.
+        if (items.isNotEmpty)
+          Padding(
+            padding: const EdgeInsets.fromLTRB(
+              AppSpacing.lg,
+              0,
+              AppSpacing.lg,
+              AppSpacing.md,
+            ),
+            child: SearchField(
+              hintText: 'Search dishes in ${categoryName.toLowerCase()}',
+              onChanged: (value) => setState(() => _search = value),
+            ),
+          ),
+
         Expanded(
           child: items.isEmpty
               ? _EmptyCategory(onAdd: () => _createItem(context, ref))
+              : shown.isEmpty
+              ? NoSearchResults(query: _search, noun: 'dishes')
               : ListView.builder(
                   padding: const EdgeInsets.fromLTRB(
                     AppSpacing.lg,
@@ -402,13 +437,13 @@ class _ItemPane extends ConsumerWidget {
                     AppSpacing.lg,
                     AppSpacing.xxl,
                   ),
-                  itemCount: items.length,
+                  itemCount: shown.length,
                   itemBuilder: (context, index) => ItemRow(
-                    item: items[index],
-                    onEdit: () => _editItem(context, ref, items[index]),
+                    item: shown[index],
+                    onEdit: () => _editItem(context, ref, shown[index]),
                     onToggle: (available) =>
-                        _toggle(context, ref, items[index], available),
-                    onDelete: () => _deleteItem(context, ref, items[index]),
+                        _toggle(context, ref, shown[index], available),
+                    onDelete: () => _deleteItem(context, ref, shown[index]),
                   ),
                 ),
         ),
@@ -419,10 +454,10 @@ class _ItemPane extends ConsumerWidget {
   Future<void> _createItem(BuildContext context, WidgetRef ref) async {
     final created = await ItemEditorDialog.show(
       context,
-      categories: categories,
-      initialCategoryId: categoryId,
+      categories: widget.categories,
+      initialCategoryId: widget.categoryId,
     );
-    if (created == true) onChanged();
+    if (created == true) widget.onChanged();
   }
 
   Future<void> _editItem(
@@ -432,10 +467,10 @@ class _ItemPane extends ConsumerWidget {
   ) async {
     final saved = await ItemEditorDialog.show(
       context,
-      categories: categories,
+      categories: widget.categories,
       item: item,
     );
-    if (saved == true) onChanged();
+    if (saved == true) widget.onChanged();
   }
 
   /// Marking a dish unavailable is the everyday action — the kitchen runs out of
@@ -450,7 +485,7 @@ class _ItemPane extends ConsumerWidget {
       await ref
           .read(menuAdminRepositoryProvider)
           .updateItem(item.id, isAvailable: available);
-      onChanged();
+      widget.onChanged();
     } on ApiException catch (error) {
       if (!context.mounted) return;
       ScaffoldMessenger.of(context)
@@ -488,7 +523,7 @@ class _ItemPane extends ConsumerWidget {
 
     try {
       await ref.read(menuAdminRepositoryProvider).deleteItem(item.id);
-      onChanged();
+      widget.onChanged();
     } on ApiException catch (error) {
       if (!context.mounted) return;
       ScaffoldMessenger.of(context)

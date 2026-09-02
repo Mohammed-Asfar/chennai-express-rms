@@ -5,6 +5,7 @@ import '../../../core/theme/app_spacing.dart';
 import '../../../core/utils/money.dart';
 import '../../../core/widgets/app_loading.dart';
 import '../../../core/widgets/error_banner.dart';
+import '../../../core/widgets/search_field.dart';
 import '../../menu/data/menu_models.dart';
 import '../../menu/data/menu_repository.dart';
 
@@ -42,13 +43,9 @@ class _MenuPanelState extends ConsumerState<MenuPanel> {
             AppSpacing.lg,
             AppSpacing.md,
           ),
-          child: TextField(
-            decoration: const InputDecoration(
-              hintText: 'Search the menu',
-              prefixIcon: Icon(Icons.search, size: 20),
-              isDense: true,
-            ),
-            onChanged: (value) => setState(() => _search = value.trim().toLowerCase()),
+          child: SearchField(
+            hintText: 'Search the menu',
+            onChanged: (value) => setState(() => _search = value),
           ),
         ),
 

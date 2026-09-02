@@ -204,6 +204,8 @@ class Bill {
     this.orderNo,
     this.orderType,
     this.tableName,
+    this.customerName,
+    this.customerPhone,
   });
 
   final String id;
@@ -242,6 +244,31 @@ class Bill {
   final String? orderType;
   final String? tableName;
 
+  /// Taken on the order when it was a phone or takeaway job. Usually null for
+  /// a walk-in, which is why search must never require it to match.
+  final String? customerName;
+  final String? customerPhone;
+
+  /// Whether [query] matches anything a person would search a bill by.
+  ///
+  /// Matched against the bill number, the order number, and the customer —
+  /// the four things someone holding a printed slip or answering the phone
+  /// actually has to hand. Case-insensitive, and the caller passes [query]
+  /// already lowercased and trimmed so a long list is not re-normalising it
+  /// per row.
+  bool matches(String query) {
+    if (query.isEmpty) return true;
+    if (billNumber.toLowerCase().contains(query)) return true;
+    // Bare digits are how a bill number is read aloud: "fourteen", not
+    // "BILL/20260902/014". Both the padded and unpadded forms match.
+    if (orderNo != null && '$orderNo'.contains(query)) return true;
+    if (customerName != null && customerName!.toLowerCase().contains(query)) {
+      return true;
+    }
+    if (customerPhone != null && customerPhone!.contains(query)) return true;
+    return false;
+  }
+
   /// Where the order was taken, for the detail header.
   String get placeLabel {
     if (orderType == 'takeaway') return 'Takeaway';
@@ -266,6 +293,8 @@ class Bill {
     orderNo: json['orderNo'] as int?,
     orderType: json['orderType'] as String?,
     tableName: json['tableName'] as String?,
+    customerName: json['customerName'] as String?,
+    customerPhone: json['customerPhone'] as String?,
     subtotal: json['subtotal'] as int,
     discountAmount: json['discountAmount'] as int? ?? 0,
     cgst: json['cgst'] as int? ?? 0,

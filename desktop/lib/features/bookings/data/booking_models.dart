@@ -78,6 +78,17 @@ class Booking {
   String get tableLabel =>
       tables.isEmpty ? 'No table' : tables.map((t) => t.name).join(', ');
 
+  /// Whether [query] matches anything a person would search a booking by.
+  ///
+  /// Name, phone, or table — the three things someone has when the phone rings
+  /// asking about a booking. [query] arrives already trimmed and lowercased.
+  bool matches(String query) {
+    if (query.isEmpty) return true;
+    if (customerName.toLowerCase().contains(query)) return true;
+    if (customerPhone != null && customerPhone!.contains(query)) return true;
+    return tables.any((t) => t.name.toLowerCase().contains(query));
+  }
+
   factory Booking.fromJson(Map<String, dynamic> json) => Booking(
     id: json['id'] as String,
     customerName: json['customerName'] as String,

@@ -5,6 +5,7 @@ import '../../../core/theme/app_spacing.dart';
 import '../../../core/utils/money.dart';
 import '../../../core/widgets/app_loading.dart';
 import '../../../core/widgets/error_banner.dart';
+import '../../../core/widgets/search_field.dart';
 import '../data/bill_models.dart';
 import '../data/bill_repository.dart';
 import 'bill_detail_dialog.dart';
@@ -94,6 +95,8 @@ class BillsScreen extends ConsumerStatefulWidget {
 }
 
 class _BillsScreenState extends ConsumerState<BillsScreen> {
+  String _search = '';
+
   @override
   void initState() {
     super.initState();
@@ -122,6 +125,19 @@ class _BillsScreenState extends ConsumerState<BillsScreen> {
           onCustom: () => _pickCustom(context, ref),
         ),
 
+        Padding(
+          padding: const EdgeInsets.fromLTRB(
+            AppSpacing.lg,
+            AppSpacing.md,
+            AppSpacing.lg,
+            0,
+          ),
+          child: SearchField(
+            hintText: 'Search by bill number, order number, or customer',
+            onChanged: (value) => setState(() => _search = value),
+          ),
+        ),
+
         Expanded(
           child: result.when(
             loading: () => const AppLoading(message: 'Loading bills'),
@@ -134,34 +150,45 @@ class _BillsScreenState extends ConsumerState<BillsScreen> {
                 ),
               ),
             ),
-            data: (list) => list.bills.isEmpty
-                ? _NoBills(range: range)
-                : Column(
-                    children: [
-                      _SummaryBar(summary: list.summary),
-                      Expanded(
-                        child: ListView.builder(
-                          padding: const EdgeInsets.fromLTRB(
-                            AppSpacing.lg,
-                            AppSpacing.md,
-                            AppSpacing.lg,
-                            AppSpacing.xxl,
-                          ),
-                          itemCount: list.bills.length,
-                          itemBuilder: (context, index) => _BillRow(
-                            bill: list.bills[index],
-                            // Only worth showing the date when the range spans
-                            // more than one day.
-                            showDate: !range.isSingleDay,
-                            onTap: () => BillDetailDialog.show(
-                              context,
-                              list.bills[index].id,
+            data: (list) {
+              if (list.bills.isEmpty) return _NoBills(range: range);
+
+              final shown = list.bills
+                  .where((bill) => bill.matches(_search))
+                  .toList();
+
+              return Column(
+                children: [
+                  // The summary stays the range's own totals, not the
+                  // filtered ones: searching is a way to find a bill, not a
+                  // way to restate the day's takings.
+                  _SummaryBar(summary: list.summary),
+                  Expanded(
+                    child: shown.isEmpty
+                        ? NoSearchResults(query: _search, noun: 'bills')
+                        : ListView.builder(
+                            padding: const EdgeInsets.fromLTRB(
+                              AppSpacing.lg,
+                              AppSpacing.md,
+                              AppSpacing.lg,
+                              AppSpacing.xxl,
+                            ),
+                            itemCount: shown.length,
+                            itemBuilder: (context, index) => _BillRow(
+                              bill: shown[index],
+                              // Only worth showing the date when the range
+                              // spans more than one day.
+                              showDate: !range.isSingleDay,
+                              onTap: () => BillDetailDialog.show(
+                                context,
+                                shown[index].id,
+                              ),
                             ),
                           ),
-                        ),
-                      ),
-                    ],
                   ),
+                ],
+              );
+            },
           ),
         ),
       ],

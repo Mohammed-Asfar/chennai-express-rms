@@ -4,6 +4,7 @@ import '../../../core/theme/app_colors.dart';
 import '../../../core/theme/app_spacing.dart';
 import '../../../core/widgets/app_loading.dart';
 import '../../../core/widgets/error_banner.dart';
+import '../../../core/widgets/search_field.dart';
 import '../../billing/presentation/reason_dialog.dart';
 import '../../floor/data/floor_repository.dart';
 import '../../order/presentation/order_screen.dart';
@@ -26,6 +27,8 @@ class BookingsScreen extends ConsumerStatefulWidget {
 }
 
 class _BookingsScreenState extends ConsumerState<BookingsScreen> {
+  String _search = '';
+
   @override
   void initState() {
     super.initState();
@@ -64,6 +67,20 @@ class _BookingsScreenState extends ConsumerState<BookingsScreen> {
           },
           onNew: () => _book(context),
         ),
+
+        Padding(
+          padding: const EdgeInsets.fromLTRB(
+            AppSpacing.lg,
+            AppSpacing.md,
+            AppSpacing.lg,
+            0,
+          ),
+          child: SearchField(
+            hintText: 'Search by name, phone, or table',
+            onChanged: (value) => setState(() => _search = value),
+          ),
+        ),
+
         Expanded(
           child: day.when(
             loading: () => const AppLoading(),
@@ -71,15 +88,27 @@ class _BookingsScreenState extends ConsumerState<BookingsScreen> {
               padding: const EdgeInsets.all(AppSpacing.lg),
               child: ErrorBanner(message: '$error'),
             ),
-            data: (loaded) => loaded.bookings.isEmpty
-                ? _Empty(onNew: () => _book(context))
-                : _BookingList(
-                    bookings: loaded.bookings,
-                    onSeat: (booking) => _seat(context, booking),
-                    onEdit: (booking) => _book(context, existing: booking),
-                    onNoShow: (booking) => _close(context, booking, noShow: true),
-                    onCancel: (booking) => _close(context, booking, noShow: false),
-                  ),
+            data: (loaded) {
+              if (loaded.bookings.isEmpty) {
+                return _Empty(onNew: () => _book(context));
+              }
+
+              final shown = loaded.bookings
+                  .where((booking) => booking.matches(_search))
+                  .toList();
+
+              if (shown.isEmpty) {
+                return NoSearchResults(query: _search, noun: 'bookings');
+              }
+
+              return _BookingList(
+                bookings: shown,
+                onSeat: (booking) => _seat(context, booking),
+                onEdit: (booking) => _book(context, existing: booking),
+                onNoShow: (booking) => _close(context, booking, noShow: true),
+                onCancel: (booking) => _close(context, booking, noShow: false),
+              );
+            },
           ),
         ),
       ],
