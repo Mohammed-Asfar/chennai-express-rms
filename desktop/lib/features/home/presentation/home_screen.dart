@@ -62,7 +62,12 @@ class _HomeScreenState extends ConsumerState<HomeScreen> {
                   // menu would offer an action that has nothing to do with the
                   // screen in front of you.
                   onTakeaway: _selected == 0 ? () => _startTakeaway(context) : null,
-                  onRefresh: _selected == 0 ? () => ref.invalidate(floorProvider) : null,
+                  onRefresh: switch (_selected) {
+                    0 => () => ref.invalidate(floorProvider),
+                    1 => () => ref.invalidate(billListProvider),
+                    4 => () => refreshReports(ref),
+                    _ => null,
+                  },
                 ),
                 Expanded(
                   child: switch (_selected) {

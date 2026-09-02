@@ -86,11 +86,30 @@ final billListProvider = FutureProvider<BillList>((ref) {
 });
 
 /// Bills for a day or a range of days, with what was taken.
-class BillsScreen extends ConsumerWidget {
+class BillsScreen extends ConsumerStatefulWidget {
   const BillsScreen({super.key});
 
   @override
-  Widget build(BuildContext context, WidgetRef ref) {
+  ConsumerState<BillsScreen> createState() => _BillsScreenState();
+}
+
+class _BillsScreenState extends ConsumerState<BillsScreen> {
+  @override
+  void initState() {
+    super.initState();
+    // Refetched every time the screen is opened. The provider caches, so
+    // without this a bill taken since the last visit — the takeaway that was
+    // just settled on the floor — is missing from a list that looks complete.
+    //
+    // After the first frame, because invalidating a provider during a build
+    // that is already reading it is not allowed.
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      if (mounted) ref.invalidate(billListProvider);
+    });
+  }
+
+  @override
+  Widget build(BuildContext context) {
     final range = ref.watch(billRangeProvider);
     final result = ref.watch(billListProvider);
 

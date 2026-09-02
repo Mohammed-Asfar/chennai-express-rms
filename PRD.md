@@ -597,6 +597,7 @@ Scenarios that occur in a working restaurant and their required behaviour.
 | Unpaid bill printed for the table | Prints `*** UNPAID ***` with the total; the bill stays open for payment |
 | Part-paid bill printed | Lists what was taken and prints `BALANCE DUE`, so the table can settle the rest |
 | Bill settled after the billing dialog closed | Taken from the bill's detail in the bills list; status and takings both follow |
+| Bill taken while another screen was open | The bills list and reports refetch when opened, so neither shows a stale figure |
 | Amount edited above what is due | Refused by the backend with the outstanding figure, not silently clamped |
 | Bill raised Monday, paid Wednesday | Sale reports on Monday, cash collection on Wednesday |
 | Wrong payment mode recorded | Reversed with a reason, correct payment added; both rows stay |

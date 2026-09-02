@@ -55,11 +55,41 @@ final reportOutstandingProvider = FutureProvider<OutstandingReport>((ref) {
 /// Every figure here is computed by the backend. Nothing on this screen adds up
 /// a column itself — a total that disagreed with the bills would be worse than
 /// no report at all.
-class ReportsScreen extends ConsumerWidget {
+/// Refetches every part of the report.
+///
+/// One function so the refresh button and the screen's own reload cannot fall
+/// out of step and leave one panel showing older figures than another.
+void refreshReports(WidgetRef ref) {
+  ref.invalidate(reportSummaryProvider);
+  ref.invalidate(reportItemsProvider);
+  ref.invalidate(reportDailyProvider);
+  ref.invalidate(reportOutstandingProvider);
+}
+
+class ReportsScreen extends ConsumerStatefulWidget {
   const ReportsScreen({super.key});
 
   @override
-  Widget build(BuildContext context, WidgetRef ref) {
+  ConsumerState<ReportsScreen> createState() => _ReportsScreenState();
+}
+
+class _ReportsScreenState extends ConsumerState<ReportsScreen> {
+  @override
+  void initState() {
+    super.initState();
+    // Rebuilt every time the screen is opened. These providers cache, and a
+    // day's takings shown from an earlier fetch is a figure someone might act
+    // on — worse than a moment's loading.
+    //
+    // After the first frame, because invalidating a provider during a build
+    // that is already reading it is not allowed.
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      if (mounted) refreshReports(ref);
+    });
+  }
+
+  @override
+  Widget build(BuildContext context) {
     final range = ref.watch(reportRangeProvider);
     final summary = ref.watch(reportSummaryProvider);
 
