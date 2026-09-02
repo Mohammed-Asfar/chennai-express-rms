@@ -386,7 +386,7 @@ class _Content extends ConsumerWidget {
         SnackBar(
           content: Text(
             result.printed
-                ? 'Duplicate printed'
+                ? 'Bill printed'
                 : result.error ?? 'The printer did not respond',
           ),
         ),

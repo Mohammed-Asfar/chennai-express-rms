@@ -313,10 +313,10 @@ a picker. Every "the table's order" assumption in the UI must handle several.
 | FR-B25 | A cancelled bill releases its order back to `open` so it can be corrected and re-billed |
 | FR-B26 | A discount larger than the subtotal is rejected |
 | FR-B27 | Round-off, when enabled, adjusts the total to the nearest rupee and is stored in `round_off` |
-| FR-B28 | A reprint is marked as a **duplicate** on the printout, not passed off as an original |
+| FR-B28 | A reprint is the same document as the original; the repeat is recorded in `reprint_count`, not written on the paper |
 | FR-B29 | An order with no items cannot be billed |
 | FR-B30 | A bill can be generated and printed **without taking payment**, so a table can be shown what it owes |
-| FR-B31 | An unpaid printout is an original, not a duplicate — the duplicate mark tracks prints, not payment |
+| FR-B31 | Nothing on a printed bill distinguishes a reprint — the customer receives the same document either time |
 | FR-B32 | Payment can be taken against an existing bill from the bills list, not only at billing time |
 | FR-B33 | A part payment leaves the bill open, and the balance can be taken later in any mode |
 | FR-B34 | A payment recorded in error can be reversed from the bill's detail, with a reason |
@@ -645,7 +645,7 @@ Scenarios that occur in a working restaurant and their required behaviour.
 | Long restaurant name with the logo off | Wraps at the columns double-width leaves (24 on 80mm, 16 on 58mm), never off the paper |
 | Tagline left empty | Nothing prints — no blank line pushing the bill down |
 | Logo missing or corrupt | Bill prints without it |
-| Bill reprinted | Marked **DUPLICATE** on the printout |
+| Bill reprinted | Prints exactly as the original; `reprint_count` records that it happened |
 
 ### 7.4 Time and reporting
 

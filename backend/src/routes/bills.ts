@@ -330,8 +330,9 @@ export async function billRoutes(app: FastifyInstance): Promise<void> {
   /**
    * Prints (or reprints) a bill.
    *
-   * A reprint is marked DUPLICATE on the paper: two identical bills in a till
-   * drawer at closing time is how a cashier ends up counting a sale twice.
+   * A reprint is the same document as the original, deliberately: the printout
+   * is what the customer is given, and marking it changes what they receive.
+   * `reprint_count` on the bill is where the repeat is recorded.
    */
   app.post<{ Params: { id: string } }>(
     '/bills/:id/print',
@@ -348,13 +349,6 @@ export async function billRoutes(app: FastifyInstance): Promise<void> {
           'No billing printer is set up. Add one in printer settings.',
         )
       }
-
-      const alreadyPrinted = app.db
-        .prepare(
-          `SELECT COUNT(*) AS n FROM print_jobs
-           WHERE ref_id = ? AND type = 'bill' AND status = 'printed'`,
-        )
-        .get(bill.id) as { n: number }
 
       const items = app.db
         .prepare(
@@ -452,7 +446,6 @@ export async function billRoutes(app: FastifyInstance): Promise<void> {
           taxMode: bill.tax_mode === 'exclusive' ? 'exclusive' : 'inclusive',
           payments,
           footer: getSetting(app.db, me.branchId, 'bill_footer'),
-          isReprint: alreadyPrinted.n > 0,
           logo,
         },
         printer.paper_width,
@@ -474,7 +467,6 @@ export async function billRoutes(app: FastifyInstance): Promise<void> {
 
       return {
         ok: job?.status === 'printed',
-        isReprint: alreadyPrinted.n > 0,
         error: job?.status === 'printed' ? null : job?.last_error ?? null,
       }
     },

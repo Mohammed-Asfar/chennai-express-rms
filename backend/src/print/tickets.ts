@@ -54,7 +54,6 @@ export interface BillData {
   taxMode: 'inclusive' | 'exclusive'
   payments: { mode: string; amount: number }[]
   footer?: string | null
-  isReprint?: boolean
   /** Pre-rasterised at upload. Absent when none is set or it is switched off. */
   logo?: LogoRaster | null
 }
@@ -153,11 +152,6 @@ export function renderBill(data: BillData, paper: PaperWidth = '80mm'): Buffer {
   if (data.branchPhone) b.line(`Ph: ${data.branchPhone}`)
   if (data.gstin) b.line(`GSTIN: ${data.gstin}`)
   b.line()
-
-  if (data.isReprint) {
-    // A duplicate must never be mistakable for the original.
-    b.bold(true).line('** DUPLICATE **').bold(false)
-  }
 
   b.align('left').rule()
   b.columns(`Bill No: ${data.billNumber}`, dateOf(data.printedAt))

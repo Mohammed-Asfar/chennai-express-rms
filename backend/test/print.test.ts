@@ -253,11 +253,12 @@ test('inclusive mode says the price already contains GST', () => {
   assertEqual(text.includes('includes GST'), true)
 })
 
-test('a reprint is stamped DUPLICATE', () => {
-  // Two identical bills in the drawer is a sale counted twice at closing.
-  const text = readable(renderBill({ ...billBase, isReprint: true }))
-  assertEqual(text.includes('DUPLICATE'), true)
-  assertEqual(readable(renderBill(billBase)).includes('DUPLICATE'), false)
+test('a bill carries no reprint marking', () => {
+  // The printout is what the customer is handed, and a remark on it changes
+  // what they receive. Repeat prints are recorded on the bill's reprint_count,
+  // not written on the paper.
+  const text = readable(renderBill(billBase))
+  assertEqual(text.includes('DUPLICATE'), false)
 })
 
 test('unit price is shown when the quantity is not one', () => {
@@ -528,9 +529,7 @@ test('a part-paid bill prints the balance, not UNPAID', () => {
   assertEqual(text.includes('*** PAID ***'), false, 'but not all of it')
 })
 
-test('an unpaid bill is not marked a duplicate', () => {
-  // The first copy is the original whether or not it has been paid. Stamping
-  // DUPLICATE on it would make a legitimate bill look like a reprint.
-  const text = readable(renderBill({ ...billBase, payments: [], isReprint: false }))
+test('an unpaid bill carries no marking either', () => {
+  const text = readable(renderBill({ ...billBase, payments: [] }))
   assertEqual(text.includes('DUPLICATE'), false)
 })

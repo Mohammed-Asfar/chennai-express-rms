@@ -106,12 +106,10 @@ class PrintOutcome {
   const PrintOutcome({
     required this.printed,
     this.error,
-    this.isReprint = false,
   });
 
   final bool printed;
   final String? error;
-  final bool isReprint;
 }
 
 /// A printer found by scanning, not yet configured.
@@ -313,7 +311,6 @@ class PrinterRepository {
     return PrintOutcome(
       printed: json['ok'] as bool? ?? false,
       error: json['error'] as String?,
-      isReprint: json['isReprint'] as bool? ?? false,
     );
   }
 

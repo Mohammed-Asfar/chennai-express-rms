@@ -213,9 +213,7 @@ class _BillingDialogState extends ConsumerState<BillingDialog> {
         );
       } else if (!silent) {
         messenger.showSnackBar(
-          SnackBar(
-            content: Text(result.isReprint ? 'Duplicate printed' : 'Bill printed'),
-          ),
+          const SnackBar(content: Text('Bill printed')),
         );
       }
     } on ApiException catch (error) {
@@ -712,8 +710,7 @@ class _PaymentSectionState extends State<_PaymentSection> {
           Row(
             children: [
               // The bill printed automatically on settling. This is for the
-              // times it did not, or the customer wants another copy — a
-              // reprint is stamped DUPLICATE on the paper.
+              // times it did not, or the customer wants another copy.
               Expanded(
                 child: SizedBox(
                   height: AppSpacing.primaryActionHeight,
