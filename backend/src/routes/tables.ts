@@ -306,14 +306,36 @@ export async function tableRoutes(app: FastifyInstance): Promise<void> {
         )
       }
 
-      // FR-V12: a booking holding this table loses it, rather than pointing at
-      // a table that no longer exists.
+      // FR-V12: the tables a live booking loses, named in the response so the
+      // floor can be told which bookings now need another table found for them.
+      const bookings = app.db
+        .prepare(
+          `SELECT r.customer_name, r.reserved_at
+           FROM reservations r
+           JOIN reservation_tables rt ON rt.reservation_id = r.id
+           WHERE rt.table_id = ? AND r.status = 'booked' AND r.deleted_at IS NULL
+           ORDER BY r.reserved_at`,
+        )
+        .all(table.id) as { customer_name: string; reserved_at: string }[]
+
+      // A booking holding this table loses it, rather than pointing at a table
+      // that no longer exists.
       app.db.transaction(() => {
         app.db.prepare('DELETE FROM reservation_tables WHERE table_id = ?').run(table.id)
         softDelete(app.db, 'tables', table.id)
       })()
 
-      return { ok: true }
+      return {
+        ok: true,
+        warnings: bookings.map(
+          (b) =>
+            `${b.customer_name}'s booking at ${new Date(b.reserved_at).toLocaleTimeString('en-IN', {
+              hour: '2-digit',
+              minute: '2-digit',
+              hour12: true,
+            })} no longer has this table.`,
+        ),
+      }
     },
   )
 

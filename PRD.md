@@ -251,8 +251,35 @@ sales on the previous trading day, with the cutoff configured in settings.
 will work around a system that refuses to seat a waiting customer. The warning
 informs; it does not obstruct.
 
-**v1 covers today only.** Advance booking for future dates is out of scope — the
-schema supports it (`reserved_at` is a full timestamp), but there is no calendar UI.
+**Warnings are returned beside the saved record, never instead of it.** Creating a
+booking, seating a walk-in on a booked table, and deleting a booked table all
+succeed and return a `warnings` array. Nothing on this screen refuses an action a
+staff member has decided on.
+
+**A booking is filed on the trading day of its time, not the day it was taken.** A
+booking entered at 11 PM for 1 AM belongs to the same trading day as the rest of
+that night's service, under the branch's `business_day_start` cutoff.
+
+**Seating creates the order inside the same transaction.** A booking that becomes
+`seated` always has an order, and the order always has a booking pointing at it —
+a crash between two separate calls could leave neither true.
+
+**One booking becomes one order, on one table.** A party across three tables still
+gets a single order and a single bill; `POST /reservations/:id/seat` takes the
+table they actually sat at. v1 has no table merge. The tables not taken drop back
+to `free` as soon as the booking stops being `booked`.
+
+**Overdue is computed by the backend** (`isOverdue`, 20 minutes past the booked
+time). A till left open overnight must not decide a booking is on time because its
+own clock says so.
+
+**Closing a booking keeps its table links.** `no_show` and `cancelled` are statuses,
+not deletions — FR-V9 — and the tables free up because `reserved` counts only
+tables held by a `booked` reservation.
+
+**Day navigation, not a calendar.** The bookings screen steps a day at a time and
+defaults to today. `reserved_at` is a full timestamp, so a booking can be taken for
+any date the day bar reaches; there is no month view.
 
 ### 6.4 Orders
 
@@ -632,9 +659,14 @@ Scenarios that occur in a working restaurant and their required behaviour.
 | Item removed after KOT printed | Order flagged so the kitchen can be told |
 | Bill settled, then a mistake found | Admin voids the bill with a reason; order reopens for correction |
 | Two terminals edit the same order | `version` column rejects the stale write rather than silently overwriting |
-| Table deleted while a booking holds it | Removed from the booking, with a warning first |
+| Table deleted while a booking holds it | Removed from the booking, with a warning naming whose booking lost it |
 | Order opened, nothing added, screen left | Discarded on the way out; the table frees itself |
 | Table stranded seated by a crash | "Free this table" on its card discards the empty orders holding it |
+| Walk-in seated on a booked table | Seated, with a warning naming the booking. Never refused |
+| Booking whose every table was deleted | Refused at seating with an explanation, rather than failing on an empty list |
+| Booking seated twice | The second attempt is refused; one booking never opens two orders |
+| Cancelled booking on a table | Stops holding it and stops warning about it, but stays in the day's record |
+| Booking edited after it was seated | Refused — it has become an order, and that is what changes now |
 
 ### 7.3 Printing
 
@@ -690,7 +722,7 @@ Accepted deliberately, listed so they are not mistaken for oversights:
 | One bill per order | Splitting a bill between guests means creating separate orders up front |
 | No table merge | A large party across three tables needs three orders, or one order on one table |
 | Push-only sync | Menu edits made in the cloud do not reach the branch |
-| Reservations cover today only | No advance booking calendar |
+| Bookings step a day at a time | No month calendar; a distant date takes many taps |
 | No inventory | Selling an item with no stock is not prevented |
 | Updates are per-machine | Each billing PC updates itself; there is no central push |
 

@@ -169,7 +169,11 @@ export async function orderRoutes(app: FastifyInstance): Promise<void> {
 
     const created = findOrder(app, me.branchId, id)
     reply.status(201)
-    return { order: present(created, [], getSetting(app.db, me.branchId, 'tax_mode')) }
+    return {
+      order: present(created, [], getSetting(app.db, me.branchId, 'tax_mode')),
+      // FR-V7: reported after the order is created, never instead of creating it.
+      warnings: body.tableId ? bookingWarnings(app, me.branchId, body.tableId) : [],
+    }
   })
 
   app.patch<{ Params: { id: string } }>(
@@ -626,6 +630,35 @@ function assertTableUsable(app: FastifyInstance, branchId: string, tableId: stri
     throw new AppError(409, 'TABLE_INACTIVE', 'That table is not in service')
   }
   // A table already holding an order is fine — two parties may share it.
+}
+
+/**
+ * FR-V7: a booking on this table informs the person seating a walk-in; it never
+ * refuses them.
+ *
+ * Guests run late and bookings get cancelled by phone. Staff will work around a
+ * system that will not seat a customer standing in front of them, and a system
+ * worked around stops being trusted for the refusals that do matter.
+ */
+function bookingWarnings(app: FastifyInstance, branchId: string, tableId: string): string[] {
+  const rows = app.db
+    .prepare(
+      `SELECT r.customer_name, r.party_size, r.reserved_at
+       FROM reservations r
+       JOIN reservation_tables rt ON rt.reservation_id = r.id
+       WHERE rt.table_id = ? AND r.branch_id = ? AND r.status = 'booked' AND r.deleted_at IS NULL
+       ORDER BY r.reserved_at`,
+    )
+    .all(tableId, branchId) as { customer_name: string; party_size: number; reserved_at: string }[]
+
+  return rows.map((row) => {
+    const at = new Date(row.reserved_at).toLocaleTimeString('en-IN', {
+      hour: '2-digit',
+      minute: '2-digit',
+      hour12: true,
+    })
+    return `This table is booked for ${row.customer_name} (${row.party_size}) at ${at}.`
+  })
 }
 
 interface VariantJoin {

@@ -9,6 +9,8 @@ import '../../auth/presentation/change_password_screen.dart';
 import '../../floor/data/floor_repository.dart';
 import '../../floor/presentation/floor_screen.dart';
 import '../../billing/presentation/bills_screen.dart';
+import '../../bookings/data/booking_repository.dart';
+import '../../bookings/presentation/bookings_screen.dart';
 import '../../menu/presentation/menu_admin_screen.dart';
 import '../../settings/presentation/settings_screen.dart';
 import '../../order/data/order_repository.dart';
@@ -37,7 +39,7 @@ class _HomeScreenState extends ConsumerState<HomeScreen> {
     SidebarItem(icon: Icons.grid_view_rounded, label: 'Floor'),
     SidebarItem(icon: Icons.receipt_long_outlined, label: 'Bills'),
     SidebarItem(icon: Icons.restaurant_menu, label: 'Menu'),
-    SidebarItem(icon: Icons.event_seat_outlined, label: 'Bookings', enabled: false),
+    SidebarItem(icon: Icons.event_seat_outlined, label: 'Bookings'),
     SidebarItem(icon: Icons.insights_outlined, label: 'Reports'),
     SidebarItem(icon: Icons.tune, label: 'Settings'),
   ];
@@ -65,6 +67,7 @@ class _HomeScreenState extends ConsumerState<HomeScreen> {
                   onRefresh: switch (_selected) {
                     0 => () => ref.invalidate(floorProvider),
                     1 => () => ref.invalidate(billListProvider),
+                    3 => () => ref.invalidate(bookingsProvider),
                     4 => () => refreshReports(ref),
                     _ => null,
                   },
@@ -74,6 +77,7 @@ class _HomeScreenState extends ConsumerState<HomeScreen> {
                     0 => const FloorScreen(),
                     1 => const BillsScreen(),
                     2 => const MenuAdminScreen(),
+                    3 => const BookingsScreen(),
                     4 => const ReportsScreen(),
                     5 => const SettingsScreen(),
                     _ => const _ComingSoon(),
