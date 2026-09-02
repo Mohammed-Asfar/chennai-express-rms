@@ -102,6 +102,42 @@ void main() {
       }
     });
 
+    testWidgets('an enlarged line does not widen the paper', (tester) async {
+      // The paper stayed 48 columns while the name was drawn in a 3x face, so
+      // the box grew to fit it and the whole receipt stretched — the total's
+      // amount ended up far out to the right of everything else.
+      await pump(tester);
+
+      final rule = tester.getRect(find.text('=' * 48).first);
+      final name = tester.getRect(find.text('CHENNAI EXPRESS'));
+
+      // 48 columns of rule is the paper's full width. The 15-character name
+      // must occupy less than that, as it does on paper.
+      expect(
+        name.width,
+        lessThan(rule.width),
+        reason: 'name ${name.width} vs paper ${rule.width}',
+      );
+    });
+
+    testWidgets('the amount stays in the column the rules mark out', (
+      tester,
+    ) async {
+      // The total is right-aligned within 48 columns. If the box is wider than
+      // the paper, the amount drifts past the rules and the preview stops
+      // showing where it really prints.
+      await pump(tester);
+
+      final rule = tester.getRect(find.text('=' * 48).first);
+      final total = tester.getRect(find.textContaining('TOTAL'));
+
+      expect(
+        total.right,
+        lessThanOrEqualTo(rule.right + 1),
+        reason: 'total ends at ${total.right}, rule at ${rule.right}',
+      );
+    });
+
     testWidgets('a blank line does not open a large gap', (tester) async {
       // Blank lines decode at 1x. If one ever inherited the enlarged size it
       // would push the whole lower half of the bill down.

@@ -85,33 +85,6 @@ class _Paper extends StatelessWidget {
     return painter.width;
   }
 
-  /// How wide the paper box must be to hold every line without clipping.
-  ///
-  /// Normally the full column count, but an enlarged line is drawn in a bigger
-  /// face and can be wider than that. Measuring the widest one is what stops a
-  /// name being cut off on screen when it prints perfectly well — the failure
-  /// the box width exists to catch.
-  double _widestLine(BuildContext context, double columnWidth) {
-    var widest = columnWidth * bill.width;
-
-    for (final line in bill.lines) {
-      if (line.heightScale <= 1 || line.text.isEmpty) continue;
-      final painter = TextPainter(
-        text: TextSpan(
-          text: line.text,
-          style: AppTextStyles.receipt.copyWith(
-            fontSize: AppTextStyles.receipt.fontSize! * line.heightScale,
-            fontWeight: FontWeight.w700,
-          ),
-        ),
-        textDirection: TextDirection.ltr,
-        textScaler: MediaQuery.textScalerOf(context),
-      )..layout();
-      if (painter.width > widest) widest = painter.width;
-    }
-    return widest;
-  }
-
   @override
   Widget build(BuildContext context) {
     final theme = Theme.of(context);
@@ -121,12 +94,13 @@ class _Paper extends StatelessWidget {
       children: [
         Center(
           child: Container(
-            // Sized from measured text rather than a guessed multiplier: too
-            // narrow and the longest line is clipped, which is how an amount
-            // goes missing from a bill that prints correctly.
+            // Exactly the paper's column count, measured from a real character
+            // rather than a guessed multiplier. Enlarged lines are squeezed
+            // back to their true width, so none of them widens this box —
+            // a preview wider than the paper would misrepresent every margin
+            // on the bill.
             constraints: BoxConstraints(
-              maxWidth:
-                  _widestLine(context, _characterWidth(context)) +
+              maxWidth: _characterWidth(context) * bill.width +
                   AppSpacing.lg * 2,
             ),
             decoration: BoxDecoration(
@@ -195,19 +169,27 @@ class _Line extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    // Enlarged by font size, which lays out properly.
+    // Taller, but never wider.
     //
-    // A transform would not: it paints outside the space it reserves, so a
-    // taller line bleeds over the rules above and below it. The paper box is
-    // measured against the largest line, so a bigger face cannot clip.
+    // The printer's height command stretches a glyph vertically while it still
+    // occupies one column. A larger font grows both ways, so the size is put
+    // back horizontally: the line ends up tall and the same width it prints,
+    // which is what keeps the paper box honest at 48 columns.
     final scale = line.heightScale;
     final style = AppTextStyles.receipt.copyWith(
       fontWeight: line.bold || line.large ? FontWeight.w700 : FontWeight.w400,
       fontSize: AppTextStyles.receipt.fontSize! * scale,
       // Enlarged lines otherwise inherit leading proportional to their size,
       // which opens a gap the printer does not leave.
-      height: scale > 1 ? 1.1 : null,
+      height: scale > 1 ? 1.05 : null,
       color: AppColors.ink,
+    );
+
+    final text = Text(
+      // A blank line still occupies its height on paper.
+      line.text.isEmpty ? ' ' : line.text,
+      style: style,
+      softWrap: false,
     );
 
     return Align(
@@ -216,12 +198,29 @@ class _Line extends StatelessWidget {
         'right' => Alignment.centerRight,
         _ => Alignment.centerLeft,
       },
-      child: Text(
-        // A blank line still occupies its height on paper.
-        line.text.isEmpty ? ' ' : line.text,
-        style: style,
-        softWrap: false,
-      ),
+      child: scale > 1
+          // Squeezed back to the width it really prints. The SizedBox is what
+          // makes the row measure that width too — a bare transform would
+          // reserve the unsqueezed size and widen the paper around it.
+          ? SizedBox(
+              width: _paintedWidth(context, style) / scale,
+              child: Transform(
+                transform: Matrix4.diagonal3Values(1 / scale, 1, 1),
+                alignment: Alignment.centerLeft,
+                child: text,
+              ),
+            )
+          : text,
     );
+  }
+
+  /// How wide this line is before it is squeezed back.
+  double _paintedWidth(BuildContext context, TextStyle style) {
+    final painter = TextPainter(
+      text: TextSpan(text: line.text.isEmpty ? ' ' : line.text, style: style),
+      textDirection: TextDirection.ltr,
+      textScaler: MediaQuery.textScalerOf(context),
+    )..layout();
+    return painter.width;
   }
 }
