@@ -406,7 +406,7 @@ a negative total; it is rejected at validation.
 | FR-P7 | A bill prints restaurant details, GSTIN, items with portion, CGST/SGST split by rate, and totals |
 | FR-P8 | The printed bill lists each payment taken and any balance still due |
 | FR-P9 | **A print failure never blocks an order or a bill.** The record saves; the job queues. |
-| FR-P10 | Failed jobs are visible with a Retry action |
+| FR-P10 | Queued and failed jobs are visible on the Printers screen, with Retry and Cancel |
 | FR-P11 | Admin can send a test print to any configured printer |
 | FR-P12 | Paper width of 58mm and 80mm are both supported |
 | FR-P13 | Admin can upload a branch logo, printed at the top of the bill |
@@ -420,6 +420,9 @@ a negative total; it is rejected at validation.
 | FR-P21 | Long item names wrap or truncate cleanly at 58mm and 80mm — never garbled |
 | FR-P22 | If no printer matches a job's role, the job queues as failed with a clear message rather than being silently dropped |
 | FR-P23 | Retrying an already-printed job is prevented, to avoid double KOTs |
+| FR-P24 | A queued or failed job can be cancelled, so a ticket dealt with by hand leaves the queue |
+| FR-P25 | Cancelling keeps the job row — the queue shows outstanding work, not history |
+| FR-P26 | An already-printed job cannot be cancelled |
 
 **FR-P17 matters in practice.** A table orders drinks, then food twenty minutes later.
 Reprinting the whole ticket would make the kitchen cook the drinks again. Only the new
@@ -607,6 +610,10 @@ Scenarios that occur in a working restaurant and their required behaviour.
 | No printer matches a job's role | Job queues as failed with a clear message — never silently dropped |
 | Items added after a KOT already printed | Only the new lines print, marked as an additional KOT |
 | Retry pressed on an already-printed job | Prevented — avoids duplicate KOTs reaching the kitchen |
+| Cancel pressed on an already-printed job | Prevented — the paper is already out; recording it cancelled would be false |
+| Job cancelled while a send is in flight | The send may not overwrite the cancellation; a job settles only while still pending |
+| Cancel pressed twice | Second press succeeds quietly — a slow connection must not produce an error to interpret |
+| Cancelled job and the retry sweep | Never picked up again; `drainPending` takes only pending jobs |
 | Long item name on 58mm paper | Wraps or truncates cleanly; never garbled |
 | Logo missing or corrupt | Bill prints without it |
 | Bill reprinted | Marked **DUPLICATE** on the printout |

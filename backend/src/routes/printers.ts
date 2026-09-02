@@ -271,26 +271,37 @@ export async function printerRoutes(app: FastifyInstance): Promise<void> {
 
   // --- the job queue ---
 
-  app.get<{ Querystring: { status?: string } }>(
+  app.get<{ Querystring: { status?: string; active?: string } }>(
     '/print-jobs',
     { preHandler: requireAuth },
     async (request) => {
       const me = currentUser(request)
       const status = request.query.status
 
+      // The queue panel asks for `active`: everything still waiting or stuck.
+      // Printed and cancelled jobs are settled — listing them would mean the
+      // panel is never empty, and a real failure gets lost in the history.
+      const activeOnly = request.query.active === 'true'
+
+      const filter = status
+        ? ' AND j.status = ?'
+        : activeOnly
+          ? " AND j.status IN ('pending', 'failed')"
+          : ''
+
       const rows = app.db
         .prepare(
           `SELECT j.id, j.type, j.status, j.attempts, j.last_error, j.created_at,
-                  j.printed_at, p.name AS printer_name
+                  j.printed_at, j.printer_id, p.name AS printer_name
            FROM print_jobs j
            LEFT JOIN printers p ON p.id = j.printer_id
-           WHERE j.branch_id = ?${status ? ' AND j.status = ?' : ''}
+           WHERE j.branch_id = ?${filter}
            ORDER BY j.created_at DESC
            LIMIT 100`,
         )
         .all(...(status ? [me.branchId, status] : [me.branchId])) as Record<string, unknown>[]
 
-      return { jobs: rows }
+      return { jobs: rows.map(toPublicJob) }
     },
   )
 
@@ -300,10 +311,13 @@ export async function printerRoutes(app: FastifyInstance): Promise<void> {
     { preHandler: requireAuth },
     async (request) => {
       const me = currentUser(request)
-      const job = app.db
-        .prepare('SELECT id FROM print_jobs WHERE id = ? AND branch_id = ?')
-        .get(request.params.id, me.branchId) as { id: string } | undefined
-      if (!job) throw new AppError(404, 'JOB_NOT_FOUND', 'Print job not found')
+      const job = findJobOrThrow(app, me.branchId, request.params.id)
+
+      // Reprinting something that already came out would put a second ticket in
+      // the kitchen, and a second copy of a bill in a customer's hand.
+      if (job.status === 'printed') {
+        throw new AppError(409, 'JOB_ALREADY_PRINTED', 'That job has already printed')
+      }
 
       // Reset to pending so runJob will pick it up; attempts is left alone as a
       // record of how much trouble this ticket has been.
@@ -316,6 +330,61 @@ export async function printerRoutes(app: FastifyInstance): Promise<void> {
     },
   )
 
+  /**
+   * Cancels a queued or failed job.
+   *
+   * The row is kept, not deleted: what was sent to a printer and what happened
+   * to it is a record worth having when someone asks why a ticket never
+   * reached the kitchen.
+   */
+  app.post<{ Params: { id: string } }>(
+    '/print-jobs/:id/cancel',
+    { preHandler: requireAuth },
+    async (request) => {
+      const me = currentUser(request)
+      const job = findJobOrThrow(app, me.branchId, request.params.id)
+
+      // Paper is already out of the printer. Cancelling would claim otherwise.
+      if (job.status === 'printed') {
+        throw new AppError(409, 'JOB_ALREADY_PRINTED', 'That job has already printed')
+      }
+      if (job.status === 'cancelled') return { ok: true }
+
+      app.db
+        .prepare("UPDATE print_jobs SET status = 'cancelled', updated_at = ? WHERE id = ?")
+        .run(new Date().toISOString(), job.id)
+
+      return { ok: true }
+    },
+  )
+}
+
+interface JobStatusRow {
+  id: string
+  status: string
+}
+
+function findJobOrThrow(app: FastifyInstance, branchId: string, id: string): JobStatusRow {
+  const job = app.db
+    .prepare('SELECT id, status FROM print_jobs WHERE id = ? AND branch_id = ?')
+    .get(id, branchId) as JobStatusRow | undefined
+  if (!job) throw new AppError(404, 'JOB_NOT_FOUND', 'Print job not found')
+  return job
+}
+
+/** Job rows go out camelCase like everything else the client consumes. */
+function toPublicJob(row: Record<string, unknown>) {
+  return {
+    id: row.id as string,
+    type: row.type as string,
+    status: row.status as string,
+    attempts: row.attempts as number,
+    lastError: (row.last_error as string | null) ?? null,
+    createdAt: row.created_at as string,
+    printedAt: (row.printed_at as string | null) ?? null,
+    printerId: (row.printer_id as string | null) ?? null,
+    printerName: (row.printer_name as string | null) ?? null,
+  }
 }
 
 /**

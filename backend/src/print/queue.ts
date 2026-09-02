@@ -123,10 +123,13 @@ export async function runJob(db: Db, jobId: string): Promise<boolean> {
 
   try {
     await send(printer.connection, printer.address, Buffer.from(job.payload, 'base64'))
+    // Only settle a job that is still pending. Someone may have cancelled it
+    // while this send was in flight, and overwriting that would revive a job
+    // they have already dealt with by hand.
     db.prepare(
       `UPDATE print_jobs SET status = 'printed', attempts = attempts + 1,
                              printed_at = ?, updated_at = ?, last_error = NULL
-       WHERE id = ?`,
+       WHERE id = ? AND status = 'pending'`,
     ).run(now, now, job.id)
     return true
   } catch (error) {
@@ -139,7 +142,7 @@ export async function runJob(db: Db, jobId: string): Promise<boolean> {
 
     db.prepare(
       `UPDATE print_jobs SET status = ?, attempts = ?, last_error = ?, updated_at = ?
-       WHERE id = ?`,
+       WHERE id = ? AND status = 'pending'`,
     ).run(status, attempts, message, now, job.id)
     return false
   }

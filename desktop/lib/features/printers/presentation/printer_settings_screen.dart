@@ -6,6 +6,7 @@ import '../../../core/theme/app_spacing.dart';
 import '../../../core/widgets/app_loading.dart';
 import '../../../core/widgets/error_banner.dart';
 import '../data/printer_repository.dart';
+import 'print_queue_panel.dart';
 import 'printer_dialog.dart';
 import 'printer_scan_dialog.dart';
 
@@ -38,62 +39,91 @@ class PrinterSettingsScreen extends ConsumerWidget {
             ),
           ),
         ),
-        data: (list) => ListView(
-          padding: const EdgeInsets.fromLTRB(
-            AppSpacing.lg,
-            AppSpacing.lg,
-            AppSpacing.lg,
-            AppSpacing.xxl,
-          ),
+        data: (list) => Row(
+          crossAxisAlignment: CrossAxisAlignment.stretch,
           children: [
-            Row(
-              children: [
-                Expanded(
-                  child: Text(
-                    'Thermal printers on USB or the network. One printer set to '
-                    '"Both" covers a counter with a single machine.',
-                    style: theme.textTheme.bodySmall,
+            Expanded(
+              child: ListView(
+                padding: const EdgeInsets.fromLTRB(
+                  AppSpacing.lg,
+                  AppSpacing.lg,
+                  AppSpacing.lg,
+                  AppSpacing.xxl,
+                ),
+                children: [
+                  Row(
+                    children: [
+                      Expanded(
+                        child: Text(
+                          'Thermal printers on USB or the network. One printer '
+                          'set to "Both" covers a counter with a single machine.',
+                          style: theme.textTheme.bodySmall,
+                        ),
+                      ),
+                      const SizedBox(width: AppSpacing.md),
+                      // Scanning is the path most people should take, so it sits
+                      // beside the manual option rather than behind it.
+                      OutlinedButton.icon(
+                        onPressed: () => _scan(context, ref),
+                        icon: const Icon(Icons.wifi_find_outlined, size: 18),
+                        label: const Text('Scan'),
+                      ),
+                      const SizedBox(width: AppSpacing.sm),
+                      ElevatedButton.icon(
+                        onPressed: () => _add(context, ref),
+                        icon: const Icon(Icons.add, size: 18),
+                        label: const Text('Add manually'),
+                      ),
+                    ],
                   ),
-                ),
-                const SizedBox(width: AppSpacing.md),
-                // Scanning is the path most people should take, so it sits beside
-                // the manual option rather than behind it.
-                OutlinedButton.icon(
-                  onPressed: () => _scan(context, ref),
-                  icon: const Icon(Icons.wifi_find_outlined, size: 18),
-                  label: const Text('Scan'),
-                ),
-                const SizedBox(width: AppSpacing.sm),
-                ElevatedButton.icon(
-                  onPressed: () => _add(context, ref),
-                  icon: const Icon(Icons.add, size: 18),
-                  label: const Text('Add manually'),
-                ),
-              ],
-            ),
-            const SizedBox(height: AppSpacing.lg),
+                  const SizedBox(height: AppSpacing.lg),
 
-            if (list.isEmpty)
-              _NoPrinters(
-                onScan: () => _scan(context, ref),
-                onAdd: () => _add(context, ref),
-              )
-            else
-              for (final printer in list) ...[
-                _PrinterCard(
-                  printer: printer,
-                  onEdit: () => _edit(context, ref, printer),
-                  onTest: () => _test(context, ref, printer),
-                  onToggle: (active) => _toggle(context, ref, printer, active),
-                  onDelete: () => _delete(context, ref, printer),
-                ),
-                const SizedBox(height: AppSpacing.sm),
-              ],
+                  if (list.isEmpty)
+                    _NoPrinters(
+                      onScan: () => _scan(context, ref),
+                      onAdd: () => _add(context, ref),
+                    )
+                  else
+                    for (final printer in list) ...[
+                      _PrinterCard(
+                        printer: printer,
+                        onEdit: () => _edit(context, ref, printer),
+                        onTest: () => _test(context, ref, printer),
+                        onToggle: (active) =>
+                            _toggle(context, ref, printer, active),
+                        onDelete: () => _delete(context, ref, printer),
+                      ),
+                      const SizedBox(height: AppSpacing.sm),
+                    ],
+                ],
+              ),
+            ),
+
+            // The queue sits beside the printers rather than under them: a
+            // stuck ticket is time-sensitive, and it must be visible without
+            // scrolling past the setup.
+            Container(
+              width: _queueWidth,
+              decoration: const BoxDecoration(
+                color: AppColors.surfaceSunken,
+                border: Border(left: BorderSide(color: AppColors.border)),
+              ),
+              padding: const EdgeInsets.fromLTRB(
+                AppSpacing.lg,
+                AppSpacing.lg,
+                AppSpacing.lg,
+                AppSpacing.lg,
+              ),
+              child: const PrintQueuePanel(),
+            ),
           ],
         ),
       ),
     );
   }
+
+  /// Wide enough for a printer name and an error on two lines.
+  static const double _queueWidth = 340;
 
   /// Scans, then opens the editor prefilled with whatever was picked.
   Future<void> _scan(BuildContext context, WidgetRef ref) async {
@@ -141,6 +171,8 @@ class PrinterSettingsScreen extends ConsumerWidget {
 
     try {
       final result = await ref.read(printerRepositoryProvider).test(printer.id);
+      // A test that failed is now sitting in the queue, so it must show there.
+      ref.invalidate(printQueueProvider);
       messenger.hideCurrentSnackBar();
       messenger.showSnackBar(
         SnackBar(

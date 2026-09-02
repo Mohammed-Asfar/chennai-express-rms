@@ -590,12 +590,21 @@ The queue that keeps printer failures from blocking sales.
 | `type` | `enum` | `bill`, `kot`, `kot_additional`, `kot_cancel`, `test` |
 | `ref_id` | `text` | `order_id` or `bill_id` |
 | `payload` | `json` | Rendered content — replayable without re-reading the order |
-| `status` | `enum` | `pending`, `printed`, `failed` |
+| `status` | `enum` | `pending`, `printed`, `failed`, `cancelled` |
 | `attempts` | `int` | |
 | `last_error` | `text` | |
 | `printed_at` | `timestamp` | |
 
 **Branch-local — never synced.** Print state is meaningless in the cloud.
+
+**`cancelled` is set by hand, never by the queue.** A job that exhausted its five
+attempts is `failed` and stays visible; cancelling is someone saying they have
+dealt with it another way. The row is kept either way — what was sent to a printer
+and what became of it is worth having when someone asks why a ticket never reached
+the kitchen.
+
+**A `printed` job can be neither retried nor cancelled.** Both return 409. Paper is
+already out of the printer, and a second copy means a dish cooked twice.
 
 **`payload` is stored rendered** so a retry reproduces the original ticket exactly,
 even if the order was edited after the first attempt failed.
@@ -708,8 +717,9 @@ CREATE INDEX idx_bills_unpaid       ON bills(branch_id, payment_status)
 CREATE INDEX idx_payments_bill      ON payments(bill_id) WHERE reversed_at IS NULL;
 CREATE INDEX idx_payments_date      ON payments(branch_id, business_date, mode);
 
--- print queue
-CREATE INDEX idx_print_jobs_pending ON print_jobs(status) WHERE status != 'printed';
+-- print queue: settled jobs are excluded, so the index covers only work outstanding
+CREATE INDEX idx_print_jobs_pending ON print_jobs(status)
+  WHERE status NOT IN ('printed', 'cancelled');
 ```
 
 ---
