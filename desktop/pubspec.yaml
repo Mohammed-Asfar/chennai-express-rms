@@ -26,9 +26,22 @@ dev_dependencies:
   flutter_test:
     sdk: flutter
   flutter_lints: ^5.0.0
+  flutter_launcher_icons: ^0.14.4
 
 flutter:
   uses-material-design: true
 
   assets:
     - assets/logo.png
+
+# The Windows title bar and taskbar icon. Regenerate with:
+#   dart run flutter_launcher_icons
+#
+# The source is squared and padded because Windows does not letterbox for you —
+# feeding it the 783x803 artwork directly would stretch the mark.
+flutter_launcher_icons:
+  windows:
+    generate: true
+    image_path: "assets/logo_square.png"
+    # 256 is the largest Windows uses, and what the .ico is built down from.
+    icon_size: 256
