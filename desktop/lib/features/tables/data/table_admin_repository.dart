@@ -1,0 +1,85 @@
+import 'package:flutter_riverpod/flutter_riverpod.dart';
+import '../../../core/api/api_client.dart';
+import '../../../core/api/providers.dart';
+import 'table_admin_models.dart';
+
+class TableAdminRepository {
+  TableAdminRepository(this._api);
+
+  final ApiClient _api;
+
+  // --- sections ---
+
+  Future<List<AdminSection>> sections() async {
+    final json = await _api.get('/sections');
+    return ((json['sections'] as List<dynamic>?) ?? const [])
+        .map((s) => AdminSection.fromJson(s as Map<String, dynamic>))
+        .toList();
+  }
+
+  Future<void> createSection(String name) async {
+    await _api.post('/sections', {'name': name});
+  }
+
+  Future<void> renameSection(String id, String name) async {
+    await _api.patch('/sections/$id', {'name': name});
+  }
+
+  /// Fails with SECTION_NOT_EMPTY, or LAST_SECTION when it is the only one.
+  Future<void> deleteSection(String id) async {
+    await _api.delete('/sections/$id');
+  }
+
+  // --- tables ---
+
+  Future<List<AdminTable>> tables() async {
+    final json = await _api.get('/tables');
+    return ((json['tables'] as List<dynamic>?) ?? const [])
+        .map((t) => AdminTable.fromJson(t as Map<String, dynamic>))
+        .toList();
+  }
+
+  Future<void> createTable({
+    required String sectionId,
+    required String name,
+    required int seats,
+  }) async {
+    await _api.post('/tables', {
+      'sectionId': sectionId,
+      'name': name,
+      'seats': seats,
+    });
+  }
+
+  Future<void> updateTable(
+    String id, {
+    String? sectionId,
+    String? name,
+    int? seats,
+    bool? isActive,
+  }) async {
+    await _api.patch('/tables/$id', {
+      if (sectionId != null) 'sectionId': sectionId,
+      if (name != null) 'name': name,
+      if (seats != null) 'seats': seats,
+      if (isActive != null) 'isActive': isActive,
+    });
+  }
+
+  /// Fails with TABLE_IN_USE when an order is still open on it.
+  Future<void> deleteTable(String id) async {
+    await _api.delete('/tables/$id');
+  }
+}
+
+final tableAdminRepositoryProvider = Provider<TableAdminRepository>((ref) {
+  return TableAdminRepository(ref.watch(apiClientProvider));
+});
+
+final adminSectionsProvider = FutureProvider<List<AdminSection>>((ref) {
+  return ref.watch(tableAdminRepositoryProvider).sections();
+});
+
+final adminTablesProvider = FutureProvider<List<AdminTable>>((ref) {
+  return ref.watch(tableAdminRepositoryProvider).tables();
+});

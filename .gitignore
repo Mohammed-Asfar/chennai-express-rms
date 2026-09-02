@@ -7,7 +7,11 @@ build/
 *.exe
 
 # Local databases — never commit billing data
-data/
+#
+# Anchored to the backend. A bare `data/` matches any directory of that name at
+# any depth, which silently excluded every Flutter feature's data/ folder — the
+# models and repositories the app will not compile without.
+/backend/data/
 *.db
 *.db-shm
 *.db-wal

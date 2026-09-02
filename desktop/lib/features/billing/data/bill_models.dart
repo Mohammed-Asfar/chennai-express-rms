@@ -1,0 +1,289 @@
+enum PaymentMode { cash, card, upi }
+
+extension PaymentModeLabel on PaymentMode {
+  String get label => switch (this) {
+    PaymentMode.cash => 'Cash',
+    PaymentMode.card => 'Card',
+    PaymentMode.upi => 'UPI',
+  };
+
+  String get wire => name;
+}
+
+enum PaymentStatus { unpaid, partial, paid }
+
+class BillPayment {
+  const BillPayment({
+    required this.id,
+    required this.mode,
+    required this.amount,
+    required this.isReversed,
+    this.reference,
+  });
+
+  final String id;
+  final PaymentMode mode;
+  final int amount;
+  final bool isReversed;
+  final String? reference;
+
+  factory BillPayment.fromJson(Map<String, dynamic> json) => BillPayment(
+    id: json['id'] as String,
+    mode: switch (json['mode']) {
+      'card' => PaymentMode.card,
+      'upi' => PaymentMode.upi,
+      _ => PaymentMode.cash,
+    },
+    amount: json['amount'] as int,
+    isReversed: json['reversedAt'] != null,
+    reference: json['reference'] as String?,
+  );
+}
+
+/// One rate's share of the tax, as GST requires on the printout.
+class TaxGroup {
+  const TaxGroup({
+    required this.rate,
+    required this.base,
+    required this.cgst,
+    required this.sgst,
+  });
+
+  final int rate;
+  final int base;
+  final int cgst;
+  final int sgst;
+
+  factory TaxGroup.fromJson(Map<String, dynamic> json) => TaxGroup(
+    rate: json['rate'] as int,
+    base: json['base'] as int,
+    cgst: json['cgst'] as int,
+    sgst: json['sgst'] as int,
+  );
+}
+
+/// A computed total that has not been persisted.
+class BillPreview {
+  const BillPreview({
+    required this.subtotal,
+    required this.discountAmount,
+    required this.cgst,
+    required this.sgst,
+    required this.roundOff,
+    required this.total,
+    required this.taxBreakdown,
+  });
+
+  final int subtotal;
+  final int discountAmount;
+  final int cgst;
+  final int sgst;
+  final int roundOff;
+  final int total;
+  final List<TaxGroup> taxBreakdown;
+
+  factory BillPreview.fromJson(Map<String, dynamic> json) => BillPreview(
+    subtotal: json['subtotal'] as int,
+    discountAmount: json['discountAmount'] as int,
+    cgst: json['cgst'] as int,
+    sgst: json['sgst'] as int,
+    roundOff: json['roundOff'] as int,
+    total: json['total'] as int,
+    taxBreakdown: ((json['taxBreakdown'] as List<dynamic>?) ?? const [])
+        .map((g) => TaxGroup.fromJson(g as Map<String, dynamic>))
+        .toList(),
+  );
+}
+
+/// One line on an issued bill.
+///
+/// These are the values snapshotted when the item was ordered, not the menu as
+/// it stands today — renaming a dish must not rewrite a bill already printed.
+class BillItem {
+  const BillItem({
+    required this.itemName,
+    required this.variantName,
+    required this.qty,
+    required this.unitPrice,
+    required this.taxRate,
+    required this.lineTax,
+    required this.lineTotal,
+  });
+
+  final String itemName;
+  final String variantName;
+  final int qty;
+
+  /// Paise, as charged.
+  final int unitPrice;
+
+  /// Basis points, as charged.
+  final int taxRate;
+  final int lineTax;
+  final int lineTotal;
+
+  /// Portions named `Standard` are the only size, so naming them adds nothing.
+  String get displayName => variantName.isEmpty || variantName == 'Standard'
+      ? itemName
+      : '$itemName ($variantName)';
+
+  factory BillItem.fromJson(Map<String, dynamic> json) => BillItem(
+    itemName: json['itemName'] as String? ?? '',
+    variantName: json['variantName'] as String? ?? '',
+    qty: json['qty'] as int? ?? 0,
+    unitPrice: json['unitPrice'] as int? ?? 0,
+    taxRate: json['taxRate'] as int? ?? 0,
+    lineTax: json['lineTax'] as int? ?? 0,
+    lineTotal: json['lineTotal'] as int? ?? 0,
+  );
+}
+
+/// Totals for a listed range.
+///
+/// Computed by the backend over every matching bill, not over the page that was
+/// returned — a day with more bills than the page limit must still report its
+/// real takings.
+class BillSummary {
+  const BillSummary({
+    required this.count,
+    required this.total,
+    required this.collected,
+    required this.outstanding,
+  });
+
+  final int count;
+
+  /// Paise billed.
+  final int total;
+
+  /// Paise actually taken. Lower than [total] when something is unpaid.
+  final int collected;
+  final int outstanding;
+
+  static const empty = BillSummary(
+    count: 0,
+    total: 0,
+    collected: 0,
+    outstanding: 0,
+  );
+
+  factory BillSummary.fromJson(Map<String, dynamic> json) => BillSummary(
+    count: json['count'] as int? ?? 0,
+    total: json['total'] as int? ?? 0,
+    collected: json['collected'] as int? ?? 0,
+    outstanding: json['outstanding'] as int? ?? 0,
+  );
+}
+
+class BillList {
+  const BillList({required this.bills, required this.summary});
+
+  final List<Bill> bills;
+  final BillSummary summary;
+}
+
+class Bill {
+  const Bill({
+    required this.id,
+    required this.orderId,
+    required this.billNumber,
+    required this.businessDate,
+    required this.createdAt,
+    required this.subtotal,
+    required this.discountAmount,
+    required this.cgst,
+    required this.sgst,
+    required this.roundOff,
+    required this.total,
+    required this.amountPaid,
+    required this.outstanding,
+    required this.paymentStatus,
+    required this.taxBreakdown,
+    required this.payments,
+    this.items = const [],
+    this.orderNo,
+    this.orderType,
+    this.tableName,
+  });
+
+  final String id;
+  final String orderId;
+
+  /// The formatted string as printed, e.g. `CE/2026-27/0042`.
+  final String billNumber;
+
+  /// The trading day this bill belongs to, which is not always the calendar day
+  /// it was created on — a 1 AM sale counts as the previous evening.
+  final String businessDate;
+
+  /// When it was created, for showing the time on the list.
+  final DateTime? createdAt;
+
+  final int subtotal;
+  final int discountAmount;
+  final int cgst;
+  final int sgst;
+  final int roundOff;
+  final int total;
+  final int amountPaid;
+  final int outstanding;
+  final PaymentStatus paymentStatus;
+  final List<TaxGroup> taxBreakdown;
+  final List<BillPayment> payments;
+
+  /// Only populated by the single-bill endpoint; the list omits them.
+  final List<BillItem> items;
+
+  /// Sent by both endpoints — the list joins it in so a row can be traced
+  /// back to the order it was billed from.
+  final int? orderNo;
+
+  /// dine_in or takeaway.
+  final String? orderType;
+  final String? tableName;
+
+  /// Where the order was taken, for the detail header.
+  String get placeLabel {
+    if (orderType == 'takeaway') return 'Takeaway';
+    return tableName ?? 'Dine-in';
+  }
+
+  bool get isPaid => paymentStatus == PaymentStatus.paid;
+
+  /// Reversed payments stay on the record for audit but do not count.
+  List<BillPayment> get livePayments =>
+      payments.where((p) => !p.isReversed).toList();
+
+  factory Bill.fromJson(Map<String, dynamic> json) => Bill(
+    id: json['id'] as String,
+    orderId: json['orderId'] as String,
+    billNumber: json['billNumber'] as String? ?? '${json['billNo']}',
+    businessDate: json['businessDate'] as String? ?? '',
+    createdAt: DateTime.tryParse(json['createdAt'] as String? ?? '')?.toLocal(),
+    items: ((json['items'] as List<dynamic>?) ?? const [])
+        .map((i) => BillItem.fromJson(i as Map<String, dynamic>))
+        .toList(),
+    orderNo: json['orderNo'] as int?,
+    orderType: json['orderType'] as String?,
+    tableName: json['tableName'] as String?,
+    subtotal: json['subtotal'] as int,
+    discountAmount: json['discountAmount'] as int? ?? 0,
+    cgst: json['cgst'] as int? ?? 0,
+    sgst: json['sgst'] as int? ?? 0,
+    roundOff: json['roundOff'] as int? ?? 0,
+    total: json['total'] as int,
+    amountPaid: json['amountPaid'] as int? ?? 0,
+    outstanding: json['outstanding'] as int? ?? 0,
+    paymentStatus: switch (json['paymentStatus']) {
+      'paid' => PaymentStatus.paid,
+      'partial' => PaymentStatus.partial,
+      _ => PaymentStatus.unpaid,
+    },
+    taxBreakdown: ((json['taxBreakdown'] as List<dynamic>?) ?? const [])
+        .map((g) => TaxGroup.fromJson(g as Map<String, dynamic>))
+        .toList(),
+    payments: ((json['payments'] as List<dynamic>?) ?? const [])
+        .map((p) => BillPayment.fromJson(p as Map<String, dynamic>))
+        .toList(),
+  );
+}
