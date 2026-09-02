@@ -301,6 +301,41 @@ export async function settingsRoutes(app: FastifyInstance): Promise<void> {
     }
   })
 
+  /**
+   * The stored logo as a PNG, for showing on screen.
+   *
+   * Its own endpoint rather than a field on `GET /branch`: the raster is
+   * kilobytes of base64, and every screen that reads the branch would carry it
+   * whether or not it draws it.
+   *
+   * Drawn from the dithered raster, not the upload — the original is not kept,
+   * and this is what actually burns onto the paper.
+   */
+  app.get('/branch/logo', { preHandler: requireAuth }, async (request) => {
+    const me = currentUser(request)
+    const branch = app.db
+      .prepare('SELECT logo_bitmap, logo_width, logo_height FROM branches WHERE id = ?')
+      .get(me.branchId) as
+      | { logo_bitmap: string | null; logo_width: number | null; logo_height: number | null }
+      | undefined
+
+    if (!branch?.logo_bitmap || !branch.logo_width || !branch.logo_height) {
+      return { logoImage: null, width: null, height: null }
+    }
+
+    const png = await rasterToPng({
+      data: branch.logo_bitmap,
+      width: branch.logo_width,
+      height: branch.logo_height,
+    })
+
+    return {
+      logoImage: 'data:image/png;base64,' + png.toString('base64'),
+      width: branch.logo_width,
+      height: branch.logo_height,
+    }
+  })
+
   app.delete('/branch/logo', { preHandler: requireRole('admin') }, async (request) => {
     const me = currentUser(request)
     const now = new Date().toISOString()

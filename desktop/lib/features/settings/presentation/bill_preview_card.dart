@@ -98,7 +98,8 @@ class _Paper extends StatelessWidget {
             // too narrow and the longest line is clipped, which is how an
             // amount goes missing from a bill that prints correctly.
             constraints: BoxConstraints(
-              maxWidth: _characterWidth(context) * bill.width + AppSpacing.lg * 2,
+              maxWidth:
+                  _characterWidth(context) * bill.width + AppSpacing.lg * 2,
             ),
             decoration: BoxDecoration(
               color: AppColors.surface,

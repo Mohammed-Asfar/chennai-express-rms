@@ -3,6 +3,7 @@ import 'package:file_picker/file_picker.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import '../../../core/api/api_exception.dart';
+import '../../../core/theme/app_colors.dart';
 import '../../../core/theme/app_spacing.dart';
 import '../../../core/widgets/app_loading.dart';
 import '../../../core/widgets/app_text_field.dart';
@@ -113,6 +114,9 @@ class _BranchScreenState extends ConsumerState<BranchScreen> {
             const SizedBox(height: AppSpacing.md),
           ],
 
+          _LogoCard(branch: _branch!, onChanged: _reloadBranch),
+          const SizedBox(height: AppSpacing.md),
+
           Card(
             child: Padding(
               padding: const EdgeInsets.all(AppSpacing.lg),
@@ -173,9 +177,6 @@ class _BranchScreenState extends ConsumerState<BranchScreen> {
               ),
             ),
           ),
-
-          const SizedBox(height: AppSpacing.md),
-          _LogoCard(branch: _branch!, onChanged: _reloadBranch),
         ],
       ),
     );
@@ -184,6 +185,9 @@ class _BranchScreenState extends ConsumerState<BranchScreen> {
   void _reloadBranch() {
     setState(() => _loaded = false);
     ref.invalidate(branchProvider);
+    // The thumbnail is fetched separately, so it will not refresh on its own
+    // after an upload or a removal.
+    ref.invalidate(branchLogoProvider);
     // The name, address, GSTIN and logo all print, so the sample bill on the
     // tax screen is now out of date.
     ref.invalidate(billPreviewProvider);
@@ -237,9 +241,9 @@ class _BranchScreenState extends ConsumerState<BranchScreen> {
 
 /// Upload, switch off, or remove the logo printed above the bill.
 ///
-/// The image itself is never fetched back — the raster is for the printer, not
-/// the screen, and shipping kilobytes of base64 to draw a thumbnail would be
-/// wasted work. The card reports whether one is set, not what it looks like.
+/// Shows the rasterised logo rather than the uploaded file: the original is not
+/// kept, and the dithered version is the one worth checking — it is what burns
+/// onto the paper. "A logo is set" cannot tell you it is the wrong image.
 class _LogoCard extends ConsumerStatefulWidget {
   const _LogoCard({required this.branch, required this.onChanged});
 
@@ -261,83 +265,79 @@ class _LogoCardState extends ConsumerState<_LogoCard> {
     return Card(
       child: Padding(
         padding: const EdgeInsets.all(AppSpacing.lg),
-        child: Column(
-          crossAxisAlignment: CrossAxisAlignment.stretch,
+        child: Row(
+          crossAxisAlignment: CrossAxisAlignment.start,
           children: [
-            Text('Logo', style: theme.textTheme.titleMedium),
-            const SizedBox(height: 2),
-            Text(
-              'Printed above the name. A simple, high-contrast image works '
-              'best — a thermal printer has no greys.',
-              style: theme.textTheme.bodySmall,
-            ),
-            const SizedBox(height: AppSpacing.md),
-
-            Row(
-              children: [
-                Icon(
-                  branch.hasLogo
-                      ? Icons.image_outlined
-                      : Icons.image_not_supported_outlined,
-                  size: 20,
-                  color: theme.colorScheme.onSurfaceVariant,
-                ),
-                const SizedBox(width: AppSpacing.sm),
-                Expanded(
-                  child: Text(
-                    branch.hasLogo ? 'A logo is set' : 'No logo',
-                    style: theme.textTheme.bodyLarge,
-                  ),
-                ),
-                if (_busy)
-                  const SizedBox(
-                    height: 18,
-                    width: 18,
-                    child: CircularProgressIndicator(strokeWidth: 2),
-                  )
-                else ...[
-                  if (branch.hasLogo)
-                    TextButton(onPressed: _remove, child: const Text('Remove')),
-                  const SizedBox(width: AppSpacing.sm),
-                  OutlinedButton.icon(
-                    onPressed: _pick,
-                    icon: const Icon(Icons.upload_outlined, size: 18),
-                    label: Text(branch.hasLogo ? 'Replace' : 'Choose image'),
-                  ),
-                ],
-              ],
-            ),
-
-            if (branch.hasLogo) ...[
-              const SizedBox(height: AppSpacing.md),
-              Row(
+            // Wording and controls on the left, the image itself on the right:
+            // the logo is the thing being judged, so it gets the room.
+            Expanded(
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
                 children: [
-                  Expanded(
-                    child: Column(
-                      crossAxisAlignment: CrossAxisAlignment.start,
-                      children: [
-                        Text(
-                          'Print it on bills',
-                          style: theme.textTheme.bodyLarge,
+                  Text('Logo', style: theme.textTheme.titleMedium),
+                  const SizedBox(height: 2),
+                  Text(
+                    'Printed above the name. A simple, high-contrast image '
+                    'works best — a thermal printer has no greys.',
+                    style: theme.textTheme.bodySmall,
+                  ),
+                  const SizedBox(height: AppSpacing.md),
+
+                  Row(
+                    children: [
+                      if (_busy)
+                        const SizedBox(
+                          height: 18,
+                          width: 18,
+                          child: CircularProgressIndicator(strokeWidth: 2),
+                        )
+                      else ...[
+                        OutlinedButton.icon(
+                          onPressed: _pick,
+                          icon: const Icon(Icons.upload_outlined, size: 18),
+                          label: Text(
+                            branch.hasLogo ? 'Replace' : 'Choose image',
+                          ),
                         ),
-                        const SizedBox(height: 2),
-                        Text(
-                          // Switching off keeps the image, so it can come back
-                          // without uploading again.
-                          'Switch off to keep the logo without printing it.',
-                          style: theme.textTheme.bodySmall,
+                        if (branch.hasLogo) ...[
+                          const SizedBox(width: AppSpacing.sm),
+                          TextButton(
+                            onPressed: _remove,
+                            child: const Text('Remove'),
+                          ),
+                        ],
+                      ],
+                    ],
+                  ),
+
+                  if (branch.hasLogo) ...[
+                    const SizedBox(height: AppSpacing.md),
+                    Text('Print it on bills', style: theme.textTheme.bodyLarge),
+                    const SizedBox(height: 2),
+                    Row(
+                      children: [
+                        Expanded(
+                          child: Text(
+                            // Switching off keeps the image, so it can come
+                            // back without uploading again.
+                            'Switch off to keep the logo without printing it.',
+                            style: theme.textTheme.bodySmall,
+                          ),
+                        ),
+                        const SizedBox(width: AppSpacing.md),
+                        Switch(
+                          value: branch.printLogo,
+                          onChanged: _busy ? null : _togglePrint,
                         ),
                       ],
                     ),
-                  ),
-                  const SizedBox(width: AppSpacing.md),
-                  Switch(
-                    value: branch.printLogo,
-                    onChanged: _busy ? null : _togglePrint,
-                  ),
+                  ],
                 ],
               ),
-            ],
+            ),
+
+            const SizedBox(width: AppSpacing.xl),
+            _LogoThumbnail(hasLogo: branch.hasLogo),
           ],
         ),
       ),
@@ -410,5 +410,76 @@ class _LogoCardState extends ConsumerState<_LogoCard> {
     ScaffoldMessenger.of(
       context,
     ).showSnackBar(SnackBar(content: Text(message)));
+  }
+}
+
+/// The stored logo, drawn as the printer will render it.
+///
+/// A white plate behind it, because the raster is black-on-transparent and the
+/// card is white — on a tinted ground the dots would read as a different weight
+/// than they print at.
+class _LogoThumbnail extends ConsumerWidget {
+  const _LogoThumbnail({required this.hasLogo});
+
+  final bool hasLogo;
+
+  /// Wide and short, matching the shape of a receipt-width raster. A square
+  /// would letterbox it down to a strip and waste the height.
+  static const double _width = 260;
+  static const double _height = 120;
+
+  @override
+  Widget build(BuildContext context, WidgetRef ref) {
+    final theme = Theme.of(context);
+
+    return Container(
+      height: _height,
+      width: _width,
+      decoration: BoxDecoration(
+        color: AppColors.surface,
+        borderRadius: BorderRadius.circular(AppSpacing.radiusSm),
+        border: Border.all(color: AppColors.border),
+      ),
+      clipBehavior: Clip.antiAlias,
+      padding: const EdgeInsets.all(AppSpacing.xs),
+      child: !hasLogo
+          ? Icon(
+              Icons.image_not_supported_outlined,
+              size: 20,
+              color: theme.colorScheme.onSurfaceVariant,
+            )
+          : ref
+                .watch(branchLogoProvider)
+                .when(
+                  loading: () => const Center(
+                    child: SizedBox(
+                      height: 16,
+                      width: 16,
+                      child: CircularProgressIndicator(strokeWidth: 2),
+                    ),
+                  ),
+                  // The logo failing to draw must not look like no logo: it is
+                  // still set, and still prints.
+                  error: (_, _) => Icon(
+                    Icons.broken_image_outlined,
+                    size: 20,
+                    color: theme.colorScheme.onSurfaceVariant,
+                  ),
+                  data: (image) => image == null
+                      ? Icon(
+                          Icons.image_outlined,
+                          size: 20,
+                          color: theme.colorScheme.onSurfaceVariant,
+                        )
+                      : Image.memory(
+                          base64Decode(image.split(',').last),
+                          // Nearest-neighbour keeps the one-bit dots crisp;
+                          // smoothing would blur them into greys the thermal
+                          // head cannot actually print.
+                          filterQuality: FilterQuality.none,
+                          fit: BoxFit.contain,
+                        ),
+                ),
+    );
   }
 }
