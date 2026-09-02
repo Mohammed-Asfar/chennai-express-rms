@@ -13,6 +13,7 @@ import '../../menu/presentation/menu_admin_screen.dart';
 import '../../settings/presentation/settings_screen.dart';
 import '../../order/data/order_repository.dart';
 import '../../order/presentation/order_screen.dart';
+import '../../reports/presentation/reports_screen.dart';
 import '../../updates/presentation/update_controller.dart';
 import '../../updates/presentation/update_dialog.dart';
 
@@ -37,7 +38,7 @@ class _HomeScreenState extends ConsumerState<HomeScreen> {
     SidebarItem(icon: Icons.receipt_long_outlined, label: 'Bills'),
     SidebarItem(icon: Icons.restaurant_menu, label: 'Menu'),
     SidebarItem(icon: Icons.event_seat_outlined, label: 'Bookings', enabled: false),
-    SidebarItem(icon: Icons.insights_outlined, label: 'Reports', enabled: false),
+    SidebarItem(icon: Icons.insights_outlined, label: 'Reports'),
     SidebarItem(icon: Icons.tune, label: 'Settings'),
   ];
 
@@ -68,6 +69,7 @@ class _HomeScreenState extends ConsumerState<HomeScreen> {
                     0 => const FloorScreen(),
                     1 => const BillsScreen(),
                     2 => const MenuAdminScreen(),
+                    4 => const ReportsScreen(),
                     5 => const SettingsScreen(),
                     _ => const _ComingSoon(),
                   },

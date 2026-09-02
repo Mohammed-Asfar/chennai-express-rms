@@ -456,6 +456,7 @@ wifi will go offline. Losing the sale because of it is unacceptable.
 | FR-R10 | Discounts given are reported separately, with the user who applied them |
 | FR-R11 | Cancelled orders and voided bills are reportable — a cancellation pattern is a loss signal |
 | FR-R12 | Reports state which business day they cover, not which calendar day |
+| FR-R13 | Sales over time: a per-day series across the range, for charting the trend. A day with no trade returns an explicit zero, never a gap — a missing day would draw as a straight line across a closed one |
 
 ### 6.8 Authentication
 
