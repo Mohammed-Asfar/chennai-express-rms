@@ -56,6 +56,10 @@ class FloorScreen extends ConsumerWidget {
                 section: section,
                 onRename: () => _renameSection(context, ref, section),
                 onDelete: () => _deleteSection(context, ref, section),
+                onMove: (direction) =>
+                    _moveSection(context, ref, sections, section, direction),
+                canMoveUp: section != sections.first,
+                canMoveDown: section != sections.last,
               ),
               const SizedBox(height: AppSpacing.md),
               GridView.builder(
@@ -119,6 +123,35 @@ class FloorScreen extends ConsumerWidget {
     ref.invalidate(floorProvider);
     ref.invalidate(adminSectionsProvider);
     ref.invalidate(adminTablesProvider);
+  }
+
+  /// Moves a section a step up or down the floor.
+  ///
+  /// The whole ordered list is sent, not the one that moved: the backend
+  /// numbers them from the order it is given, so a dropped request cannot
+  /// leave two sections claiming the same position.
+  Future<void> _moveSection(
+    BuildContext context,
+    WidgetRef ref,
+    List<FloorSection> sections,
+    FloorSection section,
+    int direction,
+  ) async {
+    final ids = sections.map((s) => s.id).toList();
+    final from = ids.indexOf(section.id);
+    final to = from + direction;
+    if (from < 0 || to < 0 || to >= ids.length) return;
+    ids.insert(to, ids.removeAt(from));
+
+    try {
+      await ref.read(tableAdminRepositoryProvider).reorderSections(ids);
+      _refresh(ref);
+    } on ApiException catch (error) {
+      if (!context.mounted) return;
+      ScaffoldMessenger.of(
+        context,
+      ).showSnackBar(SnackBar(content: Text(error.message)));
+    }
   }
 
   /// Discards the empty orders holding a table.
@@ -385,11 +418,20 @@ class _SectionHeader extends StatelessWidget {
     required this.section,
     required this.onRename,
     required this.onDelete,
+    required this.onMove,
+    required this.canMoveUp,
+    required this.canMoveDown,
   });
 
   final FloorSection section;
   final VoidCallback onRename;
   final VoidCallback onDelete;
+
+  /// -1 to move a step up the floor, 1 to move down.
+  final void Function(int direction) onMove;
+
+  final bool canMoveUp;
+  final bool canMoveDown;
 
   @override
   Widget build(BuildContext context) {
@@ -414,10 +456,19 @@ class _SectionHeader extends StatelessWidget {
           onSelected: (value) {
             if (value == 'rename') onRename();
             if (value == 'delete') onDelete();
+            if (value == 'up') onMove(-1);
+            if (value == 'down') onMove(1);
           },
-          itemBuilder: (_) => const [
-            PopupMenuItem(value: 'rename', child: Text('Rename section')),
-            PopupMenuItem(value: 'delete', child: Text('Delete section')),
+          itemBuilder: (_) => [
+            // Moved a step at a time rather than dragged: the sections are
+            // stacked around grids of tables, and a drag across them is easy
+            // to drop in the wrong place.
+            if (canMoveUp)
+              const PopupMenuItem(value: 'up', child: Text('Move up')),
+            if (canMoveDown)
+              const PopupMenuItem(value: 'down', child: Text('Move down')),
+            const PopupMenuItem(value: 'rename', child: Text('Rename section')),
+            const PopupMenuItem(value: 'delete', child: Text('Delete section')),
           ],
         ),
       ],

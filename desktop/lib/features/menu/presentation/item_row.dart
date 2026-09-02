@@ -161,25 +161,38 @@ class _VariantChip extends StatelessWidget {
   Widget build(BuildContext context) {
     final theme = Theme.of(context);
 
+    // A sold-out portion is struck through here rather than hidden: the price
+    // still matters, and someone scanning the menu needs to see at a glance
+    // which sizes are off without opening every item.
+    final off = !variant.isAvailable;
+    final style = theme.textTheme.bodySmall?.copyWith(
+      color: off ? AppColors.inkFaint : null,
+      decoration: off ? TextDecoration.lineThrough : null,
+    );
+
     return Container(
       padding: const EdgeInsets.symmetric(
         horizontal: AppSpacing.sm,
         vertical: 3,
       ),
       decoration: BoxDecoration(
-        color: AppColors.surfaceSunken,
+        color: off ? AppColors.surface : AppColors.surfaceSunken,
         borderRadius: BorderRadius.circular(AppSpacing.radiusSm),
         border: Border.all(color: AppColors.border),
       ),
       child: Row(
         mainAxisSize: MainAxisSize.min,
         children: [
-          Text(variant.name, style: theme.textTheme.bodySmall),
+          Text(variant.name, style: style),
           const SizedBox(width: AppSpacing.sm),
           Text(
             Money.formatWithSymbol(variant.price),
-            style: theme.textTheme.bodySmall?.copyWith(color: AppColors.ink),
+            style: style?.copyWith(color: off ? AppColors.inkFaint : AppColors.ink),
           ),
+          if (off) ...[
+            const SizedBox(width: AppSpacing.xs),
+            Text('sold out', style: theme.textTheme.bodySmall),
+          ],
         ],
       ),
     );

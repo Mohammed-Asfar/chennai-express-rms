@@ -257,6 +257,18 @@ class _ItemEditorDialogState extends ConsumerState<ItemEditorDialog> {
               validator: _validatePrice,
             ),
           ),
+          // Sold out for tonight, without deleting the portion or touching its
+          // price — it goes back on tomorrow with one tap.
+          Tooltip(
+            message: portion.isAvailable ? 'On the menu' : 'Sold out',
+            child: Switch(
+              value: portion.isAvailable,
+              onChanged: _saving
+                  ? null
+                  : (on) => setState(() => portion.isAvailable = on),
+            ),
+          ),
+
           // Removing the last portion would leave an item nobody can order, and
           // the backend rejects it anyway.
           IconButton(
@@ -338,6 +350,7 @@ class _ItemEditorDialogState extends ConsumerState<ItemEditorDialog> {
               VariantDraft(
                 name: p.nameController.text.trim(),
                 price: Money.parse(p.priceController.text) ?? 0,
+                isAvailable: p.isAvailable,
               ),
           ],
         );
@@ -387,8 +400,16 @@ class _ItemEditorDialogState extends ConsumerState<ItemEditorDialog> {
 
       keptIds.add(portion.id!);
       final original = item.variants.firstWhere((v) => v.id == portion.id);
-      if (original.name != name || original.price != price) {
-        await repo.updateVariant(item.id, portion.id!, name: name, price: price);
+      if (original.name != name ||
+          original.price != price ||
+          original.isAvailable != portion.isAvailable) {
+        await repo.updateVariant(
+          item.id,
+          portion.id!,
+          name: name,
+          price: price,
+          isAvailable: portion.isAvailable,
+        );
       }
     }
 
@@ -404,18 +425,27 @@ class _ItemEditorDialogState extends ConsumerState<ItemEditorDialog> {
 /// One editable portion row. Holds its own controllers so the list can grow and
 /// shrink without losing what is typed in the other rows.
 class _PortionRow {
-  _PortionRow({this.id, String name = '', int? price})
+  _PortionRow({this.id, String name = '', int? price, this.isAvailable = true})
       : nameController = TextEditingController(text: name),
         priceController = TextEditingController(
           text: price == null ? '' : Money.format(price),
         );
 
-  factory _PortionRow.fromVariant(AdminVariant v) =>
-      _PortionRow(id: v.id, name: v.name, price: v.price);
+  factory _PortionRow.fromVariant(AdminVariant v) => _PortionRow(
+        id: v.id,
+        name: v.name,
+        price: v.price,
+        isAvailable: v.isAvailable,
+      );
 
   final String? id;
   final TextEditingController nameController;
   final TextEditingController priceController;
+
+  /// Whether this portion can be ordered. A kitchen runs out of the large size
+  /// while the small one is still on — the order screen greys it out and
+  /// refuses it, rather than the whole dish disappearing.
+  bool isAvailable;
 
   void dispose() {
     nameController.dispose();

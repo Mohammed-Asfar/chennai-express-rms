@@ -67,7 +67,12 @@ class MenuAdminRepository {
       if (description != null && description.isNotEmpty) 'description': description,
       if (taxRate != null) 'taxRate': taxRate,
       'variants': [
-        for (final v in variants) {'name': v.name, 'price': v.price},
+        for (final v in variants)
+          {
+            'name': v.name,
+            'price': v.price,
+            if (!v.isAvailable) 'isAvailable': false,
+          },
       ],
     });
   }

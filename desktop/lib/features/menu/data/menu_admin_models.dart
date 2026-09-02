@@ -108,7 +108,12 @@ class AdminMenuItem {
 /// Held separately from [AdminVariant] because a new one has no id, and the
 /// price is mid-edit text rather than a settled integer.
 class VariantDraft {
-  VariantDraft({this.id, required this.name, required this.price});
+  VariantDraft({
+    this.id,
+    required this.name,
+    required this.price,
+    this.isAvailable = true,
+  });
 
   /// Null for a portion that has not been saved yet.
   final String? id;
@@ -116,6 +121,10 @@ class VariantDraft {
 
   /// Paise.
   int price;
+
+  /// Whether it can be ordered. A portion sold out for the evening keeps its
+  /// price and comes back with one tap.
+  bool isAvailable;
 
   bool get isNew => id == null;
 }

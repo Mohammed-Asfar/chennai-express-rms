@@ -551,3 +551,64 @@ test('cancelling the empty order frees the table', async () => {
   assertEqual(tableStatus(ctx, id), 'free')
   await close(ctx)
 })
+
+test('reordering sections rewrites their sort order', async () => {
+  // The order sections appear on the floor is the order they were dragged
+  // into. It is stored, not derived from when they were created.
+  const ctx = await setup()
+  const ac = await makeSection(ctx, 'AC')
+  const nonAc = await makeSection(ctx, 'Non-AC')
+  const terrace = await makeSection(ctx, 'Terrace')
+
+  const res = await ctx.app.inject({
+    method: 'POST',
+    url: '/sections/reorder',
+    headers: ctx.admin,
+    payload: { ids: [terrace, ac, nonAc] },
+  })
+  assertEqual(res.statusCode, 200)
+
+  // Only the three that were reordered; the seed creates one of its own.
+  const order = ctx.db
+    .prepare('SELECT id FROM sections WHERE deleted_at IS NULL ORDER BY sort_order')
+    .all()
+    .map((r) => (r as { id: string }).id)
+    .filter((id) => [terrace, ac, nonAc].includes(id))
+  assertEqual(order.join(','), [terrace, ac, nonAc].join(','))
+  await close(ctx)
+})
+
+test('the floor lists sections in their saved order', async () => {
+  // Storing the order is only useful if the floor reads it back.
+  const ctx = await setup()
+  const ac = await makeSection(ctx, 'AC')
+  const terrace = await makeSection(ctx, 'Terrace')
+
+  await ctx.app.inject({
+    method: 'POST',
+    url: '/sections/reorder',
+    headers: ctx.admin,
+    payload: { ids: [terrace, ac] },
+  })
+
+  const res = await ctx.app.inject({ method: 'GET', url: '/floor', headers: ctx.cashier })
+  const names = (res.json() as { sections: { name: string }[] }).sections
+    .map((s) => s.name)
+    .filter((name) => name === 'AC' || name === 'Terrace')
+  assertEqual(names.join(','), 'Terrace,AC')
+  await close(ctx)
+})
+
+test('a cashier cannot reorder the floor', async () => {
+  const ctx = await setup()
+  const ac = await makeSection(ctx, 'AC')
+
+  const res = await ctx.app.inject({
+    method: 'POST',
+    url: '/sections/reorder',
+    headers: ctx.cashier,
+    payload: { ids: [ac] },
+  })
+  assertEqual(res.statusCode, 403)
+  await close(ctx)
+})

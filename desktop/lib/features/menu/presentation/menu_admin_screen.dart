@@ -54,6 +54,7 @@ class _MenuAdminScreenState extends ConsumerState<MenuAdminScreen> {
               onCreate: () => _createCategory(context),
               onRename: (c) => _renameCategory(context, c),
               onDelete: (c) => _deleteCategory(context, c),
+              onReorder: (ids) => _reorderCategories(context, ids),
             ),
             Container(width: 1, color: AppColors.border),
             Expanded(
@@ -87,6 +88,25 @@ class _MenuAdminScreenState extends ConsumerState<MenuAdminScreen> {
           ),
         ),
       );
+
+  /// Saves the order after a drag.
+  ///
+  /// The list is sent whole rather than as a moved index: the backend numbers
+  /// them from the order it is given, so a dropped request cannot leave two
+  /// categories claiming the same position.
+  Future<void> _reorderCategories(BuildContext context, List<String> ids) async {
+    try {
+      await ref.read(menuAdminRepositoryProvider).reorderCategories(ids);
+      _refresh();
+    } on ApiException catch (error) {
+      if (!context.mounted) return;
+      // The list has already moved on screen; refreshing puts it back.
+      _refresh();
+      ScaffoldMessenger.of(
+        context,
+      ).showSnackBar(SnackBar(content: Text(error.message)));
+    }
+  }
 
   void _refresh() {
     ref.invalidate(adminCategoriesProvider);
@@ -156,6 +176,7 @@ class _CategoryPane extends StatelessWidget {
     required this.onCreate,
     required this.onRename,
     required this.onDelete,
+    required this.onReorder,
   });
 
   final List<AdminCategory> categories;
@@ -164,6 +185,9 @@ class _CategoryPane extends StatelessWidget {
   final VoidCallback onCreate;
   final ValueChanged<AdminCategory> onRename;
   final ValueChanged<AdminCategory> onDelete;
+
+  /// The full list of ids in their new order, after a drag.
+  final ValueChanged<List<String>> onReorder;
 
   @override
   Widget build(BuildContext context) {
@@ -195,17 +219,33 @@ class _CategoryPane extends StatelessWidget {
             ),
           ),
           Expanded(
-            child: ListView.builder(
+            // Draggable, because the order here is the order the till shows.
+            // Putting Biryani above Drinks is how a counter is made quick, and
+            // it is not worth a settings screen of its own.
+            child: ReorderableListView.builder(
               padding: const EdgeInsets.symmetric(horizontal: AppSpacing.sm),
               itemCount: categories.length,
+              buildDefaultDragHandles: false,
+              onReorder: (from, to) {
+                // Flutter reports the destination before the moved row is
+                // removed, so anything dragged downwards is one too far.
+                final ids = categories.map((c) => c.id).toList();
+                final target = to > from ? to - 1 : to;
+                ids.insert(target, ids.removeAt(from));
+                onReorder(ids);
+              },
               itemBuilder: (context, index) {
                 final category = categories[index];
-                return _CategoryTile(
-                  category: category,
-                  selected: category.id == selectedId,
-                  onTap: () => onSelect(category.id),
-                  onRename: () => onRename(category),
-                  onDelete: () => onDelete(category),
+                return ReorderableDragStartListener(
+                  key: ValueKey(category.id),
+                  index: index,
+                  child: _CategoryTile(
+                    category: category,
+                    selected: category.id == selectedId,
+                    onTap: () => onSelect(category.id),
+                    onRename: () => onRename(category),
+                    onDelete: () => onDelete(category),
+                  ),
                 );
               },
             ),

@@ -26,6 +26,15 @@ class TableAdminRepository {
   }
 
   /// Fails with SECTION_NOT_EMPTY, or LAST_SECTION when it is the only one.
+  /// Saves the running order of the sections.
+  ///
+  /// The full list rather than a moved index: the backend numbers them from
+  /// the order it is given, so a dropped request cannot leave two sections
+  /// claiming the same position.
+  Future<void> reorderSections(List<String> ids) async {
+    await _api.post('/sections/reorder', {'ids': ids});
+  }
+
   Future<void> deleteSection(String id) async {
     await _api.delete('/sections/$id');
   }

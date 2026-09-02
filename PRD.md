@@ -206,6 +206,8 @@ sales on the previous trading day, with the cutoff configured in settings.
 | FR-M7 | Each item has a `tax_rate`, defaulting to the branch GST rate in settings, overridable per item |
 | FR-M8 | An item can be marked unavailable — it stays on the menu but cannot be ordered |
 | FR-M9 | A single variant can be marked unavailable (e.g. Full sold out, Half still available) |
+| FR-M10 | Categories can be dragged into the order the till shows them |
+| FR-M11 | Sections can be moved up or down the floor, a step at a time |
 | FR-M10 | Deleting a category with items is blocked; items must be moved or removed first |
 | FR-M11 | A menu item or variant referenced by any order is soft-deleted, never hard-deleted |
 | FR-M12 | Marking an item unavailable does not affect orders already containing it |
