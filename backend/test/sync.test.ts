@@ -242,6 +242,77 @@ test('nothing synced yet reads as never, not as an epoch', async () => {
   db.close()
 })
 
+test('a failed cycle comes back on its own', async () => {
+  // The gap this closes: nothing rescheduled after a failure, so a cloud that
+  // went down for five seconds stayed unsynced until the next heartbeat. The
+  // backlog sat there long after the cloud was back.
+  const db = openDatabase(':memory:')
+  migrate(db)
+  await seedIfEmpty(db, env)
+
+  const cloudEnv = loadEnv({
+    NODE_ENV: 'test',
+    DB_PATH: ':memory:',
+    CLOUD_DATABASE_URL: 'postgres://stand-in/none',
+  })
+
+  let attempts = 0
+  const worker = new SyncWorker(db, cloudEnv, silentLog, {
+    // Short enough to observe, long enough not to race the assertion.
+    retryBaseMs: 40,
+    heartbeatMs: 60_000,
+    connect: () => {
+      attempts += 1
+      return Promise.reject(new Error('ECONNREFUSED'))
+    },
+  })
+
+  await worker.syncNow()
+  assertEqual(attempts, 1, 'the first attempt ran')
+
+  // Long enough for the scheduled retry, far short of the heartbeat.
+  await new Promise((resolve) => setTimeout(resolve, 250))
+
+  if (attempts < 2) {
+    throw new Error(`no retry was scheduled: still ${attempts} attempt(s)`)
+  }
+
+  worker.stop()
+  db.close()
+})
+
+test('a stopped worker schedules nothing further', async () => {
+  // A retry firing after shutdown would keep the process alive and dial a
+  // cloud nobody is waiting on.
+  const db = openDatabase(':memory:')
+  migrate(db)
+  await seedIfEmpty(db, env)
+
+  const cloudEnv = loadEnv({
+    NODE_ENV: 'test',
+    DB_PATH: ':memory:',
+    CLOUD_DATABASE_URL: 'postgres://stand-in/none',
+  })
+
+  let attempts = 0
+  const worker = new SyncWorker(db, cloudEnv, silentLog, {
+    retryBaseMs: 30,
+    connect: () => {
+      attempts += 1
+      return Promise.reject(new Error('ECONNREFUSED'))
+    },
+  })
+
+  await worker.syncNow()
+  worker.stop()
+  const afterStop = attempts
+
+  await new Promise((resolve) => setTimeout(resolve, 150))
+  assertEqual(attempts, afterStop, 'no further attempts after stop')
+
+  db.close()
+})
+
 test('storage is not offered when there is no cloud', async () => {
   // Nothing to measure, and a zero would render as a full disk.
   const db = openDatabase(':memory:')

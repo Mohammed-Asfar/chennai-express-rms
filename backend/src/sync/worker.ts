@@ -48,6 +48,7 @@ interface Logger {
 export class SyncWorker {
   private debounceTimer: NodeJS.Timeout | null = null
   private heartbeatTimer: NodeJS.Timeout | null = null
+  private retryTimer: NodeJS.Timeout | null = null
   private running = false
   /** Set when a write lands mid-cycle, so its rows are not missed. */
   private pendingSignal = false
@@ -65,6 +66,7 @@ export class SyncWorker {
     private readonly options: {
       debounceMs?: number
       heartbeatMs?: number
+      retryBaseMs?: number
       batchSize?: number
       /** Injectable for tests. */
       connect?: () => Promise<Sql>
@@ -85,19 +87,27 @@ export class SyncWorker {
     // Whatever was pending when the process last stopped.
     void this.runCycle('startup')
 
-    const heartbeat = this.options.heartbeatMs ?? 5 * 60_000
+    // A minute, not five. This is the safety net for anything the write hook
+    // and the retry both missed, and five minutes of an unnoticed backlog is
+    // a long time on a till that is taking money.
+    //
+    // Not unref'd: an unref'd timer does not hold the process open, and on an
+    // otherwise idle event loop it can be left unscheduled — the backup must
+    // keep running whether or not anything else is happening.
+    const heartbeat = this.options.heartbeatMs ?? 60_000
     this.heartbeatTimer = setInterval(() => {
       void this.runCycle('heartbeat')
     }, heartbeat)
-    this.heartbeatTimer.unref?.()
   }
 
   stop(): void {
     this.stopped = true
     if (this.debounceTimer) clearTimeout(this.debounceTimer)
     if (this.heartbeatTimer) clearInterval(this.heartbeatTimer)
+    if (this.retryTimer) clearTimeout(this.retryTimer)
     this.debounceTimer = null
     this.heartbeatTimer = null
+    this.retryTimer = null
   }
 
   /**
@@ -114,7 +124,29 @@ export class SyncWorker {
       this.debounceTimer = null
       void this.runCycle('write')
     }, this.options.debounceMs ?? 2_000)
-    this.debounceTimer.unref?.()
+  }
+
+  /**
+   * Comes back after a failed cycle, sooner than the heartbeat.
+   *
+   * Backs off as failures mount — 15s, 30s, 60s, up to two minutes — so a
+   * brief outage recovers almost immediately while a cloud that is down for
+   * the night is not dialled every fifteen seconds.
+   */
+  private scheduleRetry(): void {
+    if (this.stopped || !this.enabled) return
+    if (this.retryTimer) return
+
+    const base = this.options.retryBaseMs ?? RETRY_BASE_MS
+    const delay = Math.min(
+      base * 2 ** Math.min(this.consecutiveFailures - 1, 3),
+      RETRY_MAX_MS,
+    )
+
+    this.retryTimer = setTimeout(() => {
+      this.retryTimer = null
+      void this.runCycle('retry')
+    }, delay)
   }
 
   /** Forces a cycle now, for the manual retry action. */
@@ -245,6 +277,9 @@ export class SyncWorker {
 
       if (rejected) {
         this.consecutiveFailures += 1
+        // Same reasoning as an unreachable cloud: come back sooner than the
+        // heartbeat, on a growing delay so a permanent fault is not hammered.
+        this.scheduleRetry()
       } else {
         this.lastSuccessAt = new Date().toISOString()
         // Recovering from an outage counts as a reconnect: drain the backlog
@@ -276,6 +311,11 @@ export class SyncWorker {
         { trigger, err: this.lastError, consecutiveFailures: this.consecutiveFailures },
         'sync cycle failed',
       )
+      // Try again on a backoff rather than waiting out the heartbeat. Without
+      // this a five second outage cost five minutes: nothing rescheduled, so
+      // the next attempt was whenever the heartbeat next came round, and the
+      // backlog sat there long after the cloud was back.
+      this.scheduleRetry()
       return null
     } finally {
       if (sql) await sql.end({ timeout: 5 }).catch(() => undefined)
@@ -314,3 +354,9 @@ function later(a: string | null, b: string | null): string | null {
   if (b === null) return a
   return a > b ? a : b
 }
+
+/** First retry delay after a failed cycle. Doubles up to [RETRY_MAX_MS]. */
+const RETRY_BASE_MS = 15_000
+
+/** A cloud down for the night must not be dialled every fifteen seconds. */
+const RETRY_MAX_MS = 120_000
