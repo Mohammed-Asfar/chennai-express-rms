@@ -149,6 +149,81 @@ void main() {
     });
   });
 
+  group('the last-backed-up time', () {
+    final at = DateTime(2026, 9, 2, 12, 0);
+    String when(Duration ago) =>
+        SyncScreen.relativeTime(at, now: at.add(ago));
+
+    test('a single minute is not pluralised', () {
+      // "1 minutes ago" is the kind of thing nobody notices until a client does.
+      expect(when(const Duration(minutes: 1)), '1 minute ago');
+      expect(when(const Duration(minutes: 2)), '2 minutes ago');
+    });
+
+    test('under a minute reads as just now', () {
+      expect(when(const Duration(seconds: 5)), 'Just now');
+      expect(when(const Duration(seconds: 59)), 'Just now');
+    });
+
+    test('hours and days are pluralised correctly too', () {
+      expect(when(const Duration(hours: 1)), '1 hour ago');
+      expect(when(const Duration(hours: 5)), '5 hours ago');
+      expect(when(const Duration(days: 1)), '1 day ago');
+      expect(when(const Duration(days: 3)), '3 days ago');
+    });
+
+    test('a timestamp in the future does not read as negative', () {
+      // A server clock slightly ahead would otherwise give "-1 minutes ago".
+      expect(when(const Duration(minutes: -5)), 'Just now');
+    });
+
+    test('the time moves on as the clock does', () {
+      // The bug this guards: the screen rendered once and froze, so a backup
+      // taken a minute before opening it still said "1 minute ago" an hour on.
+      expect(when(const Duration(minutes: 1)), '1 minute ago');
+      expect(when(const Duration(minutes: 90)), '1 hour ago');
+    });
+  });
+
+  group('the screen keeps itself current', () {
+    testWidgets('it refetches the status while left open', (tester) async {
+      var fetches = 0;
+
+      tester.view.physicalSize = const Size(1400, 900);
+      tester.view.devicePixelRatio = 1.0;
+      addTearDown(tester.view.reset);
+
+      await tester.pumpWidget(
+        ProviderScope(
+          overrides: [
+            syncStatusProvider.overrideWith((_) async {
+              fetches++;
+              return healthy();
+            }),
+            cloudStorageProvider.overrideWith((_) async => null),
+          ],
+          child: MaterialApp(theme: AppTheme.light, home: const SyncScreen()),
+        ),
+      );
+      await tester.pumpAndSettle();
+      final first = fetches;
+
+      // Past the 30s tick. pump rather than pumpAndSettle: a periodic timer
+      // never settles, and pumpAndSettle would time out waiting for it.
+      await tester.pump(const Duration(seconds: 31));
+      await tester.pump();
+
+      expect(
+        fetches,
+        greaterThan(first),
+        reason: 'the screen asked again rather than freezing on first paint',
+      );
+
+      // Let the timer be cancelled cleanly by the teardown.
+      await tester.pumpWidget(const SizedBox());
+    });
+  });
+
   group('the storage model', () {
     test('a percentage is derived from the fraction used', () {
       expect(storage(usedBytes: 256 * _mb).percent, 50);

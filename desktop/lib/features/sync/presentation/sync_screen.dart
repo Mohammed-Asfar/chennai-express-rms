@@ -1,3 +1,4 @@
+import 'dart:async';
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import '../../../core/theme/app_colors.dart';
@@ -16,6 +17,28 @@ import '../data/sync_repository.dart';
 class SyncScreen extends ConsumerStatefulWidget {
   const SyncScreen({super.key});
 
+  /// Relative, because "3 hours ago" answers the question and a timestamp
+  /// makes the reader do the subtraction.
+  ///
+  /// Exposed for tests: the wording is the whole point of the line, and
+  /// "1 minutes ago" is the kind of thing nobody notices until a client does.
+  @visibleForTesting
+  static String relativeTime(DateTime at, {DateTime? now}) {
+    final gap = (now ?? DateTime.now()).difference(at);
+
+    // A clock that has drifted, or a backup stamped a moment in the future by
+    // a server slightly ahead. "-1 minutes ago" would look broken.
+    if (gap.isNegative || gap.inMinutes < 1) return 'Just now';
+
+    if (gap.inMinutes < 60) {
+      return '${gap.inMinutes} minute${gap.inMinutes == 1 ? '' : 's'} ago';
+    }
+    if (gap.inHours < 24) {
+      return '${gap.inHours} hour${gap.inHours == 1 ? '' : 's'} ago';
+    }
+    return '${gap.inDays} day${gap.inDays == 1 ? '' : 's'} ago';
+  }
+
   @override
   ConsumerState<SyncScreen> createState() => _SyncScreenState();
 }
@@ -23,6 +46,29 @@ class SyncScreen extends ConsumerStatefulWidget {
 class _SyncScreenState extends ConsumerState<SyncScreen> {
   bool _busy = false;
   String? _error;
+  Timer? _tick;
+
+  /// Fast enough that "1 minute ago" is never stale for long, cheap because the
+  /// status read is local — only the storage figure costs a cloud round trip,
+  /// and that is deliberately not refreshed here.
+  static const _interval = Duration(seconds: 30);
+
+  @override
+  void initState() {
+    super.initState();
+    _tick = Timer.periodic(_interval, (_) {
+      // Two jobs at once: re-reads the status, and rebuilds so the relative
+      // time recomputes. Without it the screen froze at whatever it said when
+      // it opened — "1 minute ago" an hour later.
+      if (mounted && !_busy) ref.invalidate(syncStatusProvider);
+    });
+  }
+
+  @override
+  void dispose() {
+    _tick?.cancel();
+    super.dispose();
+  }
 
   @override
   Widget build(BuildContext context) {
@@ -301,7 +347,7 @@ class _Facts extends StatelessWidget {
           label: 'Last backed up',
           value: status.lastSuccessAt == null
               ? 'Never'
-              : _when(status.lastSuccessAt!),
+              : SyncScreen.relativeTime(status.lastSuccessAt!),
         ),
         _Fact(label: 'Waiting to send', value: '${status.pending}'),
         _Fact(
@@ -313,17 +359,6 @@ class _Facts extends StatelessWidget {
     );
   }
 
-  /// Relative, because "3 hours ago" answers the question and a timestamp
-  /// makes the reader do the subtraction.
-  static String _when(DateTime at) {
-    final gap = DateTime.now().difference(at);
-    if (gap.inMinutes < 1) return 'Just now';
-    if (gap.inMinutes < 60) return '${gap.inMinutes} minutes ago';
-    if (gap.inHours < 24) {
-      return '${gap.inHours} hour${gap.inHours == 1 ? '' : 's'} ago';
-    }
-    return '${gap.inDays} day${gap.inDays == 1 ? '' : 's'} ago';
-  }
 }
 
 class _Fact extends StatelessWidget {
