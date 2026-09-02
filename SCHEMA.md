@@ -689,6 +689,50 @@ staff dismissed a dialog.
 **`is_active` is the rollback.** A release that turns out to be broken is deactivated
 in one row, and clients stop being offered it — no need to publish another build.
 
+### 3.18 `licenses`
+
+**Cloud-only.** Minted by the vendor, claimed by a branch, never pushed up by one.
+See `LICENSING.md` for the full workflow.
+
+| Column | Type | Notes |
+|---|---|---|
+| `key` | `text` PK | `CX-XXXX-XXXX-XXXX` |
+| `branch_code` | `text` | `BR1`, `BR2`. **Unique** — one key per branch |
+| `restaurant` | `text` | Shown on the activation screen before login |
+| `fingerprint` | `text` | Hashed Windows MachineGuid. `NULL` until first activation |
+| `status` | `enum` | `unclaimed`, `active`, `revoked` |
+| `notes` | `text` | Vendor's own reference |
+| `activated_at` | `timestamp` | First successful claim |
+| `last_seen_at` | `timestamp` | Last check-in. Diagnostic only — drives nothing |
+
+**The claim is one statement, not a read then a write.** `UPDATE ... WHERE key = $2
+AND (fingerprint IS NULL OR fingerprint = $1)` means two PCs racing with the same key
+cannot both succeed: the first writes its fingerprint, the second matches nothing and
+gets zero rows back.
+
+**`fingerprint` is hashed, not raw.** The cloud has no use for the actual MachineGuid,
+and a hash cannot be used to identify that machine anywhere else.
+
+### 3.19 `license_state`
+
+**Branch-only.** The cached copy of this installation's licence, so the till keeps
+billing when the internet is down.
+
+| Column | Type | Notes |
+|---|---|---|
+| `id` | `int` PK | `CHECK (id = 1)` — one licence per installation |
+| `key` | `text` | |
+| `branch_code` | `text` | |
+| `restaurant` | `text` | |
+| `fingerprint` | `text` | This machine's, as claimed |
+| `status` | `enum` | `active`, `revoked` as of the last successful check |
+| `activated_at` | `text` | |
+| `last_verified_at` | `text` | **The grace period counts from here** |
+
+**A failed check does not touch `last_verified_at`.** The window counts down rather
+than resetting, so an install that never reaches the cloud again does eventually stop
+— but not on the day the connection drops.
+
 ---
 
 ## 4. Indexes
@@ -745,6 +789,8 @@ CREATE INDEX idx_print_jobs_pending ON print_jobs(status)
 | `settings` | Yes |
 | `print_jobs` | **No — branch-local** |
 | `app_releases` | **No — cloud-only**, read by the branch, never written by it |
+| `licenses` | **No — cloud-only**, claimed by the branch, never pushed up |
+| `license_state` | **No — branch-local**, the cached copy of this PC's licence |
 
 **Push-only during normal operation.** The branch is the source of truth; the cloud
 is a read replica for reporting. Nothing flows back down while the till is in

@@ -13,6 +13,7 @@ import type { Env } from './lib/env.js'
 import { AppError } from './lib/errors.js'
 import { healthRoutes } from './routes/health.js'
 import { authRoutes } from './routes/auth.js'
+import { activationRoutes } from './routes/activation.js'
 import { updateRoutes } from './routes/updates.js'
 import { categoryRoutes } from './routes/categories.js'
 import { menuRoutes } from './routes/menu.js'
@@ -148,6 +149,8 @@ export async function buildServer({ db, env, sync }: BuildOptions): Promise<Fast
   })
 
   await app.register(healthRoutes)
+  // Before auth: it is what the app calls to decide whether login may be shown.
+  await app.register(activationRoutes)
   await app.register(authRoutes)
   await app.register(updateRoutes)
   await app.register(categoryRoutes)

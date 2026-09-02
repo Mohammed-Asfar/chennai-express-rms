@@ -18,7 +18,12 @@
     "db:migrate": "tsx src/db/migrate.ts",
     "db:status": "tsx src/db/migrate.ts --status",
     "db:migrate:cloud": "tsx src/db/migrate-cloud.ts",
-    "db:status:cloud": "tsx src/db/migrate-cloud.ts --status"
+    "db:status:cloud": "tsx src/db/migrate-cloud.ts --status",
+    "license:new": "tsx src/db/licenses.ts new",
+    "license:list": "tsx src/db/licenses.ts list",
+    "license:revoke": "tsx src/db/licenses.ts revoke",
+    "license:restore": "tsx src/db/licenses.ts restore",
+    "license:reset": "tsx src/db/licenses.ts reset"
   },
   "dependencies": {
     "@fastify/cors": "^11.0.0",

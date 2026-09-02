@@ -623,6 +623,46 @@ a dialog. Forcing is reserved for that class of fix — not for features.
 the billing PC. Without checksum verification, anyone who can intercept the download
 runs code on that machine.
 
+### 6.12 Licensing and Activation
+
+Full workflow in `LICENSING.md`.
+
+| ID | Requirement |
+|---|---|
+| FR-L1 | An installation must be activated with a key before anyone can sign in |
+| FR-L2 | A key binds to the first PC that activates it and will not work on a second |
+| FR-L3 | The claim is atomic — two PCs racing with one key cannot both succeed |
+| FR-L4 | Keys are normalised on entry: case, dashes and whitespace are all forgiven |
+| FR-L5 | Every activation failure returns the same message, whatever the cause |
+| FR-L6 | **A licence check never blocks billing** — the verdict is served from a local cache |
+| FR-L7 | An installation that cannot reach the licence server keeps billing for 7 days |
+| FR-L8 | A revoked licence gets the same 7 days, with a warning, before billing stops |
+| FR-L9 | The warning appears only in the last 3 days of the grace period |
+| FR-L10 | A failed check does not reset the grace window — it counts down |
+| FR-L11 | A corrupt or unreadable verification date fails closed, never open |
+| FR-L12 | The vendor can revoke, restore, or unbind a key without visiting the restaurant |
+| FR-L13 | The machine fingerprint is hashed, never stored or transmitted raw |
+| FR-L14 | The Neon connection string never leaves the backend process |
+
+**FR-L6 through FR-L11 are the operational core.** A licence system that stops a
+restaurant billing because their broadband died is worse than no licence system at
+all — the vendor loses a client over a feature meant to protect revenue. Every path
+resolves to "keep working" until a week has passed.
+
+**FR-L8 covers the commercial case honestly.** Revocation is usually a payment
+dispute, not fraud. Cutting a restaurant off mid-service on the day someone flips a
+flag costs them a day's takings and makes the dispute worse. A week is enough notice
+to settle an invoice.
+
+**FR-L5 prevents key probing.** Distinguishing "no such key" from "already in use"
+would let someone enumerate valid keys by watching which error comes back.
+
+**Known limitation:** until packaging lands (§12), `.env` is a readable file on the
+billing PC, so someone technical can point the backend at their own database. This
+stops a restaurant copying the install to a second till — the realistic threat — but
+is not airtight until the connection string is embedded in a bundled binary and the
+install directory is ACL-locked.
+
 ---
 
 ## 7. Edge Cases
@@ -727,6 +767,12 @@ Scenarios that occur in a working restaurant and their required behaviour.
 | Installer checksum does not match | Update aborts; the current version keeps running |
 | A published release turns out to be broken | Deactivated in the cloud; clients stop being offered it |
 | A build below the minimum supported version | Forced to update before billing continues |
+| Activation attempted with no internet | Reports that the licence server is unreachable; nothing is written locally |
+| Licence server unreachable on a normal day | Billing continues from the cached verdict; nothing is shown |
+| Licence server unreachable for over a week | Billing stops with an actionable message |
+| The same key entered on a second PC | Rejected — the fingerprint no longer matches |
+| A licence revoked mid-service | Billing continues to the end of the grace period |
+| The client replaces their PC | The vendor unbinds the key; it activates on the new machine |
 
 ### 7.6 Known limitations of v1
 
