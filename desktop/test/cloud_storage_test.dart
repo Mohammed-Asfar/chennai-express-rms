@@ -25,14 +25,16 @@ CloudStorage storage({
   largest: largest,
 );
 
-SyncStatus healthy() => SyncStatus(
-  enabled: true,
-  running: false,
-  healthy: true,
-  pending: 0,
-  quarantined: 0,
-  lastSuccessAt: DateTime.now(),
-);
+SyncStatus healthy({DateTime? lastSuccessAt, DateTime? lastAttemptAt}) =>
+    SyncStatus(
+      enabled: true,
+      running: false,
+      healthy: true,
+      pending: 0,
+      quarantined: 0,
+      lastSuccessAt: lastSuccessAt ?? DateTime.now(),
+      lastAttemptAt: lastAttemptAt,
+    );
 
 Future<void> pump(WidgetTester tester, CloudStorage? value) async {
   tester.view.physicalSize = const Size(1400, 900);
@@ -182,6 +184,70 @@ void main() {
       // taken a minute before opening it still said "1 minute ago" an hour on.
       expect(when(const Duration(minutes: 1)), '1 minute ago');
       expect(when(const Duration(minutes: 90)), '1 hour ago');
+    });
+  });
+
+  group('last checked', () {
+    Future<void> pumpStatus(WidgetTester tester, SyncStatus value) async {
+      tester.view.physicalSize = const Size(1400, 900);
+      tester.view.devicePixelRatio = 1.0;
+      addTearDown(tester.view.reset);
+
+      await tester.pumpWidget(
+        ProviderScope(
+          overrides: [
+            syncStatusProvider.overrideWith((_) async => value),
+            cloudStorageProvider.overrideWith((_) async => null),
+          ],
+          child: MaterialApp(theme: AppTheme.light, home: const SyncScreen()),
+        ),
+      );
+      await tester.pumpAndSettle();
+      addTearDown(() async => tester.pumpWidget(const SizedBox()));
+    }
+
+    testWidgets('is shown beside when it was last backed up', (tester) async {
+      final now = DateTime.now();
+      await pumpStatus(
+        tester,
+        healthy(
+          lastSuccessAt: now.subtract(const Duration(hours: 3)),
+          lastAttemptAt: now.subtract(const Duration(minutes: 2)),
+        ),
+      );
+
+      // The reassuring pair: nothing has needed sending for three hours, but
+      // the system looked two minutes ago. Without the second line the first
+      // reads as neglect.
+      expect(find.text('Last backed up'), findsOneWidget);
+      expect(find.text('3 hours ago'), findsOneWidget);
+      expect(find.text('Last checked'), findsOneWidget);
+      expect(find.text('2 minutes ago'), findsOneWidget);
+    });
+
+    testWidgets('is hidden before the first cycle has run', (tester) async {
+      // Nothing has been attempted yet, so "Last checked: Never" would be
+      // noise on a screen that already says the backup is fine.
+      await pumpStatus(tester, healthy(lastAttemptAt: null));
+
+      expect(find.text('Last checked'), findsNothing);
+    });
+
+    test('it parses from the wire in local time', () {
+      final utc = DateTime.utc(2026, 9, 2, 8);
+      final parsed = SyncStatus.fromJson({
+        'enabled': true,
+        'healthy': true,
+        'lastAttemptAt': utc.toIso8601String(),
+      });
+
+      expect(parsed.lastAttemptAt, utc.toLocal());
+      expect(parsed.lastAttemptAt!.isUtc, isFalse);
+    });
+
+    test('a missing attempt time is null, not the epoch', () {
+      // DateTime.tryParse('') returning null is what keeps the row hidden.
+      expect(SyncStatus.fromJson(const {}).lastAttemptAt, isNull);
     });
   });
 

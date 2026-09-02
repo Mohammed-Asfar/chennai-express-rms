@@ -349,6 +349,15 @@ class _Facts extends StatelessWidget {
               ? 'Never'
               : SyncScreen.relativeTime(status.lastSuccessAt!),
         ),
+        // Separate from the line above, and the difference is the point: on a
+        // quiet afternoon nothing changes, so the last push can be hours old
+        // while the system is checking every few minutes and is perfectly fine.
+        // Without this line that gap looks like neglect.
+        if (status.lastAttemptAt != null)
+          _Fact(
+            label: 'Last checked',
+            value: SyncScreen.relativeTime(status.lastAttemptAt!),
+          ),
         _Fact(label: 'Waiting to send', value: '${status.pending}'),
         _Fact(
           label: 'Stuck',

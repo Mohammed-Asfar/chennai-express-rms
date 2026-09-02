@@ -16,6 +16,7 @@ class SyncStatus {
     required this.quarantined,
     this.problem,
     this.lastSuccessAt,
+    this.lastAttemptAt,
     this.lastError,
   });
 
@@ -42,6 +43,14 @@ class SyncStatus {
   /// When a cycle last actually put rows in the cloud. Null means never.
   final DateTime? lastSuccessAt;
 
+  /// When it last looked, whether or not anything needed sending.
+  ///
+  /// Different from [lastSuccessAt], and the difference is the reassuring
+  /// part: on a quiet afternoon nothing changes, so the last successful push
+  /// can be hours old while the system is checking every few minutes and
+  /// working perfectly.
+  final DateTime? lastAttemptAt;
+
   /// The raw database error, for when the plain-language problem is not enough
   /// to fix it.
   final String? lastError;
@@ -57,6 +66,9 @@ class SyncStatus {
     problem: json['problem'] as String?,
     lastSuccessAt: DateTime.tryParse(
       json['lastSuccessAt'] as String? ?? '',
+    )?.toLocal(),
+    lastAttemptAt: DateTime.tryParse(
+      json['lastAttemptAt'] as String? ?? '',
     )?.toLocal(),
     lastError: json['lastError'] as String?,
   );
