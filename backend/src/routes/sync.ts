@@ -9,6 +9,17 @@ import { resyncMasterData, retryQuarantined } from '../sync/push.js'
 export async function syncRoutes(app: FastifyInstance): Promise<void> {
   app.get('/sync/status', { preHandler: requireAuth }, async () => app.sync.status())
 
+  /**
+   * How much cloud room is used, and how long it will last.
+   *
+   * Separate from `/sync/status` because it costs a round trip to the cloud,
+   * and the status is polled. Null storage means "could not measure", which the
+   * UI shows as unknown rather than as a problem.
+   */
+  app.get('/sync/storage', { preHandler: requireAuth }, async () => ({
+    storage: await app.sync.storage(),
+  }))
+
   app.post('/sync/now', { preHandler: requireRole('admin') }, async () => {
     const result = await app.sync.syncNow()
     return { ok: true, result, status: app.sync.status() }

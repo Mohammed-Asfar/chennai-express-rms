@@ -2,6 +2,7 @@ import type { Sql } from 'postgres'
 import type { Db } from '../db/client.js'
 import type { Env } from '../lib/env.js'
 import { pushPending, syncCounts, type PushResult } from './push.js'
+import { readCloudStorage, type CloudStorage } from './storage.js'
 
 export interface SyncStatus {
   enabled: boolean
@@ -120,6 +121,30 @@ export class SyncWorker {
   async syncNow(): Promise<PushResult | null> {
     if (!this.enabled) return null
     return this.runCycle('manual')
+  }
+
+  /**
+   * How much room the cloud copy is using.
+   *
+   * Its own connection rather than the cycle's: this is asked for by someone
+   * looking at a screen, and it must not wait on a push that could be pumping
+   * a week's backlog. Null when there is no cloud, or it cannot be reached —
+   * a storage figure is never worth an error in front of a user.
+   */
+  async storage(): Promise<CloudStorage | null> {
+    if (!this.enabled) return null
+
+    let sql: Sql | null = null
+    try {
+      sql = await this.connect()
+      return await readCloudStorage(this.db, sql)
+    } catch (error) {
+      const message = error instanceof Error ? error.message : String(error)
+      this.log.warn({ err: message }, 'could not read cloud storage')
+      return null
+    } finally {
+      if (sql) await sql.end({ timeout: 5 }).catch(() => undefined)
+    }
   }
 
   status(): SyncStatus {

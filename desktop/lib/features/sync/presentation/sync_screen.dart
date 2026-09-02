@@ -44,6 +44,9 @@ class _SyncScreenState extends ConsumerState<SyncScreen> {
 
             _Facts(status: value),
 
+            const SizedBox(height: AppSpacing.lg),
+            const _StorageCard(),
+
             if (value.lastError != null) ...[
               const SizedBox(height: AppSpacing.lg),
               Text('Reported problem', style: Theme.of(context).textTheme.titleSmall),
@@ -115,11 +118,120 @@ class _SyncScreenState extends ConsumerState<SyncScreen> {
     try {
       await action(ref.read(syncRepositoryProvider));
       ref.invalidate(syncStatusProvider);
+      // A push that landed changed the size, so the figure on screen is stale.
+      ref.invalidate(cloudStorageProvider);
     } catch (error) {
       if (mounted) setState(() => _error = '$error');
     } finally {
       if (mounted) setState(() => _busy = false);
     }
+  }
+}
+
+/// Cloud room used, and how long it will last.
+///
+/// Present even when everything is fine, because the question it answers is
+/// "am I about to be asked to pay for this" — and that gets asked when nothing
+/// is wrong. Silent while it cannot be measured: a missing size is not a fault.
+class _StorageCard extends ConsumerWidget {
+  const _StorageCard();
+
+  @override
+  Widget build(BuildContext context, WidgetRef ref) {
+    final storage = ref.watch(cloudStorageProvider).valueOrNull;
+    if (storage == null) return const SizedBox.shrink();
+
+    final theme = Theme.of(context);
+    final tight = storage.isRunningOut;
+
+    return Container(
+      padding: const EdgeInsets.all(AppSpacing.md),
+      decoration: BoxDecoration(
+        color: AppColors.surfaceSunken,
+        borderRadius: BorderRadius.circular(AppSpacing.radiusMd),
+      ),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Row(
+            mainAxisAlignment: MainAxisAlignment.spaceBetween,
+            children: [
+              Text('Cloud space used', style: theme.textTheme.titleSmall),
+              Text(
+                '${_size(storage.usedBytes)} of ${_size(storage.limitBytes)}',
+                style: theme.textTheme.titleSmall?.copyWith(
+                  color: tight ? AppColors.danger : AppColors.ink,
+                ),
+              ),
+            ],
+          ),
+          const SizedBox(height: AppSpacing.sm),
+
+          ClipRRect(
+            borderRadius: BorderRadius.circular(AppSpacing.radiusSm),
+            child: LinearProgressIndicator(
+              // A hair of fill at 1%, so the bar reads as a measurement rather
+              // than as an empty control someone has to interpret.
+              value: storage.fraction.clamp(0.01, 1.0),
+              minHeight: 8,
+              backgroundColor: AppColors.chartTrack,
+              valueColor: AlwaysStoppedAnimation(
+                tight ? AppColors.danger : AppColors.success,
+              ),
+            ),
+          ),
+
+          const SizedBox(height: AppSpacing.sm),
+          Text(_summary(storage), style: theme.textTheme.bodySmall),
+
+          // Only when it starts to matter. Naming the biggest table while 2%
+          // is used would invite someone to optimise nothing.
+          if (tight && storage.largest.isNotEmpty) ...[
+            const SizedBox(height: AppSpacing.sm),
+            Text(
+              'Largest: ${storage.largest.take(3).map((l) => '${l.table} ${_size(l.bytes)}').join(', ')}',
+              style: theme.textTheme.bodySmall,
+            ),
+          ],
+        ],
+      ),
+    );
+  }
+
+  /// The projection in words, and honest about not having one.
+  static String _summary(CloudStorage s) {
+    final used = '${s.percent}% used';
+
+    if (s.yearsRemaining == null) {
+      return s.daysMeasured == 0
+          ? '$used. Nothing billed yet, so there is nothing to project from.'
+          : '$used. Too few trading days so far to estimate how long it lasts.';
+    }
+
+    final years = s.yearsRemaining!;
+    final rate = '${s.billsPerDay.round()} bills a day';
+
+    if (years >= 50) {
+      return '$used. At $rate this will not run out.';
+    }
+    if (years >= 2) {
+      return '$used. At $rate there is room for about ${years.round()} more years.';
+    }
+    if (years >= 1) {
+      return '$used. At $rate there is about a year left.';
+    }
+
+    final months = (years * 12).round();
+    return '$used. At $rate there is about '
+        '$months month${months == 1 ? '' : 's'} left.';
+  }
+
+  /// Sized for a person, not a sysadmin: MB and GB, one decimal.
+  static String _size(int bytes) {
+    const mb = 1024 * 1024;
+    if (bytes >= 1024 * mb) return '${(bytes / (1024 * mb)).toStringAsFixed(1)} GB';
+    if (bytes >= mb) return '${(bytes / mb).toStringAsFixed(1)} MB';
+    return '${(bytes / 1024).round()} KB';
   }
 }
 

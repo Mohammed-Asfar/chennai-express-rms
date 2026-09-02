@@ -62,6 +62,62 @@ class SyncStatus {
   );
 }
 
+/// How much cloud room the backup is using.
+///
+/// The question behind it is commercial: a restaurant on a free plan wants to
+/// know whether they are about to be asked for money. A byte count alone does
+/// not answer that, so the projection is the point.
+class CloudStorage {
+  const CloudStorage({
+    required this.usedBytes,
+    required this.limitBytes,
+    required this.bytesPerBill,
+    required this.billsPerDay,
+    required this.daysMeasured,
+    required this.largest,
+    this.yearsRemaining,
+  });
+
+  final int usedBytes;
+  final int limitBytes;
+
+  /// Measured from this branch's own bills, not assumed.
+  final int bytesPerBill;
+  final double billsPerDay;
+
+  /// Trading days behind the average. Too few and no projection is offered.
+  final int daysMeasured;
+
+  /// Years of room left at the current rate. Null when there is not enough
+  /// trading history to say honestly.
+  final double? yearsRemaining;
+
+  final List<({String table, int bytes})> largest;
+
+  double get fraction => limitBytes == 0 ? 0 : usedBytes / limitBytes;
+  int get percent => (fraction * 100).round();
+
+  /// Worth telling someone about. Below this the number is trivia.
+  bool get isRunningOut => fraction >= 0.75;
+
+  factory CloudStorage.fromJson(Map<String, dynamic> json) => CloudStorage(
+    usedBytes: json['usedBytes'] as int? ?? 0,
+    limitBytes: json['limitBytes'] as int? ?? 0,
+    bytesPerBill: json['bytesPerBill'] as int? ?? 0,
+    billsPerDay: (json['billsPerDay'] as num?)?.toDouble() ?? 0,
+    daysMeasured: json['daysMeasured'] as int? ?? 0,
+    yearsRemaining: (json['yearsRemaining'] as num?)?.toDouble(),
+    largest:
+        ((json['largest'] as List<dynamic>?) ?? const []).map((e) {
+          final row = e as Map<String, dynamic>;
+          return (
+            table: row['table'] as String? ?? '',
+            bytes: row['bytes'] as int? ?? 0,
+          );
+        }).toList(),
+  );
+}
+
 class SyncRepository {
   SyncRepository(this._api);
 
@@ -69,6 +125,14 @@ class SyncRepository {
 
   Future<SyncStatus> status() async {
     return SyncStatus.fromJson(await _api.get('/sync/status'));
+  }
+
+  /// Cloud usage, or null when it could not be measured. Not knowing the size
+  /// is not a fault worth an error in front of someone.
+  Future<CloudStorage?> storage() async {
+    final json = await _api.get('/sync/storage');
+    final storage = json['storage'] as Map<String, dynamic>?;
+    return storage == null ? null : CloudStorage.fromJson(storage);
   }
 
   /// Runs a cycle now rather than waiting for the heartbeat.
@@ -93,4 +157,10 @@ final syncRepositoryProvider = Provider<SyncRepository>((ref) {
 
 final syncStatusProvider = FutureProvider<SyncStatus>((ref) {
   return ref.watch(syncRepositoryProvider).status();
+});
+
+/// Cloud usage. Its own provider because it costs a round trip to the cloud —
+/// the status is polled every couple of minutes, this is not.
+final cloudStorageProvider = FutureProvider<CloudStorage?>((ref) {
+  return ref.watch(syncRepositoryProvider).storage();
 });

@@ -189,6 +189,41 @@ function rejectingCloud(message: string): () => Promise<Sql> {
   return () => Promise.resolve(sql)
 }
 
+test('storage is not offered when there is no cloud', async () => {
+  // Nothing to measure, and a zero would render as a full disk.
+  const db = openDatabase(':memory:')
+  migrate(db)
+  await seedIfEmpty(db, env)
+
+  const worker = new SyncWorker(db, env, silentLog, {})
+  assertEqual(await worker.storage(), null)
+
+  worker.stop()
+  db.close()
+})
+
+test('an unreachable cloud reports unknown storage rather than throwing', async () => {
+  // A size that cannot be read is not a fault worth an error in front of
+  // someone looking at a backup screen.
+  const db = openDatabase(':memory:')
+  migrate(db)
+  await seedIfEmpty(db, env)
+
+  const offline = loadEnv({
+    NODE_ENV: 'test',
+    DB_PATH: ':memory:',
+    CLOUD_DATABASE_URL: 'postgres://nobody:nothing@127.0.0.1:1/none',
+  })
+  const worker = new SyncWorker(db, offline, silentLog, {
+    connect: () => Promise.reject(new Error('ECONNREFUSED')),
+  })
+
+  assertEqual(await worker.storage(), null)
+
+  worker.stop()
+  db.close()
+})
+
 test('a repair re-pushes master data that the cloud is missing', async () => {
   // The live fault: the admin user was stamped synced but absent from the
   // cloud, so every order, bill and payment referencing it was rejected on a
