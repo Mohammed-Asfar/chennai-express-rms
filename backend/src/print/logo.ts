@@ -114,6 +114,34 @@ function spread(
 }
 
 /**
+ * Renders a stored raster back to a PNG, for showing on screen.
+ *
+ * Drawn from the dithered one-bit data rather than the original upload, so what
+ * is shown is exactly what burns onto the paper — including how the dithering
+ * turned out. Previewing the original would hide the one thing worth checking.
+ */
+export async function rasterToPng(logo: LogoRaster): Promise<Buffer> {
+  const bytesPerRow = logo.width / 8
+  const packed = Buffer.from(logo.data, 'base64')
+
+  // Greyscale, one byte per dot: 0 where the printer burns, 255 where it does
+  // not. The stored bit is set for a burned dot, so it inverts here.
+  const pixels = Buffer.alloc(logo.width * logo.height, 255)
+  for (let y = 0; y < logo.height; y++) {
+    for (let x = 0; x < logo.width; x++) {
+      const byte = packed[y * bytesPerRow + (x >> 3)] ?? 0
+      if ((byte >> (7 - (x & 7))) & 1) pixels[y * logo.width + x] = 0
+    }
+  }
+
+  return sharp(pixels, {
+    raw: { width: logo.width, height: logo.height, channels: 1 },
+  })
+    .png()
+    .toBuffer()
+}
+
+/**
  * The ESC/POS command that prints a stored raster.
  *
  * `GS v 0` takes the width in bytes and the height in dots, both little-endian,

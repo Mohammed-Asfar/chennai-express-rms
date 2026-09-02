@@ -5,7 +5,7 @@ import { currentUser, requireAuth, requireRole } from '../lib/guards.js'
 import { getSetting, setSetting, type SettingKey } from '../lib/settings.js'
 import { formatBillNumber, RESET_PERIODS } from '../lib/bill-number.js'
 import { resolvePrinter } from '../print/queue.js'
-import { rasterise } from '../print/logo.js'
+import { rasterise, rasterToPng } from '../print/logo.js'
 import { renderBill } from '../print/tickets.js'
 import { decodeTicket } from '../print/preview.js'
 import { CHARS_PER_LINE } from '../print/escpos.js'
@@ -172,6 +172,18 @@ export async function settingsRoutes(app: FastifyInstance): Promise<void> {
       padWidth: getSetting(app.db, me.branchId, 'bill_number_pad'),
     })
 
+    const logo =
+      branch?.print_logo === 1 &&
+      branch.logo_bitmap &&
+      branch.logo_width &&
+      branch.logo_height
+        ? {
+            data: branch.logo_bitmap,
+            width: branch.logo_width,
+            height: branch.logo_height,
+          }
+        : null
+
     const rendered = renderBill(
       {
         billNumber,
@@ -208,22 +220,22 @@ export async function settingsRoutes(app: FastifyInstance): Promise<void> {
         taxMode,
         payments: [{ mode: 'cash', amount: 79_000 }],
         footer: getSetting(app.db, me.branchId, 'bill_footer'),
-        logo:
-          branch?.print_logo === 1 &&
-          branch.logo_bitmap &&
-          branch.logo_width &&
-          branch.logo_height
-            ? {
-                data: branch.logo_bitmap,
-                width: branch.logo_width,
-                height: branch.logo_height,
-              }
-            : null,
+        logo,
       },
       paper,
     )
 
-    return { preview: decodeTicket(rendered, CHARS_PER_LINE[paper]), paper }
+    // The raster as a picture, so the preview can show what actually prints
+    // rather than a placeholder. Small enough to inline as a data URL.
+    const logoImage = logo
+      ? 'data:image/png;base64,' + (await rasterToPng(logo)).toString('base64')
+      : null
+
+    return {
+      preview: decodeTicket(rendered, CHARS_PER_LINE[paper]),
+      paper,
+      logoImage,
+    }
   })
 
   // --- branch details, which appear on the printed bill ---

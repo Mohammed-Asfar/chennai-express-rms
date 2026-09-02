@@ -1,5 +1,5 @@
 import sharp from 'sharp'
-import { rasterise, rasterCommand, LOGO_WIDTH } from '../src/print/logo.js'
+import { rasterise, rasterCommand, rasterToPng, LOGO_WIDTH } from '../src/print/logo.js'
 import { test, assertEqual } from './helpers.js'
 
 /** A solid-colour test image. */
@@ -142,4 +142,36 @@ test('a tall logo encodes its height across two bytes', async () => {
   const command = rasterCommand(raster)
   const encoded = (command[6] ?? 0) | ((command[7] ?? 0) << 8)
   assertEqual(encoded, raster.height)
+})
+
+test('a raster renders back to a picture of what prints', async () => {
+  const source = await image(400, 100, 0)
+  const raster = await rasterise(source, '80mm')
+  const png = await rasterToPng(raster)
+
+  // A real PNG, at the raster's own size — not the original upload's.
+  const meta = await sharp(png).metadata()
+  assertEqual(meta.format, 'png')
+  assertEqual(meta.width, raster.width)
+  assertEqual(meta.height, raster.height)
+})
+
+test('a burned dot shows as black, an unburned one as white', async () => {
+  // Inverted here would show a negative of the logo, which is worse than a
+  // placeholder: it would look wrong when the printing is right.
+  const black = await rasterToPng(await rasterise(await image(80, 40, 0), '80mm'))
+  const blackPixels = await sharp(black).greyscale().raw().toBuffer()
+  assertEqual(
+    blackPixels.every((p) => p === 0),
+    true,
+    'a fully burned raster is a black picture',
+  )
+
+  const white = await rasterToPng(await rasterise(await image(80, 40, 255), '80mm'))
+  const whitePixels = await sharp(white).greyscale().raw().toBuffer()
+  assertEqual(
+    whitePixels.every((p) => p === 255),
+    true,
+    'an unburned raster is a blank picture',
+  )
 })

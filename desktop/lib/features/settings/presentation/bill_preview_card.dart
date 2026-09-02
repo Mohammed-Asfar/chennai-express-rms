@@ -1,3 +1,4 @@
+import 'dart:convert';
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import '../../../core/theme/app_colors.dart';
@@ -111,9 +112,23 @@ class _Paper extends StatelessWidget {
             child: Column(
               crossAxisAlignment: CrossAxisAlignment.stretch,
               children: [
-                if (bill.hasLogo) ...[
-                  // The raster is image data, not text, so the preview marks
-                  // where it prints rather than pretending to draw it.
+                if (bill.logoImage != null) ...[
+                  // The rasterised logo, not the uploaded image: this is what
+                  // burns onto the paper, dithering and all, which is the one
+                  // thing worth checking before printing a roll.
+                  Center(
+                    child: Image.memory(
+                      base64Decode(bill.logoImage!.split(',').last),
+                      // Nearest-neighbour keeps the one-bit dots crisp; smooth
+                      // scaling would blur the dithering into fake greys and
+                      // hide how it will really look.
+                      filterQuality: FilterQuality.none,
+                      fit: BoxFit.contain,
+                    ),
+                  ),
+                  const SizedBox(height: AppSpacing.sm),
+                ] else if (bill.hasLogo) ...[
+                  // A logo is set but could not be drawn.
                   Container(
                     height: 34,
                     decoration: BoxDecoration(
