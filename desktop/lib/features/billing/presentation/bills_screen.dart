@@ -439,6 +439,9 @@ class _BillRowState extends State<_BillRow> {
             padding: const EdgeInsets.all(AppSpacing.md),
             child: Row(
               children: [
+                _TypeIcon(orderType: bill.orderType),
+                const SizedBox(width: AppSpacing.md),
+
                 // Wide enough for a prefixed number as printed, e.g.
                 // CE/2026-27/0016, not just the bare counter.
                 SizedBox(
@@ -517,6 +520,49 @@ class _BillRowState extends State<_BillRow> {
               '${at.hour >= 12 ? 'pm' : 'am'}';
     if (!showDate) return time;
     return [bill.businessDate, time].where((s) => s.isNotEmpty).join('  ');
+  }
+}
+
+/// Where the order was taken, as a mark at the head of the row.
+///
+/// It carries information rather than decorating: dine-in and takeaway are the
+/// split most often eyeballed down a day's bills, and a shape is faster to scan
+/// than reading the word on every line. Grey, not coloured — the status pill
+/// and the amount are what the eye should land on first, and a third colour
+/// competing with them would slow the whole row down.
+class _TypeIcon extends StatelessWidget {
+  const _TypeIcon({required this.orderType});
+
+  /// dine_in or takeaway. Null for a bill whose order was purged.
+  final String? orderType;
+
+  @override
+  Widget build(BuildContext context) {
+    final takeaway = orderType == 'takeaway';
+
+    return Tooltip(
+      // Named as well as drawn: an icon alone is a guess until someone is told
+      // once what it means.
+      message: orderType == null
+          ? 'Order no longer on file'
+          : takeaway
+          ? 'Takeaway'
+          : 'Dine-in',
+      child: Container(
+        height: 36,
+        width: 36,
+        decoration: BoxDecoration(
+          color: AppColors.surfaceSunken,
+          borderRadius: BorderRadius.circular(AppSpacing.radiusSm),
+        ),
+        alignment: Alignment.center,
+        child: Icon(
+          takeaway ? Icons.shopping_bag_outlined : Icons.restaurant,
+          size: 18,
+          color: AppColors.inkMuted,
+        ),
+      ),
+    );
   }
 }
 

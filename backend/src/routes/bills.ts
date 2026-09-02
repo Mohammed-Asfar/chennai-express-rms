@@ -135,12 +135,15 @@ export async function billRoutes(app: FastifyInstance): Promise<void> {
     // LEFT, so a bill whose order was purged still lists.
     const rows = app.db
       .prepare(
-        `SELECT b.*, o.order_no AS order_no
+        `SELECT b.*, o.order_no AS order_no, o.type AS order_type
          FROM bills b LEFT JOIN orders o ON o.id = b.order_id
          WHERE ${where}
          ORDER BY b.business_date DESC, b.bill_no DESC LIMIT 500`,
       )
-      .all(...params) as (BillRow & { order_no: number | null })[]
+      .all(...params) as (BillRow & {
+        order_no: number | null
+        order_type: string | null
+      })[]
 
     // Summed in SQL over the whole match, not over the returned page: a day
     // with more than 500 bills must still report its real takings. The join is
@@ -708,12 +711,17 @@ const shape = (result: BillResult) => ({
   lines: result.lines,
 })
 
-function present(bill: BillRow & { order_no?: number | null }, payments: PaymentRow[]) {
+function present(
+  bill: BillRow & { order_no?: number | null; order_type?: string | null },
+  payments: PaymentRow[],
+) {
   return {
     id: bill.id,
     orderId: bill.order_id,
-    /** Only the list query joins this in; the detail route sets its own. */
+    /** Only the list query joins these in; the detail route sets its own. */
     orderNo: bill.order_no ?? null,
+    // Dine-in or takeaway, so the list can mark which is which at a glance.
+    orderType: bill.order_type ?? null,
     billNo: bill.bill_no,
     /** The formatted string as printed. */
     billNumber: bill.bill_number,

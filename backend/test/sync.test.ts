@@ -175,9 +175,11 @@ function rejectingCloud(message: string): () => Promise<Sql> {
     return Promise.reject(new Error(message))
   }) as unknown as Sql
 
-  sql.unsafe = (() => Promise.reject(new Error(message))) as Sql['unsafe']
-  sql.end = (() => Promise.resolve()) as Sql['end']
-  sql.begin = ((fn: (t: Sql) => unknown) => Promise.resolve(fn(sql))) as Sql['begin']
+  // Cast through unknown: these stubs satisfy what the worker calls, not the
+  // full tagged-template surface of the real driver.
+  sql.unsafe = (() => Promise.reject(new Error(message))) as unknown as Sql['unsafe']
+  sql.end = (() => Promise.resolve()) as unknown as Sql['end']
+  sql.begin = ((fn: (t: Sql) => unknown) => Promise.resolve(fn(sql))) as unknown as Sql['begin']
 
   return () => Promise.resolve(sql)
 }

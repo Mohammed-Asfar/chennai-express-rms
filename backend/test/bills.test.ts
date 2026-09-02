@@ -289,6 +289,26 @@ test('the list carries the order number beside the bill number', async () => {
   await close(ctx)
 })
 
+test('the list says whether each bill was dine-in or takeaway', async () => {
+  // The bills list marks the two apart with an icon. Only the single-bill
+  // route joined the type in, so every row in the list read as null and the
+  // icon would have shown the same shape for everything.
+  const ctx = await setup()
+  const takeaway = await makeBill(ctx, await makeOrder(ctx, [{ variantId: ctx.tea, qty: 1 }]))
+  const dineIn = await makeBill(
+    ctx,
+    await makeOrder(ctx, [{ variantId: ctx.tea, qty: 1 }], { dineIn: true }),
+  )
+
+  const rows = (
+    await list(ctx)
+  ).bills as unknown as { id: string; orderType: string | null }[]
+
+  assertEqual(rows.find((r) => r.id === takeaway.id)?.orderType, 'takeaway')
+  assertEqual(rows.find((r) => r.id === dineIn.id)?.orderType, 'dine_in')
+  await close(ctx)
+})
+
 test('the list summary still totals correctly with the order join', async () => {
   const ctx = await setup()
   const first = await makeOrder(ctx, [{ variantId: ctx.tea, qty: 1 }])
