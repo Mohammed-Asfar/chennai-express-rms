@@ -548,6 +548,7 @@ wifi will go offline. Losing the sale because of it is unacceptable.
 | FR-S11 | `print_jobs` never syncs — print state is meaningless in the cloud |
 | FR-S12 | If the local database is lost, it is restored from the cloud at boot, before seeding |
 | FR-S13 | Restore runs only into a completely empty database, never over existing data |
+| FR-S15 | Restore is atomic — it stages to a temporary file and swaps in only when complete, so an interrupted restore leaves the live database untouched |
 | FR-S14 | Restore is best-effort — no cloud, no network, or an empty cloud all fall through to normal first-run seeding |
 
 #### Trigger
@@ -716,6 +717,8 @@ Scenarios that occur in a working restaurant and their required behaviour.
 | SQLite file deleted, disk replaced, or Windows reinstalled | Restored from the cloud at boot, before seeding, with its branch id intact |
 | SQLite lost **and** no internet | Falls through to a normal first run; the cloud copy is restored on a later boot only if the database is still empty |
 | SQLite lost after billing offline for days | Anything that never reached the cloud is not recoverable — restore returns the last pushed state |
+| Restore interrupted partway (crash, power cut, restart) | The live database is untouched; the next boot restores again from scratch |
+| Restore completes but a table failed | Nothing is swapped in — the till seeds clean rather than opening with silently missing history |
 | No internet for days | Billing unaffected; sync resumes when connectivity returns |
 | Same row pushed to cloud twice | Idempotent — no duplicate created |
 | A row repeatedly fails to sync | Surfaced in the UI rather than retried forever in silence |

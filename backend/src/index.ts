@@ -6,15 +6,18 @@ import { restoreIfEmpty } from './db/restore.js'
 import { buildServer } from './server.js'
 
 const env = loadEnv()
+
+// Before the database is opened, and before seeding. Restore builds a staging file
+// and swaps it into place complete, so an interrupted attempt leaves nothing
+// half-written for this process to open. Seeding first would mint a new branch id
+// and make the branch already in the cloud unreachable.
+const restore = await restoreIfEmpty(env)
+
 const db = openDatabase(env.DB_PATH)
 
 // Migrations run at boot. A checksum mismatch throws here and stops startup —
 // running against a schema that does not match the code is worse than not starting.
 const applied = migrate(db)
-
-// Before seeding, never after: seeding an empty database mints a new branch id,
-// and from that point the branch already in the cloud is unreachable.
-const restore = await restoreIfEmpty(db, env)
 
 const { seeded } = await seedIfEmpty(db, env)
 

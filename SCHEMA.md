@@ -815,23 +815,37 @@ not hammer a dead connection thousands of times.
 
 ### 5.4 Restore — the one downward path
 
-Runs at boot, from `restoreIfEmpty`, **before seeding**. The order matters: seeding
-an empty database mints a new branch UUID, and once that exists the branch already in
-the cloud can never be reclaimed — the till would push a second branch alongside its
-own history, and every past bill would be orphaned.
+Runs at boot, from `restoreIfEmpty`, **before the main database handle is opened and
+before seeding**. The order matters: seeding an empty database mints a new branch
+UUID, and once that exists the branch already in the cloud can never be reclaimed —
+the till would push a second branch alongside its own history, and every past bill
+would be orphaned.
 
-**It runs only when the local database is completely empty** (no row in `branches`).
-`pullAll` throws otherwise. Pulling into a database that already holds rows would
-have to reconcile edits made on both sides, and for a financial record there is no
-correct answer to "the same bill was changed in two places".
+**It runs only when the local database is completely empty** (absent, zero bytes, no
+`branches` table, or no row in `branches`). `pullAll` throws otherwise. Pulling into
+a database that already holds rows would have to reconcile edits made on both sides,
+and for a financial record there is no correct answer to "the same bill was changed
+in two places".
+
+**Atomic.** Rows are pulled into a staging file at `<db path>.restoring`, which
+replaces the live database only once the pull has finished and been verified. The
+live path goes from absent straight to complete; it is never partially written.
+
+A restore killed halfway — crash, power cut, Ctrl-C, a dev-mode watch restart —
+leaves the live path untouched, so the next boot sees an empty database and tries
+again. **Without this the interrupted case is unrecoverable:** a half-written
+database has a `branches` row, so restore refuses to run *and* seeding skips, and the
+till comes up permanently missing most of its history with nothing explaining why.
 
 | Step | Detail |
 |---|---|
-| Detect | No row in `branches` — the same test `seedIfEmpty` uses |
+| Detect | No usable database at `DB_PATH`. A zero-byte file counts as absent — that is what an interrupted create leaves |
+| Discard | Any stale `.restoring` file is deleted, not resumed: it may hold half a table with no record of how far it got |
 | Find | Oldest non-deleted branch in the cloud. Oldest, not newest: repeated installs against one cloud database leave several, and the first is the real one |
-| Pull | Every synced table, in the same parent-first order push uses, paged 500 rows at a time ordered by primary key |
+| Pull | Into the staging file. Every synced table, in the same parent-first order push uses, paged 500 rows at a time ordered by primary key |
 | Stamp | Restored rows get `synced_at` set, `sync_attempts = 0`. Without this the first cycle would push the whole history straight back up |
-| Verify | `PRAGMA foreign_key_check` after the pull; violations are reported, not swallowed |
+| Verify | `PRAGMA foreign_key_check` after the pull. Any error at all — a failed table or a dangling reference — discards the staging file rather than swapping in something incomplete |
+| Swap | Checkpoint WAL, close, then rename over the live path. Same directory, so the rename is atomic rather than a copy |
 
 Foreign keys are disabled during the pull and re-enabled after — a parent row can be
 legitimately absent mid-restore. Postgres booleans are converted back to SQLite

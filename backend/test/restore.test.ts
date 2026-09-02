@@ -1,8 +1,12 @@
 import { randomUUID } from 'node:crypto'
+import { existsSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs'
+import { tmpdir } from 'node:os'
+import { join } from 'node:path'
 import type { Sql } from 'postgres'
 import { openDatabase, type Db } from '../src/db/client.js'
 import { migrate } from '../src/db/migrate.js'
 import { seedIfEmpty } from '../src/db/seed.js'
+import { restoreIfEmpty } from '../src/db/restore.js'
 import { loadEnv } from '../src/lib/env.js'
 import { pushPending } from '../src/sync/push.js'
 import { isEmptyDatabase, findCloudBranch, pullAll } from '../src/sync/pull.js'
@@ -187,6 +191,204 @@ if (!CLOUD_URL) {
 
       fresh.close()
     } finally {
+      await cleanup(db, sql)
+    }
+  })
+
+  serialTest('an interrupted restore leaves the live database untouched', async () => {
+    // The case that makes this atomic rather than convenient: a half-written
+    // database has a branches row, so a later boot would see it as "not empty",
+    // refuse to restore, and skip seeding too. The till would come up permanently
+    // missing most of its history with nothing explaining why.
+    const { db, sql, branchId, userId } = await cloudFixture()
+    const dir = mkdtempSync(join(tmpdir(), 'restore-'))
+    const live = join(dir, 'chennai-express.db')
+
+    try {
+      seedOrderAndBill(db, branchId, userId)
+      await pushPending(db, sql)
+
+      // A staging file left behind by an attempt that died mid-pull.
+      const staging = live + '.restoring'
+      const abandoned = openDatabase(staging)
+      migrate(abandoned)
+      abandoned
+        .prepare(
+          `INSERT INTO branches (id, name, print_logo, is_active, created_at, updated_at)
+           VALUES (?, 'Half written', 1, 1, ?, ?)`,
+        )
+        .run(randomUUID(), new Date().toISOString(), new Date().toISOString())
+      abandoned.close()
+
+      assertEqual(existsSync(live), false, 'the live database does not exist yet')
+
+      const env2 = loadEnv({
+        NODE_ENV: 'test',
+        DB_PATH: live,
+        SEED_ADMIN_PASSWORD: 'admin123',
+        CLOUD_DATABASE_URL: CLOUD_URL,
+      })
+      const outcome = await restoreIfEmpty(env2)
+
+      assertEqual(outcome.restored, true, 'restore succeeds despite the stale staging file')
+
+      // The abandoned staging file was discarded, not adopted: the restored
+      // database carries the real branch, not the half-written one.
+      const restored = openDatabase(live)
+      const branch = restored.prepare('SELECT id, name FROM branches').get() as {
+        id: string
+        name: string
+      }
+      const bills = restored.prepare('SELECT COUNT(*) AS n FROM bills').get() as { n: number }
+      restored.close()
+
+      assertEqual(branch.id, branchId, 'the real branch was restored')
+      assertEqual(bills.n, 1, 'the bill came back')
+
+      assertEqual(existsSync(staging), false, 'no staging file is left behind')
+    } finally {
+      rmSync(dir, { recursive: true, force: true })
+      await cleanup(db, sql)
+    }
+  })
+
+  serialTest('a restore that fails partway does not replace the live database', async () => {
+    const { db, sql, branchId, userId } = await cloudFixture()
+    const dir = mkdtempSync(join(tmpdir(), 'restore-fail-'))
+    const live = join(dir, 'chennai-express.db')
+
+    try {
+      seedOrderAndBill(db, branchId, userId)
+      await pushPending(db, sql)
+
+      // An unreachable cloud stands in for a connection that dies mid-pull.
+      const env2 = loadEnv({
+        NODE_ENV: 'test',
+        DB_PATH: live,
+        SEED_ADMIN_PASSWORD: 'admin123',
+        CLOUD_DATABASE_URL: 'postgres://nobody:nobody@127.0.0.1:1/nothing',
+      })
+      const outcome = await restoreIfEmpty(env2)
+
+      assertEqual(outcome.restored, false, 'a failed restore reports failure')
+      assertEqual(existsSync(live), false, 'no live database was created')
+      assertEqual(existsSync(live + '.restoring'), false, 'no staging file is left behind')
+    } finally {
+      rmSync(dir, { recursive: true, force: true })
+      await cleanup(db, sql)
+    }
+  })
+
+  serialTest('a pull reporting errors does not swap a broken database into place', async () => {
+    // Distinct from an unreachable cloud, which throws before anything is staged.
+    // Here the pull completes but reports a failed table, so the staged database
+    // is incomplete — it must be discarded rather than swapped in, or the till
+    // comes up silently missing whatever did not arrive.
+    const { db, sql, branchId, userId } = await cloudFixture()
+    const dir = mkdtempSync(join(tmpdir(), 'restore-partial-'))
+    const live = join(dir, 'chennai-express.db')
+
+    try {
+      seedOrderAndBill(db, branchId, userId)
+      await pushPending(db, sql)
+
+      // Drop a column the pull selects, so that one table fails while the tables
+      // pulled before it succeed.
+      await sql.unsafe('ALTER TABLE payments RENAME COLUMN reference TO reference_moved')
+
+      const env2 = loadEnv({
+        NODE_ENV: 'test',
+        DB_PATH: live,
+        SEED_ADMIN_PASSWORD: 'admin123',
+        CLOUD_DATABASE_URL: CLOUD_URL,
+      })
+      const outcome = await restoreIfEmpty(env2)
+
+      assertEqual(outcome.restored, false, 'a partial restore reports failure')
+      assertEqual(existsSync(live), false, 'the broken database is not swapped into place')
+      assertEqual(existsSync(live + '.restoring'), false, 'the staging file is discarded')
+    } finally {
+      // Put the cloud schema back before anything else runs against it.
+      await sql
+        .unsafe('ALTER TABLE payments RENAME COLUMN reference_moved TO reference')
+        .catch(() => undefined)
+      rmSync(dir, { recursive: true, force: true })
+      await cleanup(db, sql)
+    }
+  })
+
+  serialTest('restore skips a database that already holds a branch', async () => {
+    const { db, sql, branchId, userId } = await cloudFixture()
+    const dir = mkdtempSync(join(tmpdir(), 'restore-skip-'))
+    const live = join(dir, 'chennai-express.db')
+
+    try {
+      seedOrderAndBill(db, branchId, userId)
+      await pushPending(db, sql)
+
+      // A till already in service, with its own branch and one local bill.
+      const existing = openDatabase(live)
+      migrate(existing)
+      const localEnv = loadEnv({
+        NODE_ENV: 'test',
+        DB_PATH: live,
+        SEED_ADMIN_PASSWORD: 'admin123',
+      })
+      const seeded = await seedIfEmpty(existing, localEnv)
+      const localBranchId = seeded.branchId
+      existing.close()
+
+      const env2 = loadEnv({
+        NODE_ENV: 'test',
+        DB_PATH: live,
+        SEED_ADMIN_PASSWORD: 'admin123',
+        CLOUD_DATABASE_URL: CLOUD_URL,
+      })
+      const outcome = await restoreIfEmpty(env2)
+
+      assertEqual(outcome.attempted, false, 'restore is not attempted')
+      assertEqual(outcome.reason, 'not empty', 'the reason is recorded')
+
+      // The in-service database is untouched — its own branch, not the cloud's.
+      const after = openDatabase(live)
+      const branch = after.prepare('SELECT id FROM branches').get() as { id: string }
+      after.close()
+      assertEqual(branch.id, localBranchId, 'the local branch survives')
+    } finally {
+      rmSync(dir, { recursive: true, force: true })
+      await cleanup(db, sql)
+    }
+  })
+
+  serialTest('a zero-byte database file counts as empty and is restored', async () => {
+    // What an interrupted create leaves behind. Treating it as "already has data"
+    // would block restore forever.
+    const { db, sql, branchId, userId } = await cloudFixture()
+    const dir = mkdtempSync(join(tmpdir(), 'restore-zero-'))
+    const live = join(dir, 'chennai-express.db')
+
+    try {
+      seedOrderAndBill(db, branchId, userId)
+      await pushPending(db, sql)
+
+      writeFileSync(live, '')
+
+      const env2 = loadEnv({
+        NODE_ENV: 'test',
+        DB_PATH: live,
+        SEED_ADMIN_PASSWORD: 'admin123',
+        CLOUD_DATABASE_URL: CLOUD_URL,
+      })
+      const outcome = await restoreIfEmpty(env2)
+
+      assertEqual(outcome.restored, true, 'a zero-byte file is restored over')
+
+      const restored = openDatabase(live)
+      const branch = restored.prepare('SELECT id FROM branches').get() as { id: string }
+      restored.close()
+      assertEqual(branch.id, branchId, 'the cloud branch was restored')
+    } finally {
+      rmSync(dir, { recursive: true, force: true })
       await cleanup(db, sql)
     }
   })
