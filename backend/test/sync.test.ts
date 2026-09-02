@@ -11,6 +11,7 @@ import {
   syncCounts,
   retryQuarantined,
   resyncMasterData,
+  lastSyncedAt,
 } from '../src/sync/push.js'
 import { SYNC_TABLES, NEVER_SYNCED, MAX_SYNC_ATTEMPTS, backoffMs } from '../src/sync/tables.js'
 import { SyncWorker } from '../src/sync/worker.js'
@@ -188,6 +189,58 @@ function rejectingCloud(message: string): () => Promise<Sql> {
 
   return () => Promise.resolve(sql)
 }
+
+test('a restarted worker reports when the backup really happened', async () => {
+  // The worker keeps lastSuccessAt in memory, which empties on every restart.
+  // A till restarted mid-service said the backup had happened "Never" while
+  // the database plainly held rows stamped seconds earlier.
+  const db = openDatabase(':memory:')
+  migrate(db)
+  await seedIfEmpty(db, env)
+
+  const stamp = '2026-09-02T12:07:47.174Z'
+  db.prepare('UPDATE branches SET synced_at = ?').run(stamp)
+
+  const cloudEnv = loadEnv({
+    NODE_ENV: 'test',
+    DB_PATH: ':memory:',
+    CLOUD_DATABASE_URL: 'postgres://stand-in/none',
+  })
+  // Fresh worker, nothing in memory — exactly the state after a restart.
+  const worker = new SyncWorker(db, cloudEnv, silentLog, {})
+  const status = worker.status()
+
+  assertEqual(status.lastSuccessAt, stamp, 'read from the rows, not from memory')
+  assertEqual(status.lastAttemptAt, stamp, 'the last check demonstrably reached the cloud')
+
+  worker.stop()
+  db.close()
+})
+
+test('the newest stamp across every table wins', async () => {
+  // Tables sync at different times. The screen wants the most recent, not
+  // whichever table happens to be checked first.
+  const db = openDatabase(':memory:')
+  migrate(db)
+  await seedIfEmpty(db, env)
+
+  db.prepare('UPDATE branches SET synced_at = ?').run('2026-09-01T08:00:00.000Z')
+  db.prepare('UPDATE users SET synced_at = ?').run('2026-09-02T17:30:00.000Z')
+  db.prepare('UPDATE sections SET synced_at = ?').run('2026-09-02T09:00:00.000Z')
+
+  assertEqual(lastSyncedAt(db), '2026-09-02T17:30:00.000Z')
+  db.close()
+})
+
+test('nothing synced yet reads as never, not as an epoch', async () => {
+  const db = openDatabase(':memory:')
+  migrate(db)
+  await seedIfEmpty(db, env)
+
+  // Seeded rows are all pending, so nothing carries a stamp.
+  assertEqual(lastSyncedAt(db), null)
+  db.close()
+})
 
 test('storage is not offered when there is no cloud', async () => {
   // Nothing to measure, and a zero would render as a full disk.

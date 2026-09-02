@@ -232,6 +232,29 @@ function messageOf(error: unknown): string {
 }
 
 /** Counts for the status endpoint. */
+/**
+ * When a row was most recently stamped as synced.
+ *
+ * Read from the data rather than remembered in the worker. The worker's own
+ * `lastSuccessAt` starts null on every boot, so after a restart the screen said
+ * the backup had happened "Never" while the database plainly held bills pushed
+ * seconds earlier. The rows are the record; memory is just a cache of it.
+ */
+export function lastSyncedAt(db: Db): string | null {
+  let latest: string | null = null
+
+  for (const table of SYNC_TABLES) {
+    if (!table.tracked) continue
+    const row = db
+      .prepare(`SELECT MAX(synced_at) AS at FROM ${table.name}`)
+      .get() as { at: string | null }
+
+    // ISO-8601 UTC throughout, so string comparison is chronological.
+    if (row.at !== null && (latest === null || row.at > latest)) latest = row.at
+  }
+  return latest
+}
+
 export function syncCounts(db: Db): { pending: number; quarantined: number } {
   let pending = 0
   let quarantined = 0

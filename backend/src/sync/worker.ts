@@ -1,7 +1,7 @@
 import type { Sql } from 'postgres'
 import type { Db } from '../db/client.js'
 import type { Env } from '../lib/env.js'
-import { pushPending, syncCounts, type PushResult } from './push.js'
+import { pushPending, syncCounts, lastSyncedAt, type PushResult } from './push.js'
 import { readCloudStorage, type CloudStorage } from './storage.js'
 
 export interface SyncStatus {
@@ -152,15 +152,24 @@ export class SyncWorker {
       ? syncCounts(this.db)
       : { pending: 0, quarantined: 0 }
 
+    // The rows are the record; this worker's memory is only a cache of it that
+    // empties on every restart. Taking the later of the two means a till
+    // restarted mid-service reports when the backup actually happened rather
+    // than "Never".
+    const stamped = this.enabled ? lastSyncedAt(this.db) : null
+    const lastSuccessAt = later(this.lastSuccessAt, stamped)
+
     return {
       enabled: this.enabled,
       running: this.running,
-      lastSuccessAt: this.lastSuccessAt,
-      lastAttemptAt: this.lastAttemptAt,
+      lastSuccessAt,
+      // Falls back to the push time: after a restart nothing has been checked
+      // in this process, but the last check demonstrably reached the cloud.
+      lastAttemptAt: this.lastAttemptAt ?? lastSuccessAt,
       lastError: this.lastError,
       ...counts,
       consecutiveFailures: this.consecutiveFailures,
-      ...this.health(counts),
+      ...this.health(counts, lastSuccessAt),
     }
   }
 
@@ -171,7 +180,10 @@ export class SyncWorker {
    * internet returns, but quarantined rows are given up on and stay lost until
    * someone retries them.
    */
-  private health(counts: { pending: number; quarantined: number }): {
+  private health(
+    counts: { pending: number; quarantined: number },
+    lastSuccessAt: string | null,
+  ): {
     healthy: boolean
     problem: string | null
   } {
@@ -194,7 +206,7 @@ export class SyncWorker {
     }
     // Nothing has ever reached the cloud, so there is no backup at all yet —
     // distinct from a backlog that is merely waiting for the next cycle.
-    if (this.lastSuccessAt === null && counts.pending > 0) {
+    if (lastSuccessAt === null && counts.pending > 0) {
       return { healthy: false, problem: 'Nothing has been backed up to the cloud yet.' }
     }
     return { healthy: true, problem: null }
@@ -289,4 +301,16 @@ export class SyncWorker {
       onnotice: () => undefined,
     })
   }
+}
+
+/**
+ * The later of two ISO-8601 timestamps, either of which may be absent.
+ *
+ * Both are UTC, so string comparison is chronological and there is no need to
+ * parse into Date objects to find out which came first.
+ */
+function later(a: string | null, b: string | null): string | null {
+  if (a === null) return b
+  if (b === null) return a
+  return a > b ? a : b
 }
