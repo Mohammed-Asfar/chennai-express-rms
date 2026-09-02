@@ -586,7 +586,7 @@ means the owner believes their cloud reports are complete when they are not.
 | ID | Requirement |
 |---|---|
 | FR-U1 | The app knows its own version and build number, shown in Settings |
-| FR-U2 | It checks the cloud for a newer release on startup and once daily |
+| FR-U2 | It checks the cloud for a newer release when the app opens, and whenever staff ask via "Check for updates" |
 | FR-U3 | A newer release shows a dialog with the version and release notes |
 | FR-U4 | The user chooses when to install — the app downloads the installer and launches it |
 | FR-U5 | Download progress is visible and can be cancelled |
@@ -604,6 +604,12 @@ means the owner believes their cloud reports are complete when they are not.
 appearing mid-transaction, or a check that hangs because the internet is down, turns
 a maintenance feature into a billing outage. The check is best-effort and silent on
 failure.
+
+**FR-U2 is startup-only, deliberately.** A till stays open all day, so a check on a
+timer means a dialog can appear in the middle of service for someone who never asked
+for it — and FR-U11 can only defer that, not prevent it. Opening the app is a moment
+staff already expect to wait; mid-service is not. Anyone who wants an update sooner
+has "Check for updates" in the user menu, which also ignores an earlier dismissal.
 
 **FR-U9 exists for billing correctness.** After a tax or rounding fix, an old build
 producing wrong bills must not keep running for months because staff kept dismissing

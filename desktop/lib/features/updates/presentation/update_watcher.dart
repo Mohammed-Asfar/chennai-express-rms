@@ -4,7 +4,12 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'update_controller.dart';
 import 'update_dialog.dart';
 
-/// Checks for updates on startup and once a day, and shows the dialog.
+/// Checks for updates when the app opens, and shows the dialog.
+///
+/// Startup only. A till stays open all day, and a check on a timer means an
+/// update dialog can appear in the middle of service for someone who never
+/// asked for it. Whoever wants one sooner has "Check for updates" in the user
+/// menu.
 ///
 /// Wraps the authenticated part of the app so the prompt can never appear over
 /// the login screen.
@@ -22,7 +27,6 @@ class UpdateWatcher extends ConsumerStatefulWidget {
 }
 
 class _UpdateWatcherState extends ConsumerState<UpdateWatcher> {
-  Timer? _dailyTimer;
   Timer? _retryTimer;
   bool _dialogOpen = false;
 
@@ -31,12 +35,10 @@ class _UpdateWatcherState extends ConsumerState<UpdateWatcher> {
     super.initState();
     // Deferred so the first frame renders before any network work.
     WidgetsBinding.instance.addPostFrameCallback((_) => _check());
-    _dailyTimer = Timer.periodic(const Duration(hours: 24), (_) => _check());
   }
 
   @override
   void dispose() {
-    _dailyTimer?.cancel();
     _retryTimer?.cancel();
     super.dispose();
   }
