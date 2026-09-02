@@ -6,7 +6,12 @@ import { migrate } from '../src/db/migrate.js'
 import { seedIfEmpty } from '../src/db/seed.js'
 import { buildServer } from '../src/server.js'
 import { loadEnv } from '../src/lib/env.js'
-import { pushPending, syncCounts, retryQuarantined } from '../src/sync/push.js'
+import {
+  pushPending,
+  syncCounts,
+  retryQuarantined,
+  resyncMasterData,
+} from '../src/sync/push.js'
 import { SYNC_TABLES, NEVER_SYNCED, MAX_SYNC_ATTEMPTS, backoffMs } from '../src/sync/tables.js'
 import { SyncWorker } from '../src/sync/worker.js'
 import { test, serialTest, assertEqual } from './helpers.js'
@@ -183,6 +188,76 @@ function rejectingCloud(message: string): () => Promise<Sql> {
 
   return () => Promise.resolve(sql)
 }
+
+test('a repair re-pushes master data that the cloud is missing', async () => {
+  // The live fault: the admin user was stamped synced but absent from the
+  // cloud, so every order, bill and payment referencing it was rejected on a
+  // foreign key — forever, because a stamped row is never looked at again.
+  const db = openDatabase(':memory:')
+  migrate(db)
+  await seedIfEmpty(db, env)
+
+  const stamp = new Date().toISOString()
+  for (const table of ['branches', 'users', 'sections', 'tables', 'categories']) {
+    db.prepare(`UPDATE ${table} SET synced_at = ?`).run(stamp)
+  }
+  assertEqual(syncCounts(db).pending, 0, 'everything starts stamped as synced')
+
+  const repaired = resyncMasterData(db)
+  if (repaired < 2) throw new Error(`expected the branch and user back in the queue, got ${repaired}`)
+
+  const user = db.prepare("SELECT synced_at FROM users WHERE username = 'admin'").get() as {
+    synced_at: string | null
+  }
+  assertEqual(user.synced_at, null, 'the user is queued to push again')
+
+  db.close()
+})
+
+test('a repair leaves the business backlog alone', async () => {
+  // Re-pushing thousands of bills to fix one missing user would be a
+  // self-inflicted outage, so only the small master tables are touched.
+  const db = openDatabase(':memory:')
+  migrate(db)
+  const { branchId } = await seedIfEmpty(db, env)
+
+  const userId = (db.prepare('SELECT id FROM users LIMIT 1').get() as { id: string }).id
+  const stamp = new Date().toISOString()
+  db.prepare(
+    `INSERT INTO orders (id, branch_id, order_no, business_date, type, status, version,
+                         created_by, created_at, updated_at, synced_at)
+     VALUES (?, ?, 1, '2026-09-02', 'takeaway', 'open', 1, ?, ?, ?, ?)`,
+  ).run(randomUUID(), branchId, userId, stamp, stamp, stamp)
+
+  resyncMasterData(db)
+
+  const order = db.prepare('SELECT synced_at FROM orders LIMIT 1').get() as {
+    synced_at: string | null
+  }
+  if (order.synced_at === null) throw new Error('a synced order must not be re-queued')
+
+  db.close()
+})
+
+test('a repair skips rows that were deleted', async () => {
+  // A soft-deleted table has already pushed its deletion. Re-queueing it would
+  // send the same tombstone again for nothing.
+  const db = openDatabase(':memory:')
+  migrate(db)
+  await seedIfEmpty(db, env)
+
+  const now = new Date().toISOString()
+  db.prepare('UPDATE sections SET synced_at = ?, deleted_at = ?').run(now, now)
+
+  resyncMasterData(db)
+
+  const section = db.prepare('SELECT synced_at FROM sections LIMIT 1').get() as {
+    synced_at: string | null
+  }
+  if (section.synced_at === null) throw new Error('a deleted section must not be re-queued')
+
+  db.close()
+})
 
 test('a reachable cloud that rejects every row is not reported as healthy', async () => {
   // The defect this guards: a live branch synced nothing for days because the

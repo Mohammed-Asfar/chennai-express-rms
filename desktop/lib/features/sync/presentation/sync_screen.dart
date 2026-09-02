@@ -70,19 +70,28 @@ class _SyncScreenState extends ConsumerState<SyncScreen> {
                   label: const Text('Back up now'),
                 ),
                 const SizedBox(width: AppSpacing.sm),
-                if (value.quarantined > 0)
+                // Offered whenever anything is wrong, not only once rows have
+                // been given up on. The commonest fault is a branch or user
+                // the cloud is missing, which rejects every bill while nothing
+                // is quarantined yet — and this is the button that repairs it.
+                if (!value.healthy && value.enabled)
                   OutlinedButton.icon(
                     onPressed: _busy ? null : _retry,
                     icon: const Icon(Icons.refresh, size: 18),
-                    label: Text('Retry ${value.quarantined} stuck'),
+                    label: Text(
+                      value.quarantined > 0
+                          ? 'Retry ${value.quarantined} stuck'
+                          : 'Repair and retry',
+                    ),
                   ),
               ],
             ),
 
-            if (value.quarantined > 0) ...[
+            if (!value.healthy && value.enabled) ...[
               const SizedBox(height: AppSpacing.sm),
               Text(
-                'Retry after the cause is fixed. Until then they will fail '
+                'Retry sends the branch and staff details again first, then '
+                'everything waiting. If the cause is still there it will fail '
                 'again — the records stay safe on this PC either way.',
                 style: Theme.of(context).textTheme.bodySmall,
               ),

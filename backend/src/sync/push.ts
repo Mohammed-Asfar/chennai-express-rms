@@ -256,6 +256,40 @@ export function syncCounts(db: Db): { pending: number; quarantined: number } {
   return { pending, quarantined }
 }
 
+/**
+ * Re-pushes the master rows every business row points at.
+ *
+ * A row stamped `synced_at` is never looked at again, so if the cloud copy is
+ * missing — restored from an older backup, wiped, or never actually committed —
+ * the branch has no way to notice. Every child then fails its foreign key
+ * forever while the parent sits marked as done.
+ *
+ * That is not hypothetical: a live branch had its admin user stamped synced but
+ * absent from the cloud, and every order, bill and payment referencing it was
+ * rejected until the stamp was cleared by hand.
+ *
+ * Only the small master tables. The pushes are idempotent upserts, so this
+ * costs a few dozen rows and repairs the parents the rest depend on. Business
+ * rows are deliberately excluded: re-pushing thousands of bills to fix a
+ * missing user would be a self-inflicted outage.
+ */
+export function resyncMasterData(db: Db): number {
+  const MASTER = ['branches', 'users', 'sections', 'tables', 'categories']
+  let reset = 0
+
+  for (const table of SYNC_TABLES) {
+    if (!table.tracked || !MASTER.includes(table.name)) continue
+    const info = db
+      .prepare(
+        `UPDATE ${table.name} SET synced_at = NULL, sync_attempts = 0, sync_error = NULL
+         WHERE deleted_at IS NULL`,
+      )
+      .run()
+    reset += info.changes
+  }
+  return reset
+}
+
 /** Clears quarantine so the next cycle retries. */
 export function retryQuarantined(db: Db): number {
   let reset = 0
