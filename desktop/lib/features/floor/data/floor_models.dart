@@ -13,11 +13,18 @@ class SeatedParty {
     required this.orderId,
     required this.orderNo,
     this.seatLabel,
+    this.itemCount = 0,
   });
 
   final String orderId;
   final int orderNo;
   final String? seatLabel;
+
+  /// Lines on the order. Zero means nobody has ordered anything yet — a
+  /// mis-tap, or a screen left by a crash, holding the table for nothing.
+  final int itemCount;
+
+  bool get isEmpty => itemCount == 0;
 
   /// What the floor screen shows on the chip.
   String get label => seatLabel ?? '#$orderNo';
@@ -26,6 +33,7 @@ class SeatedParty {
         orderId: json['orderId'] as String,
         orderNo: json['orderNo'] as int,
         seatLabel: json['seatLabel'] as String?,
+        itemCount: json['itemCount'] as int? ?? 0,
       );
 }
 

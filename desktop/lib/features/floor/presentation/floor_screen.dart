@@ -83,6 +83,13 @@ class FloorScreen extends ConsumerWidget {
                     onTap: () => _openTable(context, ref, table),
                     onEdit: () => _editTable(context, ref, table),
                     onDelete: () => _deleteTable(context, ref, table),
+                    // Only when nothing has been ordered on any of its
+                    // parties. A table holding real food is freed by billing
+                    // or cancelling, which asks for a reason.
+                    onFree: table.parties.isNotEmpty &&
+                            table.parties.every((p) => p.isEmpty)
+                        ? () => _freeTable(context, ref, table)
+                        : null,
                   );
                 },
               ),
@@ -112,6 +119,58 @@ class FloorScreen extends ConsumerWidget {
     ref.invalidate(floorProvider);
     ref.invalidate(adminSectionsProvider);
     ref.invalidate(adminTablesProvider);
+  }
+
+  /// Discards the empty orders holding a table.
+  ///
+  /// A crash or a back-press used to strand an order with nothing on it, and
+  /// the floor would show the table seated with no way to correct it. Nothing
+  /// is lost: an order with no lines is a mis-tap.
+  Future<void> _freeTable(
+    BuildContext context,
+    WidgetRef ref,
+    DiningTable table,
+  ) async {
+    final confirmed = await showDialog<bool>(
+      context: context,
+      builder: (context) => AlertDialog(
+        title: Text('Free ${table.name}?'),
+        content: Text(
+          table.parties.length == 1
+              ? 'Nothing was ordered, so the order is discarded and the table '
+                    'goes back to free.'
+              : 'Nothing was ordered on any of the ${table.parties.length} '
+                    'orders here. All of them are discarded.',
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.of(context).pop(false),
+            child: const Text('Leave it'),
+          ),
+          ElevatedButton(
+            onPressed: () => Navigator.of(context).pop(true),
+            child: const Text('Free it'),
+          ),
+        ],
+      ),
+    );
+    if (confirmed != true || !context.mounted) return;
+
+    final messenger = ScaffoldMessenger.of(context);
+    final repository = ref.read(orderRepositoryProvider);
+    try {
+      for (final party in table.parties) {
+        await repository.cancel(
+          party.orderId,
+          'Discarded before anything was ordered',
+        );
+      }
+      _refresh(ref);
+      messenger.showSnackBar(SnackBar(content: Text('${table.name} is free')));
+    } on ApiException catch (error) {
+      _refresh(ref);
+      messenger.showSnackBar(SnackBar(content: Text(error.message)));
+    }
   }
 
   Future<void> _addSection(BuildContext context, WidgetRef ref) async {

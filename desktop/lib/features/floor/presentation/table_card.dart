@@ -17,6 +17,7 @@ class TableCard extends StatefulWidget {
     required this.onTap,
     this.onEdit,
     this.onDelete,
+    this.onFree,
   });
 
   final DiningTable table;
@@ -27,6 +28,11 @@ class TableCard extends StatefulWidget {
   /// thing a rushed hand hits first.
   final VoidCallback? onEdit;
   final VoidCallback? onDelete;
+
+  /// Discards the empty orders holding this table. Null unless every party on
+  /// it has nothing ordered — a table with real food on it is freed by
+  /// billing or cancelling, not from a menu.
+  final VoidCallback? onFree;
 
   @override
   State<TableCard> createState() => _TableCardState();
@@ -100,13 +106,22 @@ class _TableCardState extends State<TableCard> {
                             onSelected: (value) {
                               if (value == 'edit') widget.onEdit?.call();
                               if (value == 'delete') widget.onDelete?.call();
+                              if (value == 'free') widget.onFree?.call();
                             },
-                            itemBuilder: (_) => const [
-                              PopupMenuItem(
+                            itemBuilder: (_) => [
+                              // Offered only when the table is held by an order
+                              // nobody added anything to — a crash or a mis-tap
+                              // otherwise leaves it seated with no way back.
+                              if (widget.onFree != null)
+                                const PopupMenuItem(
+                                  value: 'free',
+                                  child: Text('Free this table'),
+                                ),
+                              const PopupMenuItem(
                                 value: 'edit',
                                 child: Text('Edit table'),
                               ),
-                              PopupMenuItem(
+                              const PopupMenuItem(
                                 value: 'delete',
                                 child: Text('Delete table'),
                               ),

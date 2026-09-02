@@ -440,3 +440,114 @@ test('tables can be filtered by section', async () => {
   assertEqual(tables[0]!.name, 'T1')
   await close(ctx)
 })
+
+/** Adds a line to an order, so it stops counting as empty. */
+function addLine(ctx: Ctx, orderId: string): void {
+  const now = new Date().toISOString()
+  // The column is a required foreign key. This suite seeds no menu, so one
+  // variant is made on demand; the line's own values are snapshotted anyway.
+  let variant = ctx.db
+    .prepare('SELECT id FROM menu_item_variants LIMIT 1')
+    .get() as { id: string } | undefined
+
+  if (!variant) {
+    const categoryId = randomUUID()
+    const itemId = randomUUID()
+    const variantId = randomUUID()
+    ctx.db
+      .prepare(
+        `INSERT INTO categories (id, branch_id, name, sort_order, is_active, created_at, updated_at)
+         VALUES (?, ?, 'Tiffin', 0, 1, ?, ?)`,
+      )
+      .run(categoryId, ctx.branchId, now, now)
+    ctx.db
+      .prepare(
+        `INSERT INTO menu_items (id, branch_id, category_id, name, tax_rate,
+                                 is_available, sort_order, created_at, updated_at)
+         VALUES (?, ?, ?, 'Idli', 500, 1, 0, ?, ?)`,
+      )
+      .run(itemId, ctx.branchId, categoryId, now, now)
+    ctx.db
+      .prepare(
+        `INSERT INTO menu_item_variants (id, menu_item_id, name, price,
+                                         is_available, sort_order, created_at, updated_at)
+         VALUES (?, ?, 'Standard', 3000, 1, 0, ?, ?)`,
+      )
+      .run(variantId, itemId, now, now)
+    variant = { id: variantId }
+  }
+
+  ctx.db
+    .prepare(
+      `INSERT INTO order_items (id, order_id, variant_id, item_name, variant_name,
+                                unit_price, tax_rate, qty, line_base, line_tax,
+                                line_total, created_at, updated_at)
+       VALUES (?, ?, ?, 'Idli', 'Standard', 3000, 500, 1, 3000, 0, 3000, ?, ?)`,
+    )
+    .run(randomUUID(), orderId, variant.id, now, now)
+}
+
+test('a seated party reports how many items are on it', async () => {
+  // The floor offers to free a table only when nothing was ordered. Without a
+  // count it cannot tell a mis-tap from a party mid-meal.
+  const ctx = await setup()
+  const section = await makeSection(ctx, 'AC')
+  const id = await makeTable(ctx, section, 'T9')
+  const empty = seatParty(ctx, id, 1, 'A')
+  const fed = seatParty(ctx, id, 2, 'B')
+  addLine(ctx, fed)
+  addLine(ctx, fed)
+
+  const res = await ctx.app.inject({ method: 'GET', url: '/floor', headers: ctx.cashier })
+  const sections = (res.json() as {
+    sections: { tables: { name: string; parties: { orderId: string; itemCount: number }[] }[] }[]
+  }).sections
+  const table = sections.flatMap((s) => s.tables).find((t) => t.name === 'T9')!
+
+  const counts = new Map(table.parties.map((p) => [p.orderId, p.itemCount]))
+  assertEqual(counts.get(empty), 0, 'nothing ordered')
+  assertEqual(counts.get(fed), 2, 'two lines')
+  await close(ctx)
+})
+
+test('a removed line stops counting towards the item count', async () => {
+  // Otherwise a table where everything was taken back off the order could not
+  // be freed, because it would still look occupied.
+  const ctx = await setup()
+  const section = await makeSection(ctx, 'AC')
+  const id = await makeTable(ctx, section, 'T10')
+  const order = seatParty(ctx, id, 1, null)
+  addLine(ctx, order)
+
+  ctx.db
+    .prepare('UPDATE order_items SET deleted_at = ? WHERE order_id = ?')
+    .run(new Date().toISOString(), order)
+
+  const res = await ctx.app.inject({ method: 'GET', url: '/floor', headers: ctx.cashier })
+  const sections = (res.json() as {
+    sections: { tables: { name: string; parties: { itemCount: number }[] }[] }[]
+  }).sections
+  const table = sections.flatMap((s) => s.tables).find((t) => t.name === 'T10')!
+  assertEqual(table.parties[0]!.itemCount, 0)
+  await close(ctx)
+})
+
+test('cancelling the empty order frees the table', async () => {
+  // What "Free this table" does. The table must go back to free on its own,
+  // from the order being cancelled — not by being set directly.
+  const ctx = await setup()
+  const section = await makeSection(ctx, 'AC')
+  const id = await makeTable(ctx, section, 'T11')
+  const order = seatParty(ctx, id, 1, null)
+  assertEqual(tableStatus(ctx, id), 'occupied')
+
+  const res = await ctx.app.inject({
+    method: 'POST',
+    url: `/orders/${order}/cancel`,
+    headers: ctx.cashier,
+    payload: { reason: 'Discarded before anything was ordered' },
+  })
+  assertEqual(res.statusCode, 200)
+  assertEqual(tableStatus(ctx, id), 'free')
+  await close(ctx)
+})

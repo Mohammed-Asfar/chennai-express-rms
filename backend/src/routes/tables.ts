@@ -56,6 +56,14 @@ interface SeatedParty {
   orderId: string
   orderNo: number
   seatLabel: string | null
+  /**
+   * Lines on the order.
+   *
+   * Zero means nobody has ordered anything yet — a mis-tap, or a screen left
+   * by a crash. The floor offers to free such a table, because otherwise it
+   * shows as seated forever with nothing explaining why.
+   */
+  itemCount: number
 }
 
 const toPublicSection = (row: SectionRow, tableCount?: number) => ({
@@ -379,17 +387,27 @@ function loadOpenParties(db: Db, tableIds: string[]): Map<string, SeatedParty[]>
   const placeholders = tableIds.map(() => '?').join(', ')
   const rows = db
     .prepare(
-      `SELECT id, table_id, order_no, seat_label FROM orders
-       WHERE table_id IN (${placeholders}) AND status = 'open' AND deleted_at IS NULL
-       ORDER BY order_no`,
+      `SELECT o.id, o.table_id, o.order_no, o.seat_label,
+              (SELECT COUNT(*) FROM order_items i
+               WHERE i.order_id = o.id AND i.deleted_at IS NULL) AS item_count
+       FROM orders o
+       WHERE o.table_id IN (${placeholders}) AND o.status = 'open' AND o.deleted_at IS NULL
+       ORDER BY o.order_no`,
     )
-    .all(...tableIds) as { id: string; table_id: string; order_no: number; seat_label: string | null }[]
+    .all(...tableIds) as {
+      id: string
+      table_id: string
+      order_no: number
+      seat_label: string | null
+      item_count: number
+    }[]
 
   for (const row of rows) {
     const party: SeatedParty = {
       orderId: row.id,
       orderNo: row.order_no,
       seatLabel: row.seat_label,
+      itemCount: row.item_count,
     }
     const list = grouped.get(row.table_id)
     if (list) list.push(party)

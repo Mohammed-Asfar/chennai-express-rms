@@ -323,6 +323,8 @@ a picker. Every "the table's order" assumption in the UI must handle several.
 | FR-B35 | Reversed payments stay listed, struck through — they are the audit trail |
 | FR-B36 | Void is offered only to an admin, and only once no live payment stands |
 | FR-B37 | Both void and reversal require a reason; whitespace alone is not a reason |
+| FR-O21 | Leaving an order with nothing on it discards it, so the table does not stay seated |
+| FR-O22 | A table held only by empty orders can be freed from its card on the floor |
 
 #### Tax calculation
 
@@ -622,6 +624,8 @@ Scenarios that occur in a working restaurant and their required behaviour.
 | Bill settled, then a mistake found | Admin voids the bill with a reason; order reopens for correction |
 | Two terminals edit the same order | `version` column rejects the stale write rather than silently overwriting |
 | Table deleted while a booking holds it | Removed from the booking, with a warning first |
+| Order opened, nothing added, screen left | Discarded on the way out; the table frees itself |
+| Table stranded seated by a crash | "Free this table" on its card discards the empty orders holding it |
 
 ### 7.3 Printing
 

@@ -37,62 +37,98 @@ class OrderScreen extends ConsumerWidget {
       }
     });
 
-    return Scaffold(
-      appBar: AppBar(
-        title: Text(order == null ? 'Order' : _title(order)),
-        actions: [
-          if (order != null && order.isOpen)
-            TextButton.icon(
-              onPressed: () =>
-                  _cancelOrder(context, ref, controller, isEmpty: order.isEmpty),
-              icon: const Icon(Icons.close),
-              // "Discard" for an order that never had anything on it: nothing is
-              // being cancelled, and the softer word matches the lighter action.
-              label: Text(order.isEmpty ? 'Discard' : 'Cancel order'),
-            ),
-          const SizedBox(width: AppSpacing.sm),
-        ],
-      ),
-      body: state.isLoading
-          ? const AppLoading()
-          : order == null
-              ? Padding(
-                  padding: const EdgeInsets.all(AppSpacing.xl),
-                  child: ErrorBanner(message: state.errorMessage ?? 'Order not found'),
-                )
-              : LayoutBuilder(
-                  builder: (context, constraints) {
-                    // The order panel needs enough room for a name, quantity
-                    // stepper and amount without wrapping, but must not squeeze
-                    // the menu on a small counter screen.
-                    final panelWidth = constraints.maxWidth < 1100
-                        ? constraints.maxWidth * 0.36
-                        : 380.0;
-
-                    return Row(
-                      crossAxisAlignment: CrossAxisAlignment.stretch,
-                      children: [
-                        Expanded(
-                          child: MenuPanel(
-                            enabled: order.isOpen && !state.isBusy,
-                            onPick: (variant) => controller.addItem(variant.id),
-                          ),
-                        ),
-                        const VerticalDivider(width: 1),
-                        SizedBox(
-                          width: panelWidth,
-                          child: _OrderPanel(
-                            state: state,
-                            controller: controller,
-                            onBill: () => _openBilling(context, ref, order),
-                            onPrintKot: () => _printKot(context, ref, order),
-                          ),
-                        ),
-                      ],
-                    );
-                  },
+    // Leaving an empty order behind is what strands a table: it stays open,
+    // the floor keeps showing SEATED, and nothing in the app explains why.
+    // Going back discards it, since an order with nothing on it is a mis-tap
+    // rather than work worth keeping.
+    return PopScope(
+      canPop: order == null || !order.isOpen || !order.isEmpty,
+      onPopInvokedWithResult: (didPop, _) {
+        if (didPop || order == null || !order.isOpen || !order.isEmpty) return;
+        _discardAndLeave(context, controller);
+      },
+      child: Scaffold(
+        appBar: AppBar(
+          title: Text(order == null ? 'Order' : _title(order)),
+          actions: [
+            if (order != null && order.isOpen)
+              TextButton.icon(
+                onPressed: () => _cancelOrder(
+                  context,
+                  ref,
+                  controller,
+                  isEmpty: order.isEmpty,
                 ),
+                icon: const Icon(Icons.close),
+                // "Discard" for an order that never had anything on it: nothing is
+                // being cancelled, and the softer word matches the lighter action.
+                label: Text(order.isEmpty ? 'Discard' : 'Cancel order'),
+              ),
+            const SizedBox(width: AppSpacing.sm),
+          ],
+        ),
+        body: state.isLoading
+            ? const AppLoading()
+            : order == null
+            ? Padding(
+                padding: const EdgeInsets.all(AppSpacing.xl),
+                child: ErrorBanner(
+                  message: state.errorMessage ?? 'Order not found',
+                ),
+              )
+            : LayoutBuilder(
+                builder: (context, constraints) {
+                  // The order panel needs enough room for a name, quantity
+                  // stepper and amount without wrapping, but must not squeeze
+                  // the menu on a small counter screen.
+                  final panelWidth = constraints.maxWidth < 1100
+                      ? constraints.maxWidth * 0.36
+                      : 380.0;
+
+                  return Row(
+                    crossAxisAlignment: CrossAxisAlignment.stretch,
+                    children: [
+                      Expanded(
+                        child: MenuPanel(
+                          enabled: order.isOpen && !state.isBusy,
+                          onPick: (variant) => controller.addItem(variant.id),
+                        ),
+                      ),
+                      const VerticalDivider(width: 1),
+                      SizedBox(
+                        width: panelWidth,
+                        child: _OrderPanel(
+                          state: state,
+                          controller: controller,
+                          onBill: () => _openBilling(context, ref, order),
+                          onPrintKot: () => _printKot(context, ref, order),
+                        ),
+                      ),
+                    ],
+                  );
+                },
+              ),
+      ),
     );
+  }
+
+  /// Discards an empty order on the way out, so the table frees itself.
+  ///
+  /// No confirmation: there is nothing to lose, and asking is what leaves a
+  /// table seated because someone dismissed the dialog and walked away.
+  Future<void> _discardAndLeave(
+    BuildContext context,
+    OrderController controller,
+  ) async {
+    final navigator = Navigator.of(context);
+    try {
+      await controller.cancel('Discarded before anything was ordered');
+    } on ApiException {
+      // Leaving is what was asked for. A discard that failed leaves the order
+      // open, which the floor will show — better than trapping the cashier on
+      // a screen they are trying to leave.
+    }
+    if (navigator.mounted) navigator.pop();
   }
 
   static String _title(Order order) {
@@ -105,7 +141,11 @@ class OrderScreen extends ConsumerWidget {
   ///
   /// Only lines not yet sent go on it, so pressing this twice does not make the
   /// kitchen cook everything again — the backend decides what is new.
-  Future<void> _printKot(BuildContext context, WidgetRef ref, Order order) async {
+  Future<void> _printKot(
+    BuildContext context,
+    WidgetRef ref,
+    Order order,
+  ) async {
     final messenger = ScaffoldMessenger.of(context);
     try {
       final result = await ref.read(orderRepositoryProvider).printKot(order.id);
@@ -129,7 +169,11 @@ class OrderScreen extends ConsumerWidget {
     }
   }
 
-  Future<void> _openBilling(BuildContext context, WidgetRef ref, Order order) async {
+  Future<void> _openBilling(
+    BuildContext context,
+    WidgetRef ref,
+    Order order,
+  ) async {
     final billed = await showDialog<bool>(
       context: context,
       // Billing cannot be dismissed by clicking away: a half-taken payment
@@ -156,7 +200,9 @@ class OrderScreen extends ConsumerWidget {
         context: context,
         builder: (_) => AlertDialog(
           title: const Text('Discard this order?'),
-          content: const Text('Nothing was added, so the table will be free again.'),
+          content: const Text(
+            'Nothing was added, so the table will be free again.',
+          ),
           actions: [
             TextButton(
               onPressed: () => Navigator.of(context).pop(false),
@@ -169,7 +215,9 @@ class OrderScreen extends ConsumerWidget {
           ],
         ),
       );
-      reason = confirmed == true ? 'Discarded before anything was ordered' : null;
+      reason = confirmed == true
+          ? 'Discarded before anything was ordered'
+          : null;
     } else {
       reason = await showDialog<String>(
         context: context,
@@ -224,10 +272,9 @@ class _OrderPanel extends ConsumerWidget {
     final order = state.order!;
 
     // No kitchen printer means no button, rather than one that can only fail.
-    final hasKotPrinter = ref.watch(printerStatusProvider).maybeWhen(
-          data: (status) => status.hasKot,
-          orElse: () => false,
-        );
+    final hasKotPrinter = ref
+        .watch(printerStatusProvider)
+        .maybeWhen(data: (status) => status.hasKot, orElse: () => false);
 
     return Container(
       color: AppColors.surface,
@@ -338,8 +385,9 @@ class _OrderPanel extends ConsumerWidget {
                     width: double.infinity,
                     height: AppSpacing.minTapTarget,
                     child: OutlinedButton.icon(
-                      onPressed:
-                          order.isEmpty || !order.isOpen || state.isBusy ? null : onPrintKot,
+                      onPressed: order.isEmpty || !order.isOpen || state.isBusy
+                          ? null
+                          : onPrintKot,
                       icon: const Icon(Icons.receipt_outlined, size: 18),
                       label: const Text('Print KOT'),
                     ),
@@ -351,7 +399,9 @@ class _OrderPanel extends ConsumerWidget {
                   width: double.infinity,
                   height: AppSpacing.primaryActionHeight,
                   child: ElevatedButton(
-                    onPressed: order.isEmpty || !order.isOpen || state.isBusy ? null : onBill,
+                    onPressed: order.isEmpty || !order.isOpen || state.isBusy
+                        ? null
+                        : onBill,
                     child: state.isBusy
                         ? const SizedBox(
                             height: 18,
@@ -482,21 +532,25 @@ class _Totals extends StatelessWidget {
   }
 
   Widget _row(ThemeData theme, String label, int paise) => Padding(
-        padding: const EdgeInsets.symmetric(vertical: 3),
-        child: Row(
-          mainAxisAlignment: MainAxisAlignment.spaceBetween,
-          children: [
-            Text(label, style: theme.textTheme.bodySmall),
-            Text(Money.formatWithSymbol(paise), style: AppTextStyles.money),
-          ],
-        ),
-      );
+    padding: const EdgeInsets.symmetric(vertical: 3),
+    child: Row(
+      mainAxisAlignment: MainAxisAlignment.spaceBetween,
+      children: [
+        Text(label, style: theme.textTheme.bodySmall),
+        Text(Money.formatWithSymbol(paise), style: AppTextStyles.money),
+      ],
+    ),
+  );
 }
 
 /// A compact square stepper, sized for a quick tap without the padding a stock
 /// IconButton carries.
 class _StepButton extends StatelessWidget {
-  const _StepButton({required this.icon, required this.tooltip, this.onPressed});
+  const _StepButton({
+    required this.icon,
+    required this.tooltip,
+    this.onPressed,
+  });
 
   final IconData icon;
   final String tooltip;
