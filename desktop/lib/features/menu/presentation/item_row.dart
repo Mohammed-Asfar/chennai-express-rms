@@ -17,9 +17,16 @@ class ItemRow extends StatefulWidget {
     required this.onEdit,
     required this.onToggle,
     required this.onDelete,
+    this.categoryName,
   });
 
   final AdminMenuItem item;
+
+  /// Set only when the row is shown outside its own category — in search
+  /// results, where the list spans the whole menu and a bare dish name does
+  /// not say where editing it will take effect.
+  final String? categoryName;
+
   final VoidCallback onEdit;
   final ValueChanged<bool> onToggle;
   final VoidCallback onDelete;
@@ -80,6 +87,13 @@ class _ItemRowState extends State<ItemRow> {
                                   overflow: TextOverflow.ellipsis,
                                 ),
                               ),
+                              if (widget.categoryName != null) ...[
+                                const SizedBox(width: AppSpacing.sm),
+                                _Pill(
+                                  label: widget.categoryName!,
+                                  color: theme.colorScheme.onSurfaceVariant,
+                                ),
+                              ],
                               if (off) ...[
                                 const SizedBox(width: AppSpacing.sm),
                                 _Pill(

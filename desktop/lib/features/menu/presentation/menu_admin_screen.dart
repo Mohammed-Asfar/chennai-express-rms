@@ -62,16 +62,16 @@ class _MenuAdminScreenState extends ConsumerState<MenuAdminScreen> {
               child: items.when(
                 loading: () => const AppLoading(message: 'Loading dishes'),
                 error: (error, _) => _fullWidthError('$error'),
-                data: (allItems) {
-                  final forCategory =
-                      allItems.where((i) => i.categoryId == selectedId).toList();
-                  return _ItemPane(
-                    categories: categoryList,
-                    categoryId: selectedId,
-                    items: forCategory,
-                    onChanged: _refresh,
-                  );
-                },
+                data: (allItems) => _ItemPane(
+                  categories: categoryList,
+                  categoryId: selectedId,
+                  items: allItems.where((i) => i.categoryId == selectedId).toList(),
+                  // Searching looks across the whole menu, not just the
+                  // category in view: someone hunting for a dish knows its
+                  // name, not which category it was filed under.
+                  allItems: allItems,
+                  onChanged: _refresh,
+                ),
               ),
             ),
           ],
@@ -351,12 +351,20 @@ class _ItemPane extends ConsumerStatefulWidget {
     required this.categories,
     required this.categoryId,
     required this.items,
+    required this.allItems,
     required this.onChanged,
   });
 
   final List<AdminCategory> categories;
   final String categoryId;
+
+  /// Dishes in the selected category — what the list shows at rest.
   final List<AdminMenuItem> items;
+
+  /// Every dish on the menu. Searched instead of [items], so a dish filed
+  /// under another category is still found by name.
+  final List<AdminMenuItem> allItems;
+
   final VoidCallback onChanged;
 
   @override
@@ -374,9 +382,16 @@ class _ItemPaneState extends ConsumerState<_ItemPane> {
     final categoryName =
         categories.firstWhere((c) => c.id == widget.categoryId).name;
 
+    // Searching widens to the whole menu; at rest the list is the selected
+    // category. Typing a dish name should find it wherever it is filed —
+    // otherwise the answer is "no dishes match" while the dish is two
+    // categories down, which reads as a missing dish rather than a filter.
+    final searching = _search.isNotEmpty;
+    final pool = searching ? widget.allItems : items;
+
     // Name or portion: "half" is as reasonable a thing to type as "biryani".
-    final shown = items.where((item) {
-      if (_search.isEmpty) return true;
+    final shown = pool.where((item) {
+      if (!searching) return true;
       if (item.name.toLowerCase().contains(_search)) return true;
       return item.variants.any((v) => v.name.toLowerCase().contains(_search));
     }).toList();
@@ -393,10 +408,18 @@ class _ItemPaneState extends ConsumerState<_ItemPane> {
           ),
           child: Row(
             children: [
-              Text(categoryName, style: theme.textTheme.titleLarge),
+              // The heading follows what is actually listed. Leaving it on the
+              // category while showing dishes from all of them would label the
+              // results wrongly.
+              Text(
+                searching ? 'All dishes' : categoryName,
+                style: theme.textTheme.titleLarge,
+              ),
               const SizedBox(width: AppSpacing.sm),
               Text(
-                '${items.length} dish${items.length == 1 ? '' : 'es'}',
+                searching
+                    ? '${shown.length} of ${widget.allItems.length} match'
+                    : '${items.length} dish${items.length == 1 ? '' : 'es'}',
                 style: theme.textTheme.bodySmall,
               ),
               const Spacer(),
@@ -409,9 +432,10 @@ class _ItemPaneState extends ConsumerState<_ItemPane> {
           ),
         ),
 
-        // Hidden when the category holds nothing: a search box over an empty
-        // list is furniture, and the empty state has the useful action on it.
-        if (items.isNotEmpty)
+        // Shown whenever the menu holds anything, even if this category is
+        // empty: search reaches the whole menu, so an empty category is
+        // exactly where someone may go looking for a dish filed elsewhere.
+        if (widget.allItems.isNotEmpty)
           Padding(
             padding: const EdgeInsets.fromLTRB(
               AppSpacing.lg,
@@ -420,13 +444,13 @@ class _ItemPaneState extends ConsumerState<_ItemPane> {
               AppSpacing.md,
             ),
             child: SearchField(
-              hintText: 'Search dishes in ${categoryName.toLowerCase()}',
+              hintText: 'Search all dishes',
               onChanged: (value) => setState(() => _search = value),
             ),
           ),
 
         Expanded(
-          child: items.isEmpty
+          child: items.isEmpty && !searching
               ? _EmptyCategory(onAdd: () => _createItem(context, ref))
               : shown.isEmpty
               ? NoSearchResults(query: _search, noun: 'dishes')
@@ -440,6 +464,13 @@ class _ItemPaneState extends ConsumerState<_ItemPane> {
                   itemCount: shown.length,
                   itemBuilder: (context, index) => ItemRow(
                     item: shown[index],
+                    // Only while searching, and only for dishes from elsewhere:
+                    // tagging every row with the category already in the
+                    // heading would be noise.
+                    categoryName: searching &&
+                            shown[index].categoryId != widget.categoryId
+                        ? _categoryNameFor(shown[index].categoryId)
+                        : null,
                     onEdit: () => _editItem(context, ref, shown[index]),
                     onToggle: (available) =>
                         _toggle(context, ref, shown[index], available),
@@ -449,6 +480,15 @@ class _ItemPaneState extends ConsumerState<_ItemPane> {
         ),
       ],
     );
+  }
+
+  /// The category a searched-up dish belongs to. Null when it has been deleted
+  /// out from under the item, which the list should survive rather than throw.
+  String? _categoryNameFor(String categoryId) {
+    for (final category in widget.categories) {
+      if (category.id == categoryId) return category.name;
+    }
+    return null;
   }
 
   Future<void> _createItem(BuildContext context, WidgetRef ref) async {
