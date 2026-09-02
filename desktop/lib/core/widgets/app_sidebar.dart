@@ -108,8 +108,13 @@ class _Wordmark extends StatelessWidget {
                   overflow: TextOverflow.ellipsis,
                 ),
                 Text(
-                  'Billing counter',
+                  'Restaurant management system',
                   style: AppTextStyles.bodySmall.copyWith(color: AppColors.onShellMuted),
+                  // The sidebar is a fixed 248px and this line is long enough
+                  // to reach it. Wrapping to two lines is fine; overflowing the
+                  // pane is not.
+                  maxLines: 2,
+                  overflow: TextOverflow.ellipsis,
                 ),
               ],
             ),

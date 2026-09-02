@@ -92,7 +92,7 @@ class _LoginScreenState extends ConsumerState<LoginScreen> {
                           ),
                           const SizedBox(height: AppSpacing.sm),
                           Text(
-                            'Billing counter',
+                            'Restaurant management system',
                             style: theme.textTheme.bodySmall,
                             textAlign: TextAlign.center,
                           ),
