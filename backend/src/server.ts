@@ -24,6 +24,7 @@ import { printerRoutes } from './routes/printers.js'
 import { settingsRoutes } from './routes/settings.js'
 import { reportRoutes } from './routes/reports.js'
 import { SyncWorker } from './sync/worker.js'
+import { createPrintWorker, type PrintWorker } from './print/worker.js'
 
 export interface BuildOptions {
   db: Db
@@ -80,6 +81,7 @@ export async function buildServer({ db, env, sync }: BuildOptions): Promise<Fast
   app.decorate('db', db)
   app.decorate('env', env)
   app.decorate('sync', sync ?? new SyncWorker(db, env, app.log))
+  app.decorate('printQueue', createPrintWorker(db, app.log))
 
   await app.register(cors, { origin: true })
   await app.register(websocket)
@@ -165,5 +167,6 @@ declare module 'fastify' {
     db: Db
     env: Env
     sync: SyncWorker
+    printQueue: PrintWorker
   }
 }

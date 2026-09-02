@@ -28,9 +28,15 @@ if (applied.length > 0) {
 
 app.sync.start()
 
+// Retries tickets that have not gone out. Without it a job left pending by an
+// offline printer stays pending forever: nothing tries it again, and the queue
+// panel offers no Retry because it has not given up yet.
+app.printQueue.start()
+
 const shutdown = async (signal: string): Promise<void> => {
   app.log.info({ signal }, 'shutting down')
   app.sync.stop()
+  app.printQueue.stop()
   await app.close()
   db.close()
   process.exit(0)

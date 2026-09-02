@@ -4,7 +4,14 @@ import { z } from 'zod'
 import { requiredText } from '../lib/validation.js'
 import { AppError } from '../lib/errors.js'
 import { currentUser, requireAuth, requireRole } from '../lib/guards.js'
-import { enqueueAndSend, resolvePrinter, runJob, type PrinterRow } from '../print/queue.js'
+import {
+  enqueueAndSend,
+  resolvePrinter,
+  runJob,
+  settleJob,
+  SETTLE_TIMEOUT_MS,
+  type PrinterRow,
+} from '../print/queue.js'
 import { renderTest } from '../print/tickets.js'
 import { discoverAll, discoverNetwork, discoverUsb, type Discovered } from '../print/discover.js'
 import { verifyToken } from '../lib/auth.js'
@@ -260,7 +267,7 @@ export async function printerRoutes(app: FastifyInstance): Promise<void> {
       // USB queue goes through the Windows spooler, which takes noticeably
       // longer than a socket — too short a wait reports a working printer as
       // failed, and someone goes looking for a fault that is not there.
-      const job = await settleJob(app, jobId, 4_000)
+      const job = await settleJob(app.db, jobId, SETTLE_TIMEOUT_MS)
 
       return {
         ok: job?.status === 'printed',
@@ -386,32 +393,6 @@ function toPublicJob(row: Record<string, unknown>) {
     printerId: (row.printer_id as string | null) ?? null,
     printerName: (row.printer_name as string | null) ?? null,
   }
-}
-
-/**
- * Waits for a queued job to stop being pending, up to a limit.
- *
- * Polls rather than sleeping a fixed time: a socket printer answers in
- * milliseconds while a Windows spool takes seconds, and a single delay long
- * enough for the slow case would make the fast one feel broken.
- */
-async function settleJob(
-  app: FastifyInstance,
-  jobId: string,
-  timeoutMs: number,
-): Promise<{ status: string; last_error: string | null } | undefined> {
-  const deadline = Date.now() + timeoutMs
-  let job: { status: string; last_error: string | null } | undefined
-
-  while (Date.now() < deadline) {
-    job = app.db
-      .prepare('SELECT status, last_error FROM print_jobs WHERE id = ?')
-      .get(jobId) as { status: string; last_error: string | null } | undefined
-
-    if (job === undefined || job.status !== 'pending') return job
-    await new Promise((resolve) => setTimeout(resolve, 150))
-  }
-  return job
 }
 
 function findOrThrow(app: FastifyInstance, branchId: string, id: string): PrinterRow {

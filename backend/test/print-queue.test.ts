@@ -284,3 +284,81 @@ test('a job carries what the panel needs to describe it', async () => {
 
   await ctx.app.close()
 })
+
+test('settleJob keeps polling instead of reading the status once', async () => {
+  // A USB printer goes through the Windows spooler and takes seconds. Reading
+  // the status once after a fixed 400ms wait reported it as failed, so a bill
+  // that printed fine showed "The bill did not print" and sent someone looking
+  // for a fault that was not there.
+  //
+  // Counts polls rather than watching the clock: the suite runs tests
+  // concurrently, so wall-clock timing here is whatever the event loop allows.
+  const { settleJob } = await import('../src/print/queue.js')
+  const ctx = await setup()
+  const id = queueJob(ctx, { status: 'pending' })
+
+  let reads = 0
+  const realPrepare = ctx.db.prepare.bind(ctx.db)
+  const spy = new Proxy(ctx.db, {
+    get(target, property, receiver) {
+      if (property !== 'prepare') return Reflect.get(target, property, receiver)
+      return (sql: string) => {
+        // Settles on the second look. One read alone would have returned
+        // pending, which is exactly what the old fixed-wait code did.
+        if (sql.includes('SELECT status, last_error') && ++reads === 2) {
+          realPrepare("UPDATE print_jobs SET status = 'printed' WHERE id = ?").run(id)
+        }
+        return realPrepare(sql)
+      }
+    },
+  })
+
+  const job = await settleJob(spy, id, 4_000)
+  assertEqual(job?.status, 'printed', `after ${reads} polls, status was ${job?.status}`)
+  assertEqual(reads >= 2, true, `polled ${reads} times, so it did not read once and stop`)
+
+  await ctx.app.close()
+})
+
+test('settleJob gives up rather than hanging on a job that never settles', async () => {
+  // Still pending is a real answer: "queued, not yet printed". The request must
+  // not hold open waiting for a printer that will never respond.
+  const { settleJob } = await import('../src/print/queue.js')
+  const ctx = await setup()
+  const id = queueJob(ctx, { status: 'pending' })
+
+  const job = await settleJob(ctx.db, id, 300)
+  assertEqual(job?.status, 'pending', 'returned rather than hanging')
+
+  await ctx.app.close()
+})
+
+test('settleJob returns a settled job without waiting out its timeout', async () => {
+  // A 4s timeout must not mean every print takes 4s.
+  const { settleJob } = await import('../src/print/queue.js')
+  const ctx = await setup()
+  const id = queueJob(ctx, { status: 'failed', lastError: 'offline' })
+
+  const job = await settleJob(ctx.db, id, 60_000)
+
+  assertEqual(job?.status, 'failed')
+  assertEqual(job?.last_error, 'offline')
+
+  await ctx.app.close()
+})
+
+test('the sweep leaves a cancelled job alone', async () => {
+  // The worker calls drainPending on a timer. It must never revive something
+  // someone deliberately stopped.
+  const { drainPending } = await import('../src/print/queue.js')
+  const ctx = await setup()
+  const cancelled = queueJob(ctx, { status: 'cancelled' })
+  const printed = queueJob(ctx, { status: 'printed' })
+
+  await drainPending(ctx.db, ctx.branchId)
+
+  assertEqual(statusOf(ctx, cancelled), 'cancelled')
+  assertEqual(statusOf(ctx, printed), 'printed')
+
+  await ctx.app.close()
+})

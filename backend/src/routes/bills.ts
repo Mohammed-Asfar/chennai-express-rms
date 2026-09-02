@@ -10,7 +10,12 @@ import { formatBillNumber, periodKey } from '../lib/bill-number.js'
 import { getSetting } from '../lib/settings.js'
 import { BillError, computeBill, type BillResult } from '../lib/bill-math.js'
 import { refreshTableStatus } from './tables.js'
-import { enqueueAndSend, resolvePrinter } from '../print/queue.js'
+import {
+  enqueueAndSend,
+  resolvePrinter,
+  settleJob,
+  SETTLE_TIMEOUT_MS,
+} from '../print/queue.js'
 import { renderBill } from '../print/tickets.js'
 
 const createBody = z.object({
@@ -461,10 +466,11 @@ export async function billRoutes(app: FastifyInstance): Promise<void> {
         payload,
       })
 
-      await new Promise((resolve) => setTimeout(resolve, 400))
-      const job = app.db
-        .prepare('SELECT status, last_error FROM print_jobs WHERE id = ?')
-        .get(jobId) as { status: string; last_error: string | null } | undefined
+      // Polled rather than a fixed wait: a USB printer goes through the
+      // Windows spooler and takes seconds, so a short sleep reported a working
+      // printer as failed and sent someone looking for a fault that was not
+      // there.
+      const job = await settleJob(app.db, jobId, SETTLE_TIMEOUT_MS)
 
       return {
         ok: job?.status === 'printed',

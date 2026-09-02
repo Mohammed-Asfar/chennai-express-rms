@@ -250,13 +250,14 @@ class _JobCard extends StatelessWidget {
                 child: const Text('Cancel'),
               ),
               const SizedBox(width: AppSpacing.xs),
-              // Retrying something still pending would send it twice: the
-              // backend is already working through it on its own timer.
-              if (failed)
-                ElevatedButton(
-                  onPressed: busy ? null : onRetry,
-                  child: const Text('Retry'),
-                ),
+              // Offered on a pending job too. The sweep will get to it, but a
+              // cook waiting at the pass should not have to wait for the next
+              // tick, and the backend only sends a job that is still pending
+              // so pressing this cannot produce a second ticket.
+              ElevatedButton(
+                onPressed: busy ? null : onRetry,
+                child: Text(failed ? 'Retry' : 'Send now'),
+              ),
             ],
           ),
         ],

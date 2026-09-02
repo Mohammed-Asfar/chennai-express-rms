@@ -632,6 +632,8 @@ Scenarios that occur in a working restaurant and their required behaviour.
 | Scenario | Required behaviour |
 |---|---|
 | Printer offline | Order and bill still save; job queues as failed with Retry |
+| Slow USB printer via the Windows spooler | The result is polled, not read once after a fixed wait — a bill that printed must not report failure |
+| Job left pending by a restart or an offline printer | A background sweep retries it, and the queue offers "Send now" rather than only waiting |
 | No printer matches a job's role | Job queues as failed with a clear message — never silently dropped |
 | Items added after a KOT already printed | Only the new lines print, marked as an additional KOT |
 | Retry pressed on an already-printed job | Prevented — avoids duplicate KOTs reaching the kitchen |

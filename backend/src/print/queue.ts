@@ -172,6 +172,39 @@ export function enqueueAndSend(
   return jobId
 }
 
+/**
+ * Waits for a queued job to stop being pending, up to a limit.
+ *
+ * Polls rather than sleeping a fixed time. A socket printer answers in
+ * milliseconds while a Windows spool takes seconds, so any single delay is
+ * wrong for one of them: too short reports a working printer as failed, and
+ * too long makes every print feel slow.
+ *
+ * Returns whatever the job looks like when it settles or the limit runs out —
+ * still pending is a real answer, meaning "queued, not yet printed".
+ */
+export async function settleJob(
+  db: Db,
+  jobId: string,
+  timeoutMs: number,
+): Promise<{ status: string; last_error: string | null } | undefined> {
+  const deadline = Date.now() + timeoutMs
+  let job: { status: string; last_error: string | null } | undefined
+
+  while (Date.now() < deadline) {
+    job = db
+      .prepare('SELECT status, last_error FROM print_jobs WHERE id = ?')
+      .get(jobId) as { status: string; last_error: string | null } | undefined
+
+    if (job === undefined || job.status !== 'pending') return job
+    await new Promise((resolve) => setTimeout(resolve, 150))
+  }
+  return job
+}
+
+/** How long a print request waits before reporting back. */
+export const SETTLE_TIMEOUT_MS = 4_000
+
 /** Retries everything still pending. Called on a timer and at startup. */
 export async function drainPending(db: Db, branchId?: string): Promise<number> {
   const rows = (
