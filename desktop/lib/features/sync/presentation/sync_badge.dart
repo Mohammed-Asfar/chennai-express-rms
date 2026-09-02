@@ -56,53 +56,66 @@ class _SyncBadgeState extends ConsumerState<SyncBadge> {
     // Quarantined rows are stuck until someone acts; everything else resolves
     // itself when the connection returns. Only the first is an alarm.
     final stuck = value.quarantined > 0 || (value.hasNeverSynced && value.pending > 0);
-    final tone = stuck ? AppColors.danger : AppColors.warning;
 
-    return Padding(
-      padding: const EdgeInsets.fromLTRB(
-        AppSpacing.sm,
-        0,
-        AppSpacing.sm,
-        AppSpacing.sm,
-      ),
+    // The light-ground danger and warning are unreadable here — see the note
+    // on these in app_colors.dart.
+    final tone = stuck ? AppColors.dangerOnShell : AppColors.warningOnShell;
+
+    return Semantics(
+      button: true,
+      label: '${stuck ? 'Backup stopped' : 'Backup behind'}. ${_detail(value)}.',
       child: Material(
         color: AppColors.shellHover,
-        borderRadius: BorderRadius.circular(AppSpacing.radiusSm),
         child: InkWell(
           onTap: () => Navigator.of(context).push(
             MaterialPageRoute<void>(builder: (_) => const SyncScreen()),
           ),
-          borderRadius: BorderRadius.circular(AppSpacing.radiusSm),
-          child: Padding(
+          child: Container(
+            // A full-width band ruled off from the user row below it, rather
+            // than a floating card. It reads as part of the sidebar's
+            // structure, which is what stops it looking like a stray
+            // notification to be dismissed and forgotten. The sidebar already
+            // draws the rule above the footer, so only the lower one is ours.
+            decoration: const BoxDecoration(
+              border: Border(bottom: BorderSide(color: AppColors.shellBorder)),
+            ),
             padding: const EdgeInsets.symmetric(
               horizontal: AppSpacing.md,
-              vertical: AppSpacing.sm,
+              vertical: AppSpacing.md,
             ),
             child: Row(
               children: [
-                Icon(Icons.cloud_off_outlined, size: 16, color: tone),
-                const SizedBox(width: AppSpacing.sm),
+                Icon(Icons.cloud_off_outlined, size: 18, color: tone),
+                const SizedBox(width: AppSpacing.md),
                 Expanded(
                   child: Column(
                     crossAxisAlignment: CrossAxisAlignment.start,
                     children: [
                       Text(
                         stuck ? 'Backup stopped' : 'Backup behind',
-                        style: AppTextStyles.bodySmall.copyWith(
+                        style: AppTextStyles.bodyMedium.copyWith(
                           color: tone,
                           fontWeight: FontWeight.w600,
                         ),
                       ),
+                      const SizedBox(height: 2),
                       Text(
                         _detail(value),
                         style: AppTextStyles.bodySmall.copyWith(
-                          color: AppColors.onShellMuted,
+                          color: AppColors.onShell,
                         ),
                         maxLines: 1,
                         overflow: TextOverflow.ellipsis,
                       ),
                     ],
                   ),
+                ),
+                // Says the band goes somewhere. Without it the whole thing
+                // reads as a notice to be endured rather than acted on.
+                const Icon(
+                  Icons.chevron_right,
+                  size: 18,
+                  color: AppColors.onShellMuted,
                 ),
               ],
             ),

@@ -60,6 +60,15 @@ abstract final class AppColors {
   static const Color onShell = Color(0xFFF2F0EC);
   static const Color onShellMuted = Color(0xFF908B83);
 
+  /// Status colours for use *on the charcoal spine*.
+  ///
+  /// [danger] and [warning] below are mixed for a light ground and turn muddy
+  /// on the sidebar — #B3261E on #2A2926 measures 2.23:1, well under the 4.5
+  /// minimum, so a warning there is harder to read than the text around it.
+  /// These are the same hues lifted until they carry: 6.4:1 and 8.3:1.
+  static const Color dangerOnShell = Color(0xFFFF8A80);
+  static const Color warningOnShell = Color(0xFFF5B860);
+
   // --- 10%: the accent ------------------------------------------------------
 
   static const Color accent = Color(0xFFF5C518);
