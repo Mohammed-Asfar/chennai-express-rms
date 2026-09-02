@@ -86,17 +86,17 @@ class _Wordmark extends StatelessWidget {
       ),
       child: Row(
         children: [
-          // A single amber bar, not a logo: the restaurant's name is the mark,
-          // and the bar ties the sidebar to the accent used everywhere else.
-          Container(
-            width: 3,
-            height: 22,
-            decoration: BoxDecoration(
-              color: AppColors.accent,
-              borderRadius: BorderRadius.circular(2),
-            ),
+          // Small: the logo is a detailed illustration and shrinking it much
+          // further turns the lettering to mush. At 36px it reads as a mark
+          // rather than a picture, which is what a permanent sidebar needs.
+          Image.asset(
+            'assets/logo.png',
+            width: 36,
+            height: 36,
+            fit: BoxFit.contain,
+            filterQuality: FilterQuality.medium,
           ),
-          const SizedBox(width: AppSpacing.sm),
+          const SizedBox(width: AppSpacing.md),
           Expanded(
             child: Column(
               crossAxisAlignment: CrossAxisAlignment.start,

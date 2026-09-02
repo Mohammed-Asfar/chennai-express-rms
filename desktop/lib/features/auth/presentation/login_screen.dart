@@ -75,8 +75,21 @@ class _LoginScreenState extends ConsumerState<LoginScreen> {
                         mainAxisSize: MainAxisSize.min,
                         crossAxisAlignment: CrossAxisAlignment.stretch,
                         children: [
-                          // The wordmark carries the identity; a stock restaurant icon
-                          // would say less and look like every other POS.
+                          // Large here, where there is room. The login screen is
+                          // the one place the restaurant's own identity gets to
+                          // be the whole point rather than a corner of a toolbar.
+                          Center(
+                            child: Image.asset(
+                              'assets/logo.png',
+                              width: 132,
+                              fit: BoxFit.contain,
+                              filterQuality: FilterQuality.medium,
+                            ),
+                          ),
+                          const SizedBox(height: AppSpacing.md),
+                          // The name stays under the logo: the mark carries it
+                          // as artwork, but a screen reader gets nothing from an
+                          // image, and a faint print reads as decoration.
                           Text(
                             'Chennai Express',
                             style: theme.textTheme.headlineMedium,
