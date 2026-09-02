@@ -14,8 +14,10 @@ PreviewLine line(String text, {int height = 1, String align = 'left'}) =>
       heightScale: height,
     );
 
+const _rule = '================================================'; // 48
+
 /// A sample bill shaped like the real one: an enlarged name, then rules either
-/// side of an enlarged total — the places overlapping was visible.
+/// side of an enlarged total — the places where breakage was visible.
 final _bill = BillPreview(
   paper: '80mm',
   width: 48,
@@ -24,9 +26,9 @@ final _bill = BillPreview(
     line('CHENNAI EXPRESS', height: 3, align: 'center'),
     line('NORTH INDIAN FOOD', align: 'center'),
     line(''),
-    line('=' * 48),
+    line(_rule),
     line('TOTAL                                     790.00', height: 2),
-    line('=' * 48),
+    line(_rule),
     line(''),
     line('Thank you, visit again!', align: 'center'),
   ],
@@ -47,108 +49,111 @@ Future<void> pump(WidgetTester tester) async {
   await tester.pumpAndSettle();
 }
 
+/// The rendered rows, in order. Lines are painted rather than laid out as Text,
+/// so they are found by their painter.
+List<Rect> rows(WidgetTester tester) => tester
+    .widgetList<CustomPaint>(find.byType(CustomPaint))
+    .where((paint) => paint.painter.runtimeType.toString() == '_LinePainter')
+    .map((paint) => tester.getRect(find.byWidget(paint)))
+    .toList();
+
 void main() {
   group('the sample bill lays out', () {
-    testWidgets('an enlarged line is drawn larger than a normal one', (
-      tester,
-    ) async {
-      // The bug this guards: every line rendered at one size, so the preview
+    testWidgets('every line is drawn', (tester) async {
+      await pump(tester);
+      expect(rows(tester).length, _bill.lines.length);
+    });
+
+    testWidgets('an enlarged line is taller than a normal one', (tester) async {
+      // The original bug: every line rendered at one size, so the preview
       // showed the name unchanged however large it was set to print.
       await pump(tester);
+      final r = rows(tester);
 
-      final name = tester.widget<Text>(find.text('CHENNAI EXPRESS'));
-      final tagline = tester.widget<Text>(find.text('NORTH INDIAN FOOD'));
+      final name = r[0]; // 3x
+      final tagline = r[1]; // 1x
+      final total = r[4]; // 2x
 
-      expect(name.style!.fontSize, greaterThan(tagline.style!.fontSize!));
+      expect(name.height, greaterThan(tagline.height), reason: 'name is taller');
+      expect(total.height, greaterThan(tagline.height), reason: 'total is taller');
+      expect(name.height, greaterThan(total.height), reason: '3x beats 2x');
     });
 
-    testWidgets('a taller line does not overlap the one below it', (
+    testWidgets('a taller line does not overlap its neighbours', (
       tester,
     ) async {
-      // The second bug: a transform paints outside the space it reserves, so
-      // the total bled over the rules above and below it.
+      // A transform paints outside the space it reserves, so the total bled
+      // over the rules above and below it.
       await pump(tester);
+      final r = rows(tester);
 
-      final rules = find.text('=' * 48);
-      final above = tester.getRect(rules.first);
-      final total = tester.getRect(find.textContaining('TOTAL'));
-      final below = tester.getRect(rules.last);
-
-      expect(
-        total.top,
-        greaterThanOrEqualTo(above.bottom - 0.5),
-        reason: 'the total starts below the rule above it',
-      );
-      expect(
-        total.bottom,
-        lessThanOrEqualTo(below.top + 0.5),
-        reason: 'and ends above the rule below it',
-      );
-    });
-
-    testWidgets('every line stays inside the paper', (tester) async {
-      // The box is measured against the largest line, so an enlarged name must
-      // not be clipped — that is the failure the width exists to catch.
-      await pump(tester);
-
-      final paper = tester.getRect(
-        find.ancestor(of: find.text('CHENNAI EXPRESS'), matching: find.byType(Container)).first,
-      );
-
-      for (final text in ['CHENNAI EXPRESS', 'NORTH INDIAN FOOD']) {
-        final rect = tester.getRect(find.text(text));
-        expect(rect.left, greaterThanOrEqualTo(paper.left - 0.5), reason: '$text overflows left');
-        expect(rect.right, lessThanOrEqualTo(paper.right + 0.5), reason: '$text overflows right');
+      for (var i = 1; i < r.length; i++) {
+        expect(
+          r[i].top,
+          greaterThanOrEqualTo(r[i - 1].bottom - 0.5),
+          reason: 'row $i starts before row ${i - 1} ends',
+        );
       }
     });
 
     testWidgets('an enlarged line does not widen the paper', (tester) async {
-      // The paper stayed 48 columns while the name was drawn in a 3x face, so
-      // the box grew to fit it and the whole receipt stretched — the total's
-      // amount ended up far out to the right of everything else.
+      // Scaling the font grew glyphs both ways, so the 3x name was far wider
+      // than the columns it occupies and stretched the box around it.
       await pump(tester);
+      final r = rows(tester);
 
-      final rule = tester.getRect(find.text('=' * 48).first);
-      final name = tester.getRect(find.text('CHENNAI EXPRESS'));
-
-      // 48 columns of rule is the paper's full width. The 15-character name
-      // must occupy less than that, as it does on paper.
-      expect(
-        name.width,
-        lessThan(rule.width),
-        reason: 'name ${name.width} vs paper ${rule.width}',
-      );
+      final rule = r[3].width; // a full 48-column line
+      for (final row in r) {
+        expect(
+          row.width,
+          lessThanOrEqualTo(rule + 1),
+          reason: 'a row is wider than the paper',
+        );
+      }
     });
 
-    testWidgets('the amount stays in the column the rules mark out', (
+    testWidgets('the paper is the column count wide, whatever prints on it', (
       tester,
     ) async {
-      // The total is right-aligned within 48 columns. If the box is wider than
-      // the paper, the amount drifts past the rules and the preview stops
-      // showing where it really prints.
+      // Same assertion from the paper's side: the box must not grow to fit an
+      // enlarged line, or every margin on the preview is wrong.
       await pump(tester);
 
-      final rule = tester.getRect(find.text('=' * 48).first);
-      final total = tester.getRect(find.textContaining('TOTAL'));
+      final withLarge = rows(tester)[3].width;
 
-      expect(
-        total.right,
-        lessThanOrEqualTo(rule.right + 1),
-        reason: 'total ends at ${total.right}, rule at ${rule.right}',
+      // The same bill with nothing enlarged must be exactly as wide.
+      await tester.pumpWidget(
+        ProviderScope(
+          overrides: [
+            billPreviewProvider.overrideWith(
+              (_) async => BillPreview(
+                paper: '80mm',
+                width: 48,
+                hasLogo: false,
+                lines: [line('CHENNAI EXPRESS', align: 'center'), line(_rule)],
+              ),
+            ),
+          ],
+          child: MaterialApp(
+            theme: AppTheme.light,
+            home: const Scaffold(
+              body: SingleChildScrollView(child: BillPreviewCard()),
+            ),
+          ),
+        ),
       );
+      await tester.pumpAndSettle();
+
+      expect(rows(tester)[1].width, closeTo(withLarge, 1));
     });
 
     testWidgets('a blank line does not open a large gap', (tester) async {
-      // Blank lines decode at 1x. If one ever inherited the enlarged size it
-      // would push the whole lower half of the bill down.
+      // Blank lines decode at 1x. One inheriting an enlarged size would push
+      // the whole lower half of the bill down.
       await pump(tester);
+      final r = rows(tester);
 
-      final tagline = tester.getRect(find.text('NORTH INDIAN FOOD'));
-      final rule = tester.getRect(find.text('=' * 48).first);
-      final gap = rule.top - tagline.bottom;
-
-      // One blank line between them, so at most a couple of line heights.
-      expect(gap, lessThan(tagline.height * 3), reason: 'gap was $gap');
+      expect(r[2].height, closeTo(r[1].height, 1), reason: 'blank line is normal height');
     });
   });
 }

@@ -169,58 +169,72 @@ class _Line extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    // Taller, but never wider.
-    //
-    // The printer's height command stretches a glyph vertically while it still
-    // occupies one column. A larger font grows both ways, so the size is put
-    // back horizontally: the line ends up tall and the same width it prints,
-    // which is what keeps the paper box honest at 48 columns.
-    final scale = line.heightScale;
     final style = AppTextStyles.receipt.copyWith(
       fontWeight: line.bold || line.large ? FontWeight.w700 : FontWeight.w400,
-      fontSize: AppTextStyles.receipt.fontSize! * scale,
-      // Enlarged lines otherwise inherit leading proportional to their size,
-      // which opens a gap the printer does not leave.
-      height: scale > 1 ? 1.05 : null,
       color: AppColors.ink,
     );
 
-    final text = Text(
-      // A blank line still occupies its height on paper.
-      line.text.isEmpty ? ' ' : line.text,
-      style: style,
-      softWrap: false,
-    );
-
-    return Align(
-      alignment: switch (line.align) {
-        'center' => Alignment.center,
-        'right' => Alignment.centerRight,
-        _ => Alignment.centerLeft,
-      },
-      child: scale > 1
-          // Squeezed back to the width it really prints. The SizedBox is what
-          // makes the row measure that width too — a bare transform would
-          // reserve the unsqueezed size and widen the paper around it.
-          ? SizedBox(
-              width: _paintedWidth(context, style) / scale,
-              child: Transform(
-                transform: Matrix4.diagonal3Values(1 / scale, 1, 1),
-                alignment: Alignment.centerLeft,
-                child: text,
-              ),
-            )
-          : text,
-    );
-  }
-
-  /// How wide this line is before it is squeezed back.
-  double _paintedWidth(BuildContext context, TextStyle style) {
+    // A blank line still occupies its height on paper.
     final painter = TextPainter(
       text: TextSpan(text: line.text.isEmpty ? ' ' : line.text, style: style),
       textDirection: TextDirection.ltr,
       textScaler: MediaQuery.textScalerOf(context),
     )..layout();
-    return painter.width;
+
+    // Painted rather than laid out, because the two axes have to move
+    // independently: the printer's height command makes a glyph taller while
+    // it still occupies one column. Every widget-level approach ties the axes
+    // together — a bigger font widens the line and stretches the paper around
+    // it, and constraining the width back truncates the text instead.
+    return CustomPaint(
+      // The row's own size: the text's true width, and the taller height. This
+      // is what keeps the paper 48 columns wide however large a line prints.
+      size: Size(painter.width, painter.height * line.heightScale),
+      painter: _LinePainter(
+        painter: painter,
+        heightScale: line.heightScale.toDouble(),
+        align: line.align,
+      ),
+    );
   }
+}
+
+/// Draws one receipt line, stretched vertically only.
+class _LinePainter extends CustomPainter {
+  const _LinePainter({
+    required this.painter,
+    required this.heightScale,
+    required this.align,
+  });
+
+  final TextPainter painter;
+  final double heightScale;
+  final String align;
+
+  @override
+  void paint(Canvas canvas, Size size) {
+    final x = switch (align) {
+      'center' => (size.width - painter.width) / 2,
+      'right' => size.width - painter.width,
+      _ => 0.0,
+    };
+
+    if (heightScale == 1) {
+      painter.paint(canvas, Offset(x, 0));
+      return;
+    }
+
+    // Scaling the canvas on one axis stretches the glyphs without touching
+    // their advance widths, which is exactly what the printer does.
+    canvas.save();
+    canvas.scale(1, heightScale);
+    painter.paint(canvas, Offset(x, 0));
+    canvas.restore();
+  }
+
+  @override
+  bool shouldRepaint(_LinePainter old) =>
+      old.painter != painter ||
+      old.heightScale != heightScale ||
+      old.align != align;
 }
