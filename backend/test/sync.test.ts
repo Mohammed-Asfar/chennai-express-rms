@@ -160,6 +160,104 @@ test('an unreachable cloud never throws into billing', async () => {
   db.close()
 })
 
+/**
+ * A cloud that answers but rejects every row.
+ *
+ * This is schema drift: the branch has a column the cloud has not been
+ * migrated for. The connection is perfectly healthy, which is precisely why it
+ * went unnoticed on a real till for days.
+ */
+function rejectingCloud(message: string): () => Promise<Sql> {
+  const sql = ((strings: unknown, ..._values: unknown[]) => {
+    // The `SELECT 1` probe must succeed — the cloud is reachable.
+    const text = Array.isArray(strings) ? String((strings as string[])[0]) : String(strings)
+    if (text.includes('SELECT 1')) return Promise.resolve([{ '?column?': 1 }])
+    return Promise.reject(new Error(message))
+  }) as unknown as Sql
+
+  sql.unsafe = (() => Promise.reject(new Error(message))) as Sql['unsafe']
+  sql.end = (() => Promise.resolve()) as Sql['end']
+  sql.begin = ((fn: (t: Sql) => unknown) => Promise.resolve(fn(sql))) as Sql['begin']
+
+  return () => Promise.resolve(sql)
+}
+
+test('a reachable cloud that rejects every row is not reported as healthy', async () => {
+  // The defect this guards: a live branch synced nothing for days because the
+  // cloud was missing a migration, while the status said everything was fine.
+  const db = openDatabase(':memory:')
+  migrate(db)
+  await seedIfEmpty(db, env)
+
+  const cloudEnv = loadEnv({
+    NODE_ENV: 'test',
+    DB_PATH: ':memory:',
+    CLOUD_DATABASE_URL: 'postgres://stand-in/none',
+  })
+  const worker = new SyncWorker(db, cloudEnv, silentLog, {
+    batchSize: 10,
+    connect: rejectingCloud('column "tagline" of relation "branches" does not exist'),
+  })
+
+  await worker.syncNow()
+  const status = worker.status()
+
+  assertEqual(status.healthy, false, 'rejected rows must not read as a healthy sync')
+  assertEqual(status.lastSuccessAt, null, 'nothing reached the cloud, so there was no success')
+  if (status.consecutiveFailures < 1) throw new Error('the rejection was not counted as a failure')
+  if (status.problem === null) throw new Error('an unhealthy sync must say what is wrong')
+
+  worker.stop()
+  db.close()
+})
+
+test('an unreachable cloud is unhealthy and says the sales are safe locally', async () => {
+  const db = openDatabase(':memory:')
+  migrate(db)
+  await seedIfEmpty(db, env)
+
+  const offline = loadEnv({
+    NODE_ENV: 'test',
+    DB_PATH: ':memory:',
+    CLOUD_DATABASE_URL: 'postgres://nobody:nothing@127.0.0.1:1/none',
+  })
+  const worker = new SyncWorker(db, offline, silentLog, {
+    batchSize: 10,
+    connect: () => Promise.reject(new Error('ECONNREFUSED')),
+  })
+
+  await worker.syncNow()
+  const status = worker.status()
+
+  assertEqual(status.healthy, false)
+  // The owner needs to know their takings are not lost, not just that a
+  // technical thing failed.
+  if (!status.problem?.includes('safe on this PC')) {
+    throw new Error(`unhelpful message: ${status.problem}`)
+  }
+
+  worker.stop()
+  db.close()
+})
+
+test('sync switched off is unhealthy rather than quietly fine', async () => {
+  // No CLOUD_DATABASE_URL means there is no backup at all. Reporting that as
+  // healthy would be the most dangerous reading of the three.
+  const db = openDatabase(':memory:')
+  migrate(db)
+  await seedIfEmpty(db, env)
+
+  const worker = new SyncWorker(db, env, silentLog, {})
+  const status = worker.status()
+
+  assertEqual(status.enabled, false)
+  assertEqual(status.healthy, false)
+  if (status.problem === null) throw new Error('it must say cloud backup is not set up')
+
+  worker.stop()
+  db.close()
+})
+
 test('sync status is visible through the API', async () => {
   const db = openDatabase(':memory:')
   migrate(db)

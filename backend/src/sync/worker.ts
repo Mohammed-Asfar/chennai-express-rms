@@ -13,6 +13,20 @@ export interface SyncStatus {
   quarantined: number
   /** Consecutive failed cycles — drives the reconnect detection. */
   consecutiveFailures: number
+
+  /**
+   * Whether the cloud copy can be trusted to be current.
+   *
+   * False the moment anything is stuck, so the UI has one field to read rather
+   * than re-deriving the rule and getting it subtly different.
+   */
+  healthy: boolean
+
+  /**
+   * Why it is unhealthy, in words a restaurant owner can act on. Null when
+   * healthy.
+   */
+  problem: string | null
 }
 
 interface Logger {
@@ -121,7 +135,44 @@ export class SyncWorker {
       lastError: this.lastError,
       ...counts,
       consecutiveFailures: this.consecutiveFailures,
+      ...this.health(counts),
     }
+  }
+
+  /**
+   * The one-line verdict, worst problem first.
+   *
+   * Quarantine outranks a failing connection: an outage fixes itself when the
+   * internet returns, but quarantined rows are given up on and stay lost until
+   * someone retries them.
+   */
+  private health(counts: { pending: number; quarantined: number }): {
+    healthy: boolean
+    problem: string | null
+  } {
+    if (!this.enabled) {
+      return { healthy: false, problem: 'Cloud backup is not set up on this machine.' }
+    }
+    if (counts.quarantined > 0) {
+      return {
+        healthy: false,
+        problem:
+          `${counts.quarantined} record${counts.quarantined === 1 ? '' : 's'} the cloud kept ` +
+          'refusing. They stay on this PC only until you retry them.',
+      }
+    }
+    if (this.consecutiveFailures > 0) {
+      return {
+        healthy: false,
+        problem: 'Cannot reach the cloud. Sales are safe on this PC and will send when it returns.',
+      }
+    }
+    // Nothing has ever reached the cloud, so there is no backup at all yet —
+    // distinct from a backlog that is merely waiting for the next cycle.
+    if (this.lastSuccessAt === null && counts.pending > 0) {
+      return { healthy: false, problem: 'Nothing has been backed up to the cloud yet.' }
+    }
+    return { healthy: true, problem: null }
   }
 
   private async runCycle(trigger: string): Promise<PushResult | null> {
@@ -146,15 +197,30 @@ export class SyncWorker {
         ...(this.options.batchSize !== undefined ? { batchSize: this.options.batchSize } : {}),
       })
 
-      this.lastSuccessAt = new Date().toISOString()
       this.lastError = result.errors[0]?.message ?? null
 
-      // Recovering from an outage counts as a reconnect: drain the backlog
-      // rather than waiting for the next heartbeat.
+      // Reaching the cloud is not the same as syncing to it. A schema drift
+      // rejects every row while the connection itself is perfectly healthy, so
+      // counting that as success reported "all synced" while nothing moved —
+      // exactly the silent failure this status exists to prevent.
       const wasOffline = this.consecutiveFailures > 0
-      this.consecutiveFailures = 0
+      const rejected = result.errors.length > 0
 
-      if (result.pushed > 0 || result.failed > 0) {
+      if (rejected) {
+        this.consecutiveFailures += 1
+      } else {
+        this.lastSuccessAt = new Date().toISOString()
+        // Recovering from an outage counts as a reconnect: drain the backlog
+        // rather than waiting for the next heartbeat.
+        this.consecutiveFailures = 0
+      }
+
+      if (rejected) {
+        this.log.warn(
+          { trigger, ...result, errors: result.errors.length, err: this.lastError },
+          'sync cycle reached the cloud but rows were rejected',
+        )
+      } else if (result.pushed > 0 || result.failed > 0) {
         this.log.info(
           { trigger, ...result, errors: result.errors.length },
           'sync cycle complete',

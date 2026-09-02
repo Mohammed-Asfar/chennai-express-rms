@@ -2,6 +2,7 @@ import 'package:flutter/material.dart';
 import '../../../core/theme/app_colors.dart';
 import '../../../core/theme/app_spacing.dart';
 import '../../printers/presentation/printer_settings_screen.dart';
+import '../../sync/presentation/sync_screen.dart';
 import 'branch_screen.dart';
 import 'tax_billing_screen.dart';
 
@@ -55,6 +56,18 @@ class SettingsScreen extends StatelessWidget {
           onTap: () => Navigator.of(
             context,
           ).push(MaterialPageRoute<void>(builder: (_) => const BranchScreen())),
+        ),
+
+        // Reachable even when healthy: "is my data backed up" is a question
+        // people ask when nothing is wrong, and the sidebar badge only appears
+        // when something is.
+        _SettingsRow(
+          icon: Icons.cloud_outlined,
+          title: 'Cloud backup',
+          subtitle: 'Whether your sales are copied off this PC',
+          onTap: () => Navigator.of(
+            context,
+          ).push(MaterialPageRoute<void>(builder: (_) => const SyncScreen())),
         ),
 
         // Shown but not built, so it is clear what the system will do rather

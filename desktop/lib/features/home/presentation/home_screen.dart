@@ -4,7 +4,9 @@ import '../../../core/theme/app_colors.dart';
 import '../../../core/theme/app_spacing.dart';
 import '../../../core/theme/app_text_styles.dart';
 import '../../../core/widgets/app_sidebar.dart';
+import '../../auth/data/user.dart';
 import '../../auth/presentation/auth_controller.dart';
+import '../../sync/presentation/sync_badge.dart';
 import '../../auth/presentation/change_password_screen.dart';
 import '../../floor/data/floor_repository.dart';
 import '../../floor/presentation/floor_screen.dart';
@@ -169,6 +171,25 @@ class _SidebarFooter extends ConsumerWidget {
     final user = ref.watch(authControllerProvider).user;
     if (user == null) return const SizedBox.shrink();
 
+    return Column(
+      mainAxisSize: MainAxisSize.min,
+      children: [
+        // Above the user, where the eye already goes. Renders nothing at all
+        // while the backup is healthy.
+        const SyncBadge(),
+        _UserRow(user: user),
+      ],
+    );
+  }
+}
+
+class _UserRow extends ConsumerWidget {
+  const _UserRow({required this.user});
+
+  final User user;
+
+  @override
+  Widget build(BuildContext context, WidgetRef ref) {
     return Padding(
       padding: const EdgeInsets.all(AppSpacing.md),
       child: Row(
