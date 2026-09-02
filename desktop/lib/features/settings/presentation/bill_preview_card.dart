@@ -85,6 +85,33 @@ class _Paper extends StatelessWidget {
     return painter.width;
   }
 
+  /// How wide the paper box must be to hold every line without clipping.
+  ///
+  /// Normally the full column count, but an enlarged line is drawn in a bigger
+  /// face and can be wider than that. Measuring the widest one is what stops a
+  /// name being cut off on screen when it prints perfectly well — the failure
+  /// the box width exists to catch.
+  double _widestLine(BuildContext context, double columnWidth) {
+    var widest = columnWidth * bill.width;
+
+    for (final line in bill.lines) {
+      if (line.heightScale <= 1 || line.text.isEmpty) continue;
+      final painter = TextPainter(
+        text: TextSpan(
+          text: line.text,
+          style: AppTextStyles.receipt.copyWith(
+            fontSize: AppTextStyles.receipt.fontSize! * line.heightScale,
+            fontWeight: FontWeight.w700,
+          ),
+        ),
+        textDirection: TextDirection.ltr,
+        textScaler: MediaQuery.textScalerOf(context),
+      )..layout();
+      if (painter.width > widest) widest = painter.width;
+    }
+    return widest;
+  }
+
   @override
   Widget build(BuildContext context) {
     final theme = Theme.of(context);
@@ -94,12 +121,13 @@ class _Paper extends StatelessWidget {
       children: [
         Center(
           child: Container(
-            // Sized from a measured character rather than a guessed multiplier:
-            // too narrow and the longest line is clipped, which is how an
-            // amount goes missing from a bill that prints correctly.
+            // Sized from measured text rather than a guessed multiplier: too
+            // narrow and the longest line is clipped, which is how an amount
+            // goes missing from a bill that prints correctly.
             constraints: BoxConstraints(
               maxWidth:
-                  _characterWidth(context) * bill.width + AppSpacing.lg * 2,
+                  _widestLine(context, _characterWidth(context)) +
+                  AppSpacing.lg * 2,
             ),
             decoration: BoxDecoration(
               color: AppColors.surface,
@@ -167,16 +195,19 @@ class _Line extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
+    // Enlarged by font size, which lays out properly.
+    //
+    // A transform would not: it paints outside the space it reserves, so a
+    // taller line bleeds over the rules above and below it. The paper box is
+    // measured against the largest line, so a bigger face cannot clip.
+    final scale = line.heightScale;
     final style = AppTextStyles.receipt.copyWith(
       fontWeight: line.bold || line.large ? FontWeight.w700 : FontWeight.w400,
+      fontSize: AppTextStyles.receipt.fontSize! * scale,
+      // Enlarged lines otherwise inherit leading proportional to their size,
+      // which opens a gap the printer does not leave.
+      height: scale > 1 ? 1.1 : null,
       color: AppColors.ink,
-    );
-
-    final text = Text(
-      // A blank line still occupies its height on paper.
-      line.text.isEmpty ? ' ' : line.text,
-      style: style,
-      softWrap: false,
     );
 
     return Align(
@@ -185,35 +216,12 @@ class _Line extends StatelessWidget {
         'right' => Alignment.centerRight,
         _ => Alignment.centerLeft,
       },
-      // Stretched vertically, never horizontally.
-      //
-      // This is exactly what the printer's height scaling does: the glyph gets
-      // taller while still occupying one column. Scaling the font size instead
-      // would widen it too, and a name wrapped to the 22 columns double-width
-      // leaves would then overflow a 48-column paper box that prints fine.
-      child: line.heightScale > 1
-          ? SizedBox(
-              // Transform paints outside its bounds, so the row has to reserve
-              // the taller height itself or the next line is overlapped.
-              height: _lineHeight(context, style) * line.heightScale,
-              child: Transform.scale(
-                scaleY: line.heightScale.toDouble(),
-                scaleX: 1,
-                alignment: Alignment.center,
-                child: text,
-              ),
-            )
-          : text,
+      child: Text(
+        // A blank line still occupies its height on paper.
+        line.text.isEmpty ? ' ' : line.text,
+        style: style,
+        softWrap: false,
+      ),
     );
-  }
-
-  /// The height one line of this style occupies, measured rather than assumed.
-  double _lineHeight(BuildContext context, TextStyle style) {
-    final painter = TextPainter(
-      text: TextSpan(text: 'Ag', style: style),
-      textDirection: TextDirection.ltr,
-      textScaler: MediaQuery.textScalerOf(context),
-    )..layout();
-    return painter.height;
   }
 }
