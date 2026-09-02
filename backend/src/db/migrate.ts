@@ -1,10 +1,32 @@
 import Database from 'better-sqlite3'
 import { createHash } from 'node:crypto'
-import { readdirSync, readFileSync } from 'node:fs'
+import { existsSync, readdirSync, readFileSync } from 'node:fs'
 import { join, dirname } from 'node:path'
 import { fileURLToPath, pathToFileURL } from 'node:url'
 
-const MIGRATIONS_DIR = join(dirname(fileURLToPath(import.meta.url)), '../../db/migrations/sqlite')
+const MIGRATIONS_DIR = resolveMigrationsDir('sqlite')
+
+/**
+ * Finds the migrations, in the source tree or in a shipped bundle.
+ *
+ * From `src/db/` the SQL lives two directories up. The bundle is one flat file
+ * at the install root, where it sits alongside `db/` instead — so both are
+ * tried, nearest first.
+ *
+ * Exported for `migrate-cloud.ts`, which has the same problem with the Postgres
+ * migrations.
+ */
+export function resolveMigrationsDir(dialect: 'sqlite' | 'postgres'): string {
+  const here = dirname(fileURLToPath(import.meta.url))
+  const candidates = [
+    // Bundled: server.mjs and db/ are siblings at the install root.
+    join(here, 'db/migrations', dialect),
+    // Source tree: src/db/migrate.ts -> backend/db/migrations/.
+    join(here, '../../db/migrations', dialect),
+  ]
+
+  return candidates.find((path) => existsSync(path)) ?? candidates[1]!
+}
 
 export interface AppliedMigration {
   version: string

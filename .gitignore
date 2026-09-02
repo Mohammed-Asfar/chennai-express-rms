@@ -37,3 +37,6 @@ Thumbs.db
 
 # Logs
 *.log
+
+# Built by scripts/bundle.mjs — 177 MB of Node runtime and native modules.
+backend/dist-bundle/

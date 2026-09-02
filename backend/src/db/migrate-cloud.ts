@@ -3,8 +3,9 @@ import { readdirSync, readFileSync } from 'node:fs'
 import { join, dirname } from 'node:path'
 import { fileURLToPath, pathToFileURL } from 'node:url'
 import type { Sql } from 'postgres'
+import { resolveMigrationsDir } from './migrate.js'
 
-const MIGRATIONS_DIR = join(dirname(fileURLToPath(import.meta.url)), '../../db/migrations/postgres')
+const MIGRATIONS_DIR = resolveMigrationsDir('postgres')
 
 interface MigrationFile {
   version: string
