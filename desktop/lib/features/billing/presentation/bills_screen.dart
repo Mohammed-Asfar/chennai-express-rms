@@ -393,14 +393,30 @@ class _BillRowState extends State<_BillRow> {
             padding: const EdgeInsets.all(AppSpacing.md),
             child: Row(
               children: [
+                // Wide enough for a prefixed number as printed, e.g.
+                // CE/2026-27/0016, not just the bare counter.
                 SizedBox(
-                  width: 120,
+                  width: 190,
                   child: Column(
                     crossAxisAlignment: CrossAxisAlignment.start,
                     children: [
-                      Text(bill.billNumber, style: theme.textTheme.bodyLarge),
+                      Text(
+                        bill.billNumber,
+                        style: theme.textTheme.bodyLarge,
+                        maxLines: 1,
+                        overflow: TextOverflow.ellipsis,
+                      ),
                       const SizedBox(height: 2),
-                      Text(_when(), style: theme.textTheme.bodySmall),
+                      Text(
+                        // The order number is how the floor refers to a table's
+                        // order, so it is the way back from a bill to a KOT.
+                        bill.orderNo == null
+                            ? _when()
+                            : '${_when()}  ·  Order #${bill.orderNo}',
+                        style: theme.textTheme.bodySmall,
+                        maxLines: 1,
+                        overflow: TextOverflow.ellipsis,
+                      ),
                     ],
                   ),
                 ),

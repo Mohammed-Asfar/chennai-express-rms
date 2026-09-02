@@ -93,51 +93,58 @@ export async function billRoutes(app: FastifyInstance): Promise<void> {
     }
   }>('/bills', { preHandler: requireAuth }, async (request) => {
     const me = currentUser(request)
-    const conditions = ['branch_id = ?', 'deleted_at IS NULL']
+    const conditions = ['b.branch_id = ?', 'b.deleted_at IS NULL']
     const params: unknown[] = [me.branchId]
 
     const { businessDate, from, to } = request.query
 
     if (businessDate) {
-      conditions.push('business_date = ?')
+      conditions.push('b.business_date = ?')
       params.push(businessDate)
     } else if (from || to) {
       // An open-ended range is still a range: "everything since Monday".
       if (from) {
-        conditions.push('business_date >= ?')
+        conditions.push('b.business_date >= ?')
         params.push(from)
       }
       if (to) {
-        conditions.push('business_date <= ?')
+        conditions.push('b.business_date <= ?')
         params.push(to)
       }
     } else if (request.query.all !== 'true') {
-      conditions.push('business_date = ?')
+      conditions.push('b.business_date = ?')
       params.push(currentBusinessDate(app.db, me.branchId))
     }
 
     if (request.query.status) {
-      conditions.push('payment_status = ?')
+      conditions.push('b.payment_status = ?')
       params.push(request.query.status)
     }
-    if (request.query.unpaid === 'true') conditions.push("payment_status != 'paid'")
+    if (request.query.unpaid === 'true') conditions.push("b.payment_status != 'paid'")
 
     const where = conditions.join(' AND ')
 
+    // Joined rather than looked up per row: the list shows the order number
+    // beside the bill number, and 500 bills must not mean 500 extra queries.
+    // LEFT, so a bill whose order was purged still lists.
     const rows = app.db
       .prepare(
-        `SELECT * FROM bills WHERE ${where} ORDER BY business_date DESC, bill_no DESC LIMIT 500`,
+        `SELECT b.*, o.order_no AS order_no
+         FROM bills b LEFT JOIN orders o ON o.id = b.order_id
+         WHERE ${where}
+         ORDER BY b.business_date DESC, b.bill_no DESC LIMIT 500`,
       )
-      .all(...params) as BillRow[]
+      .all(...params) as (BillRow & { order_no: number | null })[]
 
     // Summed in SQL over the whole match, not over the returned page: a day
-    // with more than 500 bills must still report its real takings.
+    // with more than 500 bills must still report its real takings. The join is
+    // repeated only because the conditions are qualified with `b.`.
     const totals = app.db
       .prepare(
         `SELECT COUNT(*) AS count,
-                COALESCE(SUM(total), 0) AS total,
-                COALESCE(SUM(amount_paid), 0) AS collected
-         FROM bills WHERE ${where}`,
+                COALESCE(SUM(b.total), 0) AS total,
+                COALESCE(SUM(b.amount_paid), 0) AS collected
+         FROM bills b WHERE ${where}`,
       )
       .get(...params) as { count: number; total: number; collected: number }
 
@@ -699,10 +706,12 @@ const shape = (result: BillResult) => ({
   lines: result.lines,
 })
 
-function present(bill: BillRow, payments: PaymentRow[]) {
+function present(bill: BillRow & { order_no?: number | null }, payments: PaymentRow[]) {
   return {
     id: bill.id,
     orderId: bill.order_id,
+    /** Only the list query joins this in; the detail route sets its own. */
+    orderNo: bill.order_no ?? null,
     billNo: bill.bill_no,
     /** The formatted string as printed. */
     billNumber: bill.bill_number,

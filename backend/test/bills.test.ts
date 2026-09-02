@@ -272,6 +272,43 @@ test('an order cannot be billed twice', async () => {
   await close(ctx)
 })
 
+test('the list carries the order number beside the bill number', async () => {
+  const ctx = await setup()
+  const order = await makeOrder(ctx, [{ variantId: ctx.tea, qty: 1 }])
+  const bill = await makeBill(ctx, order)
+
+  const list = await ctx.app.inject({ method: 'GET', url: '/bills', headers: ctx.cashier })
+  const rows = (list.json() as { bills: { id: string; orderNo: number | null }[] }).bills
+  const row = rows.find((r) => r.id === bill.id)
+  if (!row) throw new Error('the new bill is missing from the list')
+
+  const expected = ctx.db
+    .prepare('SELECT order_no FROM orders WHERE id = ?')
+    .get(order) as { order_no: number }
+  assertEqual(row.orderNo, expected.order_no, 'the list joins the order number in')
+  await close(ctx)
+})
+
+test('the list summary still totals correctly with the order join', async () => {
+  const ctx = await setup()
+  const first = await makeOrder(ctx, [{ variantId: ctx.tea, qty: 1 }])
+  const second = await makeOrder(ctx, [{ variantId: ctx.tea, qty: 1 }])
+  const a = await makeBill(ctx, first)
+  const b = await makeBill(ctx, second)
+
+  const list = await ctx.app.inject({ method: 'GET', url: '/bills', headers: ctx.cashier })
+  const body = list.json() as {
+    bills: { id: string }[]
+    summary: { count: number; total: number }
+  }
+
+  // A LEFT JOIN that matched more than one order row would double both.
+  assertEqual(body.bills.filter((r) => r.id === a.id).length, 1, 'no duplicated rows')
+  assertEqual(body.summary.count, body.bills.length, 'the count matches the rows')
+  assertEqual(body.summary.total, a.total + b.total, 'the join does not inflate takings')
+  await close(ctx)
+})
+
 test('preview does not create a bill', async () => {
   const ctx = await setup()
   const order = await makeOrder(ctx, [{ variantId: ctx.full, qty: 1 }])
