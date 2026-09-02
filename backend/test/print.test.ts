@@ -533,3 +533,37 @@ test('an unpaid bill carries no marking either', () => {
   const text = readable(renderBill({ ...billBase, payments: [] }))
   assertEqual(text.includes('DUPLICATE'), false)
 })
+
+test('a bill with no tax prints no GST lines', () => {
+  // A restaurant below the registration threshold should see nothing about
+  // GST on its paper — not CGST 0.00 twice on every bill.
+  const text = readable(renderBill({ ...billBase, cgst: 0, sgst: 0 }))
+  assertEqual(text.includes('CGST'), false)
+  assertEqual(text.includes('SGST'), false)
+})
+
+test('the inclusive note is dropped when no tax was charged', () => {
+  // tax_mode stays 'inclusive' with GST switched off, so the note would claim
+  // a tax the bill never charged.
+  const inclusive = { ...billBase, taxMode: 'inclusive' as const }
+  assertEqual(
+    readable(renderBill(inclusive)).includes('includes GST'),
+    true,
+    'still shown when there is tax to include',
+  )
+  assertEqual(
+    readable(renderBill({ ...inclusive, cgst: 0, sgst: 0 })).includes('includes GST'),
+    false,
+  )
+})
+
+test('a bill with no tax still totals correctly', () => {
+  // The subtotal is the total when nothing is added on top, and both must
+  // still print.
+  const text = readable(
+    renderBill({ ...billBase, cgst: 0, sgst: 0, subtotal: 76_000, total: 76_000 }),
+  )
+  assertEqual(text.includes('Subtotal'), true)
+  assertEqual(text.includes('TOTAL'), true)
+  assertEqual(text.includes('760.00'), true)
+})

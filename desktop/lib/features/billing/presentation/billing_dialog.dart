@@ -201,27 +201,32 @@ class _BillingDialogState extends ConsumerState<BillingDialog> {
     final messenger = ScaffoldMessenger.of(context);
 
     try {
-      final result = await ref.read(printerRepositoryProvider).printBill(bill.id);
+      final result = await ref
+          .read(printerRepositoryProvider)
+          .printBill(bill.id);
       if (!mounted) return;
 
       if (!result.printed) {
         messenger.showSnackBar(
           SnackBar(
-            content: Text(result.error ?? 'The bill did not print. It is queued.'),
+            content: Text(
+              result.error ?? 'The bill did not print. It is queued.',
+            ),
             duration: const Duration(seconds: 6),
           ),
         );
       } else if (!silent) {
-        messenger.showSnackBar(
-          const SnackBar(content: Text('Bill printed')),
-        );
+        messenger.showSnackBar(const SnackBar(content: Text('Bill printed')));
       }
     } on ApiException catch (error) {
       if (!mounted) return;
       // NO_BILL_PRINTER is the common one: nothing is set up yet. Worth saying
       // plainly rather than silently doing nothing.
       messenger.showSnackBar(
-        SnackBar(content: Text(error.message), duration: const Duration(seconds: 6)),
+        SnackBar(
+          content: Text(error.message),
+          duration: const Duration(seconds: 6),
+        ),
       );
     }
   }
@@ -413,8 +418,14 @@ class _BillingDialogState extends ConsumerState<BillingDialog> {
                             // wrongly settled first to get at it.
                             SegmentedButton<String>(
                               segments: const [
-                                ButtonSegment(value: 'cash', label: Text('Cash')),
-                                ButtonSegment(value: 'card', label: Text('Card')),
+                                ButtonSegment(
+                                  value: 'cash',
+                                  label: Text('Cash'),
+                                ),
+                                ButtonSegment(
+                                  value: 'card',
+                                  label: Text('Card'),
+                                ),
                                 ButtonSegment(value: 'upi', label: Text('UPI')),
                                 ButtonSegment(
                                   value: 'split',
@@ -578,22 +589,29 @@ class _Totals extends StatelessWidget {
         _row(theme, 'Subtotal', subtotal),
         if (discount > 0) _row(theme, 'Discount', -discount),
 
-        // GST requires the rate-wise split to be visible when a bill carries
-        // more than one rate.
-        if (groups.length > 1)
-          for (final group in groups) ...[
-            _row(
-              theme,
-              'CGST ${Money.formatRate(group.rate ~/ 2)}%',
-              group.cgst,
-            ),
-            _row(
-              theme,
-              'SGST ${Money.formatRate(group.rate ~/ 2)}%',
-              group.sgst,
-            ),
-          ]
-        else ...[_row(theme, 'CGST', cgst), _row(theme, 'SGST', sgst)],
+        // Nothing when no tax was charged — with GST switched off, rows
+        // reading CGST 0.00 are noise on every bill.
+        //
+        // Keyed on the figures rather than the setting so an old bill that
+        // did carry tax still shows it, which is what the customer paid.
+        if (cgst + sgst > 0) ...[
+          // GST requires the rate-wise split to be visible when a bill carries
+          // more than one rate.
+          if (groups.length > 1)
+            for (final group in groups) ...[
+              _row(
+                theme,
+                'CGST ${Money.formatRate(group.rate ~/ 2)}%',
+                group.cgst,
+              ),
+              _row(
+                theme,
+                'SGST ${Money.formatRate(group.rate ~/ 2)}%',
+                group.sgst,
+              ),
+            ]
+          else ...[_row(theme, 'CGST', cgst), _row(theme, 'SGST', sgst)],
+        ],
 
         if (roundOff != 0) _row(theme, 'Round off', roundOff),
 

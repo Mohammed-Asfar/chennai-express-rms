@@ -178,6 +178,7 @@ for rates (5% → `500`). Never float — see `SCHEMA.md` §1.
 | `printers.role` | `bill`, `kot`, `both` |
 | `print_jobs.type` | `bill`, `kot`, `kot_additional`, `kot_cancel`, `test` |
 | `print_jobs.status` | `pending`, `printed`, `failed`, `cancelled` |
+| `settings.gst_enabled` | `0`, `1` — on unless switched off |
 | `settings.tax_mode` | `inclusive`, `exclusive` |
 | `app_releases.channel` | `stable`, `beta` |
 
@@ -289,6 +290,10 @@ a picker. Every "the table's order" assumption in the UI must handle several.
 | FR-B3 | Bill shows subtotal, CGST, SGST, discount, and total |
 | FR-B4 | Branch default GST rate is configurable in settings; per-item rates override it |
 | FR-B5 | `tax_mode` is configurable per branch: `inclusive` or `exclusive` |
+| FR-B5a | GST can be switched off entirely, for a restaurant below the registration threshold |
+| FR-B5b | With GST off, new order lines snapshot a zero rate — the bill is genuinely tax-free, not merely displayed without tax |
+| FR-B5c | With GST off, no GST appears on any screen or on the paper |
+| FR-B5d | Switching GST off never alters a bill already issued; it keeps the tax it charged |
 | FR-B6 | Tax is computed **per line** and summed — never applied once to the subtotal |
 | FR-B7 | GST is split evenly into CGST and SGST (5% → 2.5% + 2.5%) |
 | FR-B8 | A discount can be applied as a fixed amount or a percentage |
@@ -602,6 +607,8 @@ Scenarios that occur in a working restaurant and their required behaviour.
 | Bill paid ₹500 cash + ₹300 card | Two payment rows; reports count each mode separately |
 | Payment exceeding the bill total | Rejected — change is handled at the drawer, not recorded |
 | Bill left unpaid | `payment_status` stays `unpaid`; the table still frees |
+| GST switched off mid-day | Bills raised earlier keep their tax; ones raised after carry none |
+| Inclusive mode with GST off | The "(Price includes GST)" note is dropped — it would claim a tax never charged |
 | Unpaid bill printed for the table | Prints `*** UNPAID ***` with the total; the bill stays open for payment |
 | Part-paid bill printed | Lists what was taken and prints `BALANCE DUE`, so the table can settle the rest |
 | Bill settled after the billing dialog closed | Taken from the bill's detail in the bills list; status and takings both follow |

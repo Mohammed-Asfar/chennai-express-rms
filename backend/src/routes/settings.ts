@@ -21,6 +21,8 @@ import { currentBusinessDate } from '../lib/business-date.js'
  */
 
 const updateSettingsBody = z.object({
+  /** Whether GST applies at all. Off for a restaurant below the threshold. */
+  gstEnabled: z.boolean().optional(),
   taxMode: z.enum(['inclusive', 'exclusive']).optional(),
   /** Basis points. 5% is 500. */
   defaultTaxRate: z.number().int().min(0).max(10_000).optional(),
@@ -75,8 +77,11 @@ export async function settingsRoutes(app: FastifyInstance): Promise<void> {
     const write = (key: SettingKey, value: string) =>
       setSetting(app.db, me.branchId, key, value)
 
-    // Changing the tax mode does not touch bills already issued — each one
-    // snapshots the mode it was calculated under.
+    // Neither switching GST off nor changing the mode touches bills already
+    // issued: each one snapshots the mode and rates it was calculated under.
+    if (body.gstEnabled !== undefined) {
+      write('gst_enabled', body.gstEnabled ? '1' : '0')
+    }
     if (body.taxMode !== undefined) write('tax_mode', body.taxMode)
     if (body.defaultTaxRate !== undefined) {
       write('default_tax_rate', String(body.defaultTaxRate))
@@ -167,6 +172,7 @@ export async function settingsRoutes(app: FastifyInstance): Promise<void> {
 
     const businessDate = currentBusinessDate(app.db, me.branchId)
     const taxMode = getSetting(app.db, me.branchId, 'tax_mode')
+    const gstEnabled = getSetting(app.db, me.branchId, 'gst_enabled')
 
     // A representative order rather than real data: two lines, one with a
     // quantity above one, so the layout is exercised properly.
@@ -218,10 +224,12 @@ export async function settingsRoutes(app: FastifyInstance): Promise<void> {
             lineTotal: 3_000,
           },
         ],
-        subtotal: 75_238,
+        // With GST off the sample carries none, so the preview shows what
+        // will actually print rather than tax that no longer applies.
+        subtotal: gstEnabled ? 75_238 : 79_000,
         discountAmount: 0,
-        cgst: 1_881,
-        sgst: 1_881,
+        cgst: gstEnabled ? 1_881 : 0,
+        sgst: gstEnabled ? 1_881 : 0,
         roundOff: 0,
         total: 79_000,
         taxMode,
@@ -423,6 +431,7 @@ function readAll(app: FastifyInstance, branchId: string) {
 
   return {
     taxMode: read('tax_mode'),
+    gstEnabled: read('gst_enabled'),
     defaultTaxRate: read('default_tax_rate'),
     businessDayStart: read('business_day_start'),
     billPrefix: read('bill_prefix'),

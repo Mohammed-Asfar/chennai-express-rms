@@ -130,20 +130,25 @@ class _Content extends ConsumerWidget {
                     _row(theme, 'Subtotal', bill.subtotal),
                     if (bill.discountAmount > 0)
                       _row(theme, 'Discount', -bill.discountAmount),
-                    // A bill mixing 5% and 18% items shows each rate on its own
-                    // line, so the GST can be checked group by group. With a
-                    // single rate that would just repeat the totals below, so
-                    // only the summed split is shown.
-                    if (bill.taxBreakdown.length > 1)
-                      for (final group in bill.taxBreakdown)
-                        _row(
-                          theme,
-                          'GST ${Money.formatRate(group.rate)}% on '
-                          '${Money.formatWithSymbol(group.base)}',
-                          group.cgst + group.sgst,
-                        ),
-                    _row(theme, 'CGST', bill.cgst),
-                    _row(theme, 'SGST', bill.sgst),
+                    // Nothing when no tax was charged. Keyed on the bill's own
+                    // figures, not the current setting: this one recorded what
+                    // the customer paid and must keep showing it.
+                    if (bill.cgst + bill.sgst > 0) ...[
+                      // A bill mixing 5% and 18% items shows each rate on its own
+                      // line, so the GST can be checked group by group. With a
+                      // single rate that would just repeat the totals below, so
+                      // only the summed split is shown.
+                      if (bill.taxBreakdown.length > 1)
+                        for (final group in bill.taxBreakdown)
+                          _row(
+                            theme,
+                            'GST ${Money.formatRate(group.rate)}% on '
+                            '${Money.formatWithSymbol(group.base)}',
+                            group.cgst + group.sgst,
+                          ),
+                      _row(theme, 'CGST', bill.cgst),
+                      _row(theme, 'SGST', bill.sgst),
+                    ],
                     if (bill.roundOff != 0)
                       _row(theme, 'Round off', bill.roundOff),
                     const Divider(height: AppSpacing.lg),
@@ -497,13 +502,15 @@ class _ItemRow extends StatelessWidget {
                 Text(item.displayName, style: theme.textTheme.bodyMedium),
                 // The unit price only earns its place when it is not obvious
                 // from the line total.
+                // "GST 0%" says nothing. With tax off the line is either the
+                // unit price or, at a quantity of one, nothing at all.
                 if (item.qty > 1)
                   Text(
                     '${Money.formatWithSymbol(item.unitPrice)} each'
-                    '  ·  GST ${Money.formatRate(item.taxRate)}%',
+                    '${item.taxRate > 0 ? '  ·  GST ${Money.formatRate(item.taxRate)}%' : ''}',
                     style: theme.textTheme.bodySmall,
                   )
-                else
+                else if (item.taxRate > 0)
                   Text(
                     'GST ${Money.formatRate(item.taxRate)}%',
                     style: theme.textTheme.bodySmall,

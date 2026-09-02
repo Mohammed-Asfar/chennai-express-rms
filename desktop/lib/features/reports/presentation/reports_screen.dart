@@ -673,10 +673,15 @@ class _TaxSection extends StatelessWidget {
             label: 'Discount',
             amount: Money.formatWithSymbol(sales.discountTotal),
           ),
-          const ReportDivider(),
-          ReportRow(label: 'CGST', amount: Money.formatWithSymbol(sales.cgst)),
-          const ReportDivider(),
-          ReportRow(label: 'SGST', amount: Money.formatWithSymbol(sales.sgst)),
+          // Omitted when the range collected no tax, so a restaurant with GST
+          // switched off is not asked to read two zero rows every day. A range
+          // that does include taxed bills still shows them.
+          if (sales.cgst + sales.sgst > 0) ...[
+            const ReportDivider(),
+            ReportRow(label: 'CGST', amount: Money.formatWithSymbol(sales.cgst)),
+            const ReportDivider(),
+            ReportRow(label: 'SGST', amount: Money.formatWithSymbol(sales.sgst)),
+          ],
           const ReportDivider(),
           ReportRow(
             label: 'Round-off',

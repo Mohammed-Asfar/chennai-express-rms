@@ -660,5 +660,11 @@ function loadOrderableVariant(app: FastifyInstance, branchId: string, variantId:
       `${row.item_name} (${row.name}) is not available right now`,
     )
   }
+
+  // With GST switched off the line is snapshotted at zero, so it is genuinely
+  // tax-free rather than merely hidden. Bills already issued keep the rate
+  // they were charged at — this only affects lines added from now on.
+  if (!getSetting(app.db, branchId, 'gst_enabled')) return { ...row, tax_rate: 0 }
+
   return row
 }

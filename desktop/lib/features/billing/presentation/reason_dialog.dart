@@ -88,10 +88,7 @@ class _ReasonDialogState extends State<ReasonDialog> {
           onPressed: () => Navigator.of(context).pop(),
           child: const Text('Cancel'),
         ),
-        ElevatedButton(
-          onPressed: _submit,
-          child: Text(widget.confirmLabel),
-        ),
+        ElevatedButton(onPressed: _submit, child: Text(widget.confirmLabel)),
       ],
     );
   }

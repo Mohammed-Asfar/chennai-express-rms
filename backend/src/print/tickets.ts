@@ -201,7 +201,9 @@ export function renderBill(data: BillData, paper: PaperWidth = '80mm'): Buffer {
   b.size(true, false).bold(true).columns('TOTAL', money(data.total)).size(false).bold(false)
   b.rule('=')
 
-  if (data.taxMode === 'inclusive') {
+  // Only when there is tax to include. The mode stays 'inclusive' with GST
+  // switched off, and the note would then claim a tax the bill never charged.
+  if (data.taxMode === 'inclusive' && data.cgst + data.sgst > 0) {
     b.align('center').line('(Price includes GST)').align('left')
   }
 

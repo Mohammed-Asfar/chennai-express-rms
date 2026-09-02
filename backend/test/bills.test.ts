@@ -1127,3 +1127,94 @@ test('voiding without a reason is refused', async () => {
   }
   await close(ctx)
 })
+
+test('with GST switched off a bill carries no tax at all', async () => {
+  // Not merely hidden: the line is snapshotted at zero, so the figures a
+  // restaurant below the registration threshold records are genuinely
+  // tax-free and reconcile without a tax component.
+  const ctx = await setup('exclusive')
+
+  await ctx.app.inject({
+    method: 'PATCH',
+    url: '/settings',
+    headers: ctx.admin,
+    payload: { gstEnabled: false },
+  })
+
+  const order = await makeOrder(ctx, [{ variantId: ctx.full, qty: 1 }])
+  const bill = await makeBill(ctx, order)
+
+  assertEqual(bill.cgst, 0)
+  assertEqual(bill.sgst, 0)
+  assertEqual(bill.total, bill.subtotal, 'nothing was added on top')
+  await close(ctx)
+})
+
+test('switching GST off does not rewrite bills already issued', async () => {
+  // A bill records what the customer was charged. Changing a setting today
+  // must not make last month's tax disappear from the record.
+  const ctx = await setup('exclusive')
+  const order = await makeOrder(ctx, [{ variantId: ctx.full, qty: 1 }])
+  const taxed = await makeBill(ctx, order)
+  assertEqual(taxed.cgst + taxed.sgst > 0, true, 'charged tax while GST was on')
+
+  await ctx.app.inject({
+    method: 'PATCH',
+    url: '/settings',
+    headers: ctx.admin,
+    payload: { gstEnabled: false },
+  })
+
+  const res = await ctx.app.inject({
+    method: 'GET',
+    url: `/bills/${taxed.id}`,
+    headers: ctx.cashier,
+  })
+  const after = (res.json() as { bill: { cgst: number; sgst: number } }).bill
+  assertEqual(after.cgst, taxed.cgst, 'the tax it charged is unchanged')
+  assertEqual(after.sgst, taxed.sgst)
+  await close(ctx)
+})
+
+test('turning GST back on taxes new lines again', async () => {
+  const ctx = await setup('exclusive')
+
+  await ctx.app.inject({
+    method: 'PATCH',
+    url: '/settings',
+    headers: ctx.admin,
+    payload: { gstEnabled: false },
+  })
+  const untaxed = await makeBill(
+    ctx,
+    await makeOrder(ctx, [{ variantId: ctx.full, qty: 1 }]),
+  )
+  assertEqual(untaxed.cgst + untaxed.sgst, 0)
+
+  await ctx.app.inject({
+    method: 'PATCH',
+    url: '/settings',
+    headers: ctx.admin,
+    payload: { gstEnabled: true },
+  })
+  const taxed = await makeBill(
+    ctx,
+    await makeOrder(ctx, [{ variantId: ctx.full, qty: 1 }]),
+  )
+  assertEqual(taxed.cgst + taxed.sgst > 0, true)
+  await close(ctx)
+})
+
+test('GST is on unless it has been switched off', async () => {
+  // The expensive direction to be wrong is under-charging tax, so a branch
+  // that never touched the setting still bills GST.
+  const ctx = await setup('exclusive')
+  const res = await ctx.app.inject({
+    method: 'GET',
+    url: '/settings',
+    headers: ctx.cashier,
+  })
+  const settings = (res.json() as { settings: { gstEnabled: boolean } }).settings
+  assertEqual(settings.gstEnabled, true)
+  await close(ctx)
+})

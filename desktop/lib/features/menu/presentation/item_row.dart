@@ -115,13 +115,15 @@ class _ItemRowState extends State<ItemRow> {
                     const SizedBox(width: AppSpacing.md),
 
                     // The rate matters when checking a bill, so it is shown
-                    // rather than buried in the edit dialog.
-                    Text(
-                      'GST ${Money.formatRate(item.taxRate)}%',
-                      style: theme.textTheme.bodySmall,
-                    ),
-
-                    const SizedBox(width: AppSpacing.md),
+                    // rather than buried in the edit dialog. Nothing at 0%,
+                    // which is what a restaurant with GST switched off sees.
+                    if (item.taxRate > 0) ...[
+                      Text(
+                        'GST ${Money.formatRate(item.taxRate)}%',
+                        style: theme.textTheme.bodySmall,
+                      ),
+                      const SizedBox(width: AppSpacing.md),
+                    ],
 
                     Switch(
                       value: item.isAvailable,

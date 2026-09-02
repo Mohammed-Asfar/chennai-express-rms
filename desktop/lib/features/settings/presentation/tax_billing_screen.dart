@@ -31,6 +31,7 @@ class _TaxBillingScreenState extends ConsumerState<TaxBillingScreen> {
   final _footerController = TextEditingController();
 
   String _taxMode = 'inclusive';
+  bool _gstEnabled = true;
   String _resetPeriod = 'daily';
   int _pad = 4;
   bool _roundOff = true;
@@ -60,6 +61,7 @@ class _TaxBillingScreenState extends ConsumerState<TaxBillingScreen> {
     _formatController.text = settings.billNumberFormat;
     _footerController.text = settings.billFooter;
     _taxMode = settings.taxMode;
+    _gstEnabled = settings.gstEnabled;
     _resetPeriod = settings.billResetPeriod;
     _pad = settings.billNumberPad;
     _roundOff = settings.roundOffEnabled;
@@ -166,43 +168,75 @@ class _TaxBillingScreenState extends ConsumerState<TaxBillingScreen> {
             child: Column(
               crossAxisAlignment: CrossAxisAlignment.stretch,
               children: [
-                SegmentedButton<String>(
-                  segments: const [
-                    ButtonSegment(
-                      value: 'inclusive',
-                      label: Text('Included in price'),
+                Row(
+                  children: [
+                    Expanded(
+                      child: Column(
+                        crossAxisAlignment: CrossAxisAlignment.start,
+                        children: [
+                          Text('Charge GST', style: theme.textTheme.bodyLarge),
+                          const SizedBox(height: 2),
+                          Text(
+                            'Off for a restaurant below the registration '
+                            'threshold. No tax is charged and no GST appears '
+                            'anywhere.',
+                            style: theme.textTheme.bodySmall,
+                          ),
+                        ],
+                      ),
                     ),
-                    ButtonSegment(
-                      value: 'exclusive',
-                      label: Text('Added on top'),
+                    const SizedBox(width: AppSpacing.md),
+                    Switch(
+                      value: _gstEnabled,
+                      onChanged: _saving
+                          ? null
+                          : (on) => setState(() => _gstEnabled = on),
                     ),
                   ],
-                  selected: {_taxMode},
-                  onSelectionChanged: _saving
-                      ? null
-                      : (v) => setState(() => _taxMode = v.first),
                 ),
-                const SizedBox(height: AppSpacing.xs),
-                Text(
-                  _taxMode == 'inclusive'
-                      ? 'A dish priced ₹100 is billed at ₹100, with the '
-                            'GST worked out of it.'
-                      : 'A dish priced ₹100 is billed at ₹105 at 5% GST.',
-                  style: theme.textTheme.bodySmall,
-                ),
-                const SizedBox(height: AppSpacing.md),
-                AppTextField(
-                  controller: _taxRateController,
-                  label: 'Default GST %',
-                  hintText: '5',
-                  enabled: !_saving,
-                  validator: _validateRate,
-                ),
-                const SizedBox(height: AppSpacing.xs),
-                Text(
-                  'Used for new dishes. Each dish can override it.',
-                  style: theme.textTheme.bodySmall,
-                ),
+
+                // The mode and rate mean nothing with GST off, and leaving
+                // them on screen invites setting a rate that never applies.
+                if (_gstEnabled) ...[
+                  const SizedBox(height: AppSpacing.md),
+                  SegmentedButton<String>(
+                    segments: const [
+                      ButtonSegment(
+                        value: 'inclusive',
+                        label: Text('Included in price'),
+                      ),
+                      ButtonSegment(
+                        value: 'exclusive',
+                        label: Text('Added on top'),
+                      ),
+                    ],
+                    selected: {_taxMode},
+                    onSelectionChanged: _saving
+                        ? null
+                        : (v) => setState(() => _taxMode = v.first),
+                  ),
+                  const SizedBox(height: AppSpacing.xs),
+                  Text(
+                    _taxMode == 'inclusive'
+                        ? 'A dish priced ₹100 is billed at ₹100, with the '
+                              'GST worked out of it.'
+                        : 'A dish priced ₹100 is billed at ₹105 at 5% GST.',
+                    style: theme.textTheme.bodySmall,
+                  ),
+                  const SizedBox(height: AppSpacing.md),
+                  AppTextField(
+                    controller: _taxRateController,
+                    label: 'Default GST %',
+                    hintText: '5',
+                    enabled: !_saving,
+                    validator: _validateRate,
+                  ),
+                  const SizedBox(height: AppSpacing.xs),
+                  Text(
+                    'Used for new dishes. Each dish can override it.',
+                    style: theme.textTheme.bodySmall,
+                  ),
+                ],
               ],
             ),
           ),
@@ -495,6 +529,7 @@ class _TaxBillingScreenState extends ConsumerState<TaxBillingScreen> {
 
     try {
       await ref.read(settingsRepositoryProvider).updateSettings({
+        'gstEnabled': _gstEnabled,
         'taxMode': _taxMode,
         // Percent to basis points at the boundary, as everywhere else.
         'defaultTaxRate': (double.parse(_taxRateController.text.trim()) * 100)

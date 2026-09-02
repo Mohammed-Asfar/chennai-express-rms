@@ -66,11 +66,14 @@ class BillRepository {
     await _api.post('/bills/$billId/void', {'reason': reason});
   }
 
-  Future<Bill> reversePayment(String billId, String paymentId, String reason) async {
-    final json = await _api.post(
-      '/bills/$billId/payments/$paymentId/reverse',
-      {'reason': reason},
-    );
+  Future<Bill> reversePayment(
+    String billId,
+    String paymentId,
+    String reason,
+  ) async {
+    final json = await _api.post('/bills/$billId/payments/$paymentId/reverse', {
+      'reason': reason,
+    });
     return Bill.fromJson(json['bill'] as Map<String, dynamic>);
   }
 
@@ -85,7 +88,11 @@ class BillRepository {
   ///
   /// Dates are `yyyy-MM-dd` business dates, inclusive at both ends. Omitting
   /// both gives today.
-  Future<BillList> list({String? from, String? to, bool unpaidOnly = false}) async {
+  Future<BillList> list({
+    String? from,
+    String? to,
+    bool unpaidOnly = false,
+  }) async {
     final query = <String>[
       if (from != null) 'from=$from',
       if (to != null) 'to=$to',

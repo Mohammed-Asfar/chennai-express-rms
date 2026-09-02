@@ -8,6 +8,8 @@ import { RESET_PERIODS } from './bill-number.js'
  * to live here.
  */
 const parsers = {
+  /** Whether GST applies at all. Off for a restaurant below the threshold. */
+  gst_enabled: z.enum(['0', '1']).transform((v) => v === '1'),
   tax_mode: z.enum(['inclusive', 'exclusive']),
   default_tax_rate: z.coerce.number().int().min(0),
   business_day_start: z.string().regex(/^\d{2}:\d{2}$/),
@@ -24,6 +26,9 @@ export type SettingKey = keyof typeof parsers
 export type SettingValue<K extends SettingKey> = z.infer<(typeof parsers)[K]>
 
 const fallbacks: { [K in SettingKey]: SettingValue<K> } = {
+  // On by default: a registered restaurant that forgot to set it must not
+  // silently under-charge tax, which is the expensive direction to be wrong.
+  gst_enabled: true,
   tax_mode: 'inclusive',
   default_tax_rate: 500, // 5% in basis points
   business_day_start: '05:00',

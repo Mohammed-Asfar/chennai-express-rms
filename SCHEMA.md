@@ -517,6 +517,11 @@ carries more than one rate:
 ]
 ```
 
+**`gst_enabled` defaults to on.** A branch that never set it still bills GST: under-charging
+tax is the expensive direction to be wrong. Switching it off snapshots new order lines at a
+zero rate, so the bill is genuinely tax-free rather than merely displayed without tax — and
+bills already issued keep the tax they charged.
+
 **`tax_mode` is snapshotted** for the same reason prices are — a branch switching from
 inclusive to exclusive must not change what last month's bills mean.
 
@@ -630,6 +635,7 @@ PRIMARY KEY (branch_id, key)
 
 | Key | Example | Meaning |
 |---|---|---|
+| `gst_enabled` | `1` | Whether GST applies at all. `0` for a restaurant below the registration threshold |
 | `tax_mode` | `inclusive` | Menu prices include GST |
 | `default_tax_rate` | `500` | 5% in basis points |
 | `business_day_start` | `05:00` | Trading day cutoff |

@@ -5,6 +5,7 @@ import '../../../core/theme/app_spacing.dart';
 import '../../../core/utils/money.dart';
 import '../../../core/widgets/app_text_field.dart';
 import '../../../core/widgets/error_banner.dart';
+import '../../settings/data/settings_repository.dart';
 import '../data/menu_admin_models.dart';
 import '../data/menu_admin_repository.dart';
 
@@ -99,6 +100,11 @@ class _ItemEditorDialogState extends ConsumerState<ItemEditorDialog> {
   Widget build(BuildContext context) {
     final theme = Theme.of(context);
 
+    // Defaults to on while the settings load, so the field does not flicker
+    // away and back on a screen someone is already typing into.
+    final gstEnabled =
+        ref.watch(branchSettingsProvider).valueOrNull?.gstEnabled ?? true;
+
     return AlertDialog(
       title: Text(_isEditing ? 'Edit ${widget.item!.name}' : 'New dish'),
       content: SizedBox(
@@ -146,6 +152,10 @@ class _ItemEditorDialogState extends ConsumerState<ItemEditorDialog> {
                 ),
                 const SizedBox(height: AppSpacing.md),
 
+                // Hidden entirely with GST switched off in settings: a rate
+                // set here would never be charged, and offering the field
+                // invites someone to believe otherwise.
+                if (gstEnabled) ...[
                 AppTextField(
                   controller: _taxController,
                   label: 'GST %',
@@ -181,6 +191,7 @@ class _ItemEditorDialogState extends ConsumerState<ItemEditorDialog> {
                       ),
                     ],
                   ),
+                ],
                 ],
 
                 const SizedBox(height: AppSpacing.lg),

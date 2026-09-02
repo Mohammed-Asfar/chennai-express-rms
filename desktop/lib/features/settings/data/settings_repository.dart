@@ -5,6 +5,7 @@ import '../../../core/api/providers.dart';
 /// Branch settings that change how bills are calculated, numbered and printed.
 class BranchSettings {
   const BranchSettings({
+    required this.gstEnabled,
     required this.taxMode,
     required this.defaultTaxRate,
     required this.businessDayStart,
@@ -15,6 +16,10 @@ class BranchSettings {
     required this.billFooter,
     required this.roundOffEnabled,
   });
+
+  /// Whether GST applies at all. Off for a restaurant below the registration
+  /// threshold — no tax is charged, and no GST is shown anywhere.
+  final bool gstEnabled;
 
   /// inclusive or exclusive.
   final String taxMode;
@@ -37,6 +42,7 @@ class BranchSettings {
   final bool roundOffEnabled;
 
   factory BranchSettings.fromJson(Map<String, dynamic> json) => BranchSettings(
+    gstEnabled: json['gstEnabled'] as bool? ?? true,
     taxMode: json['taxMode'] as String? ?? 'inclusive',
     defaultTaxRate: json['defaultTaxRate'] as int? ?? 500,
     businessDayStart: json['businessDayStart'] as String? ?? '05:00',
