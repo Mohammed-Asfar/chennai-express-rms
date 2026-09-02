@@ -18,6 +18,7 @@ import '../../settings/presentation/settings_screen.dart';
 import '../../order/data/order_repository.dart';
 import '../../order/presentation/order_screen.dart';
 import '../../reports/presentation/reports_screen.dart';
+import '../../activation/presentation/license_banner.dart';
 import '../../updates/presentation/update_controller.dart';
 import '../../updates/presentation/update_dialog.dart';
 
@@ -60,6 +61,10 @@ class _HomeScreenState extends ConsumerState<HomeScreen> {
           Expanded(
             child: Column(
               children: [
+                // Above the header so it cannot be mistaken for part of the
+                // screen being worked on. Hidden unless the grace period is
+                // nearly spent.
+                const LicenseBanner(),
                 _WorkHeader(
                   title: _items[_selected].label,
                   // Takeaway belongs to the floor. Showing it while editing the

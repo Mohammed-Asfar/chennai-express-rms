@@ -1,4 +1,5 @@
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
 
 /// A text field styled entirely by the theme's [InputDecorationTheme].
 ///
@@ -19,6 +20,7 @@ class AppTextField extends StatelessWidget {
     this.validator,
     this.suffixIcon,
     this.hintText,
+    this.inputFormatters,
   });
 
   final TextEditingController controller;
@@ -34,6 +36,9 @@ class AppTextField extends StatelessWidget {
   final Widget? suffixIcon;
   final String? hintText;
 
+  /// Formatting applied as the user types, e.g. grouping an activation key.
+  final List<TextInputFormatter>? inputFormatters;
+
   @override
   Widget build(BuildContext context) {
     return TextFormField(
@@ -46,6 +51,7 @@ class AppTextField extends StatelessWidget {
       onFieldSubmitted: onSubmitted,
       onChanged: onChanged,
       validator: validator,
+      inputFormatters: inputFormatters,
       style: Theme.of(context).textTheme.bodyLarge,
       decoration: InputDecoration(
         labelText: label,

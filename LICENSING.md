@@ -45,6 +45,33 @@ code, enforced by a unique index.
 Type the key into the activation screen on first launch. That is the whole
 process — the key binds to that PC and the screen never appears again.
 
+```
+┌──────────────────────────────────┐
+│            [ logo ]              │
+│                                  │
+│         Activate this PC         │
+│              ────                │
+│  Enter the activation key        │
+│  supplied with your licence.     │
+│  It will be linked to this PC.   │
+│                                  │
+│  ┌────────────────────────────┐  │
+│  │ CX-V8G8-GWAE-KD9F          │  │
+│  └────────────────────────────┘  │
+│                                  │
+│  ┌────────────────────────────┐  │
+│  │         Activate           │  │
+│  └────────────────────────────┘  │
+└──────────────────────────────────┘
+```
+
+The field upper-cases and inserts the dashes as you type, and stops at a full
+key — someone reading it off a phone screen does not have to get the punctuation
+right.
+
+Once the grace period is nearly spent, a banner appears above the work area
+naming the days left, with a **Retry now** button. It never blocks anything.
+
 ### Seeing what is out there
 
 ```bash
@@ -238,11 +265,50 @@ ACL-locked so a non-administrator cannot write to it.
 
 ---
 
-## 9. Testing
+## 9. The desktop app
+
+`desktop/lib/features/activation/`
+
+The gate sits **ahead of the auth gate** in `app.dart`. An unlicensed
+installation never reaches a login screen.
+
+| Phase | Screen |
+|---|---|
+| `checking` | Loading |
+| `backendDown` | The existing "service unreachable" screen |
+| `blocked` | Activation screen |
+| `allowed` | Continues to the auth gate |
+
+**`backendDown` is separate from `blocked` on purpose.** The Windows service and
+the app start together and the service does not always win. Treating a slow start
+as "not activated" would put an activated restaurant in front of the key screen
+every morning.
+
+A licence that is activated but out of grace, or revoked, shows the same screen
+with no key field — the key they hold is the right one, so offering the field
+would send staff round a loop that cannot succeed. They get **Check again**
+instead.
+
+---
+
+## 10. Testing
 
 `backend/test/license.test.ts` — 21 cases covering key format and normalisation,
 fingerprint stability, the full grace-period ladder, revocation, fail-closed on a
 corrupt timestamp, and the single-row constraint.
 
-Each was verified by deliberately breaking the implementation: the grace period
-never expiring, and a revoked licence running forever. Both were caught.
+`desktop/test/activation_test.dart` — 13 cases covering the verdict model, the
+banner's visibility rules, and key entry formatting.
+
+Each was verified by deliberately breaking the implementation:
+
+| Break | Caught by |
+|---|---|
+| Grace period never expires | `billing stops once the grace period is spent` |
+| Revoked licence runs forever | `a revoked licence stops after its grace period` |
+| Missing `allowed` defaults to true | `an empty response fails closed` |
+| No length cap on key entry | `the field stops at a full key` |
+
+The claim cycle was also run against the real Neon database: a second PC with the
+same key is rejected, the same PC re-launching succeeds, a revoked key is
+rejected, and an unbound key activates on a new machine.

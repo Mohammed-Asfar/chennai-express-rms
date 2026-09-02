@@ -643,6 +643,10 @@ Full workflow in `LICENSING.md`.
 | FR-L12 | The vendor can revoke, restore, or unbind a key without visiting the restaurant |
 | FR-L13 | The machine fingerprint is hashed, never stored or transmitted raw |
 | FR-L14 | The Neon connection string never leaves the backend process |
+| FR-L15 | The activation gate sits ahead of login — an unlicensed PC never sees a sign-in screen |
+| FR-L16 | A backend that is not answering shows its own screen, never the key entry screen |
+| FR-L17 | The key field upper-cases, groups, and caps input as it is typed |
+| FR-L18 | An expired or revoked licence offers "Check again", not a key field |
 
 **FR-L6 through FR-L11 are the operational core.** A licence system that stops a
 restaurant billing because their broadband died is worse than no licence system at
