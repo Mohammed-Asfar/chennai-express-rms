@@ -70,13 +70,10 @@ class SettingsScreen extends StatelessWidget {
           ).push(MaterialPageRoute<void>(builder: (_) => const SyncScreen())),
         ),
 
-        // Shown but not built, so it is clear what the system will do rather
-        // than leaving someone hunting for a screen that does not exist.
-        const _SettingsRow(
-          icon: Icons.people_outline,
-          title: 'Users',
-          subtitle: 'Cashier accounts and roles',
-        ),
+        // Users is deliberately absent. Everyone shares the admin login, and
+        // a row marked "Soon" promises a screen that is not being built —
+        // better to show nothing than to advertise a feature that is not
+        // coming. The /users API exists if it is ever wanted.
       ],
     );
   }
