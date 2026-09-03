@@ -1,5 +1,7 @@
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
+import 'package:window_manager/window_manager.dart';
+import 'core/backend/backend_process.dart';
 import 'core/theme/app_theme.dart';
 import 'core/widgets/app_loading.dart';
 import 'core/widgets/backend_unreachable.dart';
@@ -11,8 +13,38 @@ import 'features/auth/presentation/login_screen.dart';
 import 'features/home/presentation/home_screen.dart';
 import 'features/updates/presentation/update_watcher.dart';
 
-class ChennaiExpressApp extends StatelessWidget {
+class ChennaiExpressApp extends StatefulWidget {
   const ChennaiExpressApp({super.key});
+
+  @override
+  State<ChennaiExpressApp> createState() => _ChennaiExpressAppState();
+}
+
+class _ChennaiExpressAppState extends State<ChennaiExpressApp> with WindowListener {
+  @override
+  void initState() {
+    super.initState();
+    windowManager.addListener(this);
+  }
+
+  @override
+  void dispose() {
+    windowManager.removeListener(this);
+    super.dispose();
+  }
+
+  /// Stops the backend before the window goes.
+  ///
+  /// `setPreventClose` is on in a packaged build, so this is the only thing that
+  /// closes the window — without it the app cannot be quit at all. The backend
+  /// is a detached child and would otherwise keep running, holding port 4000
+  /// against the next launch.
+  @override
+  void onWindowClose() async {
+    await BackendProcess.stop();
+    await windowManager.setPreventClose(false);
+    await windowManager.close();
+  }
 
   @override
   Widget build(BuildContext context) {

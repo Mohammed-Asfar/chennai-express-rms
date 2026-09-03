@@ -253,14 +253,14 @@ guessed at scale, and the fingerprint binding is the real control.
 
 ## 8. What an installed till actually protects
 
-Packaging is in place. On a PC installed with `service.ps1 install`:
+Packaging is in place. On an installed PC:
 
 | | |
 |---|---|
 | Source code | Not present — one bundled `server.mjs` |
 | Connection string | In `config.dat`, DPAPI-encrypted to that machine |
 | JWT secret | Generated per installation |
-| Install directory | Readable only by Administrators and SYSTEM |
+| Install directory | Under Program Files, so a standard user cannot modify it |
 
 A cashier cannot read the connection string, replace the server, or point the
 backend at their own database. A `config.dat` copied to another PC will not

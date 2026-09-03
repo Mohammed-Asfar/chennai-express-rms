@@ -17,12 +17,12 @@ dist-bundle/
   node/node.exe         110 MB   private runtime; the PC needs no Node
   node_modules/                  the two native addons and their dependencies
   db/migrations/                 SQL, read at boot
-  start.cmd                      what the service wrapper runs
+  configure.ps1                  writes the encrypted config at install time
   build.json                     version, build number, Node version, timestamp
 ```
 
-**No `.env`.** That is the point of packaging: configuration comes from the
-environment the service is started with, written by the installer.
+**No `.env`.** That is the point of packaging: configuration comes from
+`config.dat`, DPAPI-encrypted to the machine by the installer.
 
 ---
 
@@ -98,97 +98,25 @@ megabytes a billing PC will never load.
 
 ## Installing on a billing PC
 
-Three steps, all run elevated, in this order.
+Run the installer as Administrator. It copies both halves, writes the encrypted
+configuration, and that is all.
 
-```powershell
-# 1. Encrypt the configuration to this machine
-npm run configure -- --dir "C:\Program Files\Chennai Express\backend"
+**No Windows service is registered.** The Flutter app starts the backend itself
+as a child process — see `desktop/lib/core/backend/backend_process.dart`.
 
-# 2. Install the service, lock the directory, and start it
-powershell -File scripts\service.ps1 install -Path "C:\Program Files\Chennai Express\backend"
+### Why not a service
 
-# 3. Confirm
-powershell -File scripts\service.ps1 status
-```
+`node.exe` never calls `StartServiceCtrlDispatcher`, so the Service Control
+Manager waits ninety seconds for a handshake that never arrives and kills it with
+**error 1053**. A wrapper such as WinSW solves that, but it costs an 18 MB
+vendored binary, an XML config, an elevated registration step, and a chain of
+failure modes — all so a process can run that the app could simply start itself.
 
-`install` hardens the directory and waits for `/health` before returning, so a
-broken install fails while you are still standing at the till.
+This is what Electron and Tauri applications do with a local server.
 
-Other actions: `uninstall`, `restart`, `harden`, `status`.
-
----
-
-## Configuration
-
-`config.dat` sits beside `server.mjs`, encrypted with Windows DPAPI at machine
-scope. `npm run configure` reads the current `.env`, encrypts what the service
-needs, and writes it.
-
-**The JWT secret is generated per installation.** A token forged on one
-restaurant's PC is meaningless on another.
-
-Loading order, first match wins:
-
-1. The process environment — an operator or the service definition
-2. `config.dat` — an installed service
-3. `.env` — development only
-
-**What this protects against:** the file copied to another machine (DPAPI
-refuses), and a member of staff opening it in Notepad.
-
-**What it does not:** an administrator on the billing PC. The service must
-decrypt it to work, so anyone who can run code as the service account can read
-what the service reads. Nothing short of a hardware module changes that — the
-directory ACL is what stops a non-administrator getting that far.
-
-A config that cannot be decrypted throws with a message naming the cause, rather
-than starting half-configured and behaving strangely later.
-
-Only keys on an allow list are read. A rewritten `config.dat` cannot set
-`NODE_OPTIONS` or `PATH` and get code loaded into the service.
-
----
-
-## The service
-
-WinSW, vendored as `chennai-service.exe`. See `installer/vendor/README.md`.
-
-**Not `sc.exe` alone.** An earlier version registered `node.exe` directly and
-the service was killed after 90 seconds with **error 1053** — `node` never calls
-`StartServiceCtrlDispatcher`, so the Service Control Manager waits for a
-handshake that never arrives. The binary is fine; it does not speak the protocol,
-and correcting the `binPath` quoting does not change that.
-
-WinSW speaks it, and runs `node.exe server.mjs` as a child. Configuration is
-`chennai-service.xml`, written beside it by `service.ps1`.
-
-| | |
-|---|---|
-| Name | `ChennaiExpressRMS` |
-| Account | `LocalSystem` |
-| Startup | Automatic |
-| On failure | Restart after 5s, 10s, then every 30s; count resets daily |
-
-**Why LocalSystem.** The service binds only to `127.0.0.1` and touches nothing
-outside its own directory and the print spooler, but it must start before anyone
-logs in and survive the cashier signing out. A per-user account cannot do either,
-and a low-privilege service account cannot reach a printer installed for another
-user — which is the first thing a restaurant does.
-
----
-
-## Directory ACLs
-
-`harden` runs as part of `install`, and can be run alone.
-
-Inheritance is disabled first — `Program Files` grants Users read access, and an
-inherited allow rule cannot be removed, only overridden. `Users`, `Everyone`,
-`Authenticated Users` and `INTERACTIVE` are then removed, leaving
-`Administrators` and `SYSTEM`.
-
-**This is the step that makes everything above it mean something.** Without it a
-cashier can read `config.dat`, replace `server.mjs`, or point the backend at
-their own database, and the licence check is decoration.
+The trade-off: the backend stops when the app closes. For a till that is
+arguably right — nothing is orphaned, and no stale process holds port 4000 the
+next morning.
 
 ---
 
@@ -196,8 +124,8 @@ their own database, and the licence check is decoration.
 
 Built by `installer/build.ps1`, which runs this bundle first. See `RELEASING.md`.
 
-The installer calls `configure.ps1` and `service.ps1` from the installed
-directory, so both ship inside the bundle.
+The installer calls `configure.ps1` from the installed directory, so it ships
+inside the bundle.
 
 `configure.ps1` exists because the equivalent TypeScript tool needs the source
 tree and tsx, and an installed till has neither. Both write the same DPAPI

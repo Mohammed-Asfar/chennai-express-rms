@@ -7,16 +7,17 @@
 ; What this installs:
 ;   the Flutter desktop app, per-machine
 ;   the bundled backend, with its own Node runtime
-;   the backend as an auto-starting Windows service
 ;   an encrypted config.dat, generated on this machine at install time
 ;
-; The install directory is then locked to Administrators and SYSTEM. That ACL is
-; what stops a cashier reading the connection string or replacing the server, and
-; without it the licence check is decoration.
+; No Windows service is registered. The app starts the backend itself as a child
+; process — see desktop\lib\core\backend\backend_process.dart. node.exe does not
+; call StartServiceCtrlDispatcher, so a service pointing at it is killed after
+; ninety seconds with error 1053, and the wrapper that works around it added a
+; vendored binary and an elevated registration step that could fail in half a
+; dozen ways.
 
 #define AppName "Chennai Express"
 #define AppPublisher "Chennai Express"
-#define ServiceName "ChennaiExpressRMS"
 #define DesktopExe "chennai_express_pos.exe"
 
 ; Passed by build.ps1 (/DAppVersion=...). The fallback keeps a manual compile
@@ -48,8 +49,13 @@ Compression=lzma2/max
 SolidCompression=yes
 WizardStyle=modern
 
-; The service must be installed and the directory ACL'd, both of which need
-; elevation. Asking once up front beats failing halfway through.
+; Writing to Program Files needs elevation, and nothing else here does — the
+; backend is started by the app rather than registered as a service.
+;
+; Program Files is kept deliberately: it is write-protected for standard users,
+; which is now what stops a cashier replacing server.mjs or deleting config.dat.
+; That is weaker than the ACL a service account allowed, but it is the same
+; protection every other installed application relies on.
 PrivilegesRequired=admin
 
 ; The backend ships a 64-bit Node and Flutter builds x64 only.
@@ -74,7 +80,7 @@ Name: "desktopicon"; Description: "Create a desktop shortcut"; GroupDescription:
 ; The Flutter app.
 Source: "{#DesktopDir}\*"; DestDir: "{app}"; Flags: ignoreversion recursesubdirs createallsubdirs
 
-; The bundled backend, its private Node runtime, migrations and service script.
+; The bundled backend, its private Node runtime and migrations.
 Source: "{#BackendDir}\*"; DestDir: "{app}\backend"; Flags: ignoreversion recursesubdirs createallsubdirs
 
 [Icons]
@@ -82,28 +88,17 @@ Name: "{group}\{#AppName}"; Filename: "{app}\{#DesktopExe}"
 Name: "{autodesktop}\{#AppName}"; Filename: "{app}\{#DesktopExe}"; Tasks: desktopicon
 
 [Run]
-; Only the app launch lives here. Configuration and the service are run from
-; [Code] instead, so their exit codes are checked — a [Run] entry that fails is
-; reported nowhere, and an install that skips the service produces an app which
-; looks installed and can never start.
+; Only the app launch lives here. Configuration runs from [Code] instead, so its
+; exit code is checked — a [Run] entry that fails is reported nowhere, and an
+; install that silently skipped it would leave an app with no cloud and no
+; stable signing secret.
 Filename: "{app}\{#DesktopExe}"; \
   Description: "Start {#AppName}"; \
   Flags: nowait postinstall skipifsilent
 
-[UninstallRun]
-; Through the wrapper, and before the files go: it cannot deregister itself once
-; its own executable has been deleted.
-Filename: "{app}\backend\chennai-service.exe"; Parameters: "stop"; \
-  RunOnceId: "StopService"; Flags: runhidden waituntilterminated
-
-Filename: "{app}\backend\chennai-service.exe"; Parameters: "uninstall"; \
-  RunOnceId: "RemoveService"; \
-  Flags: runhidden waituntilterminated
-
 [UninstallDelete]
 ; Generated after install, so Setup does not know about them.
 Type: files; Name: "{app}\backend\config.dat"
-Type: files; Name: "{app}\backend\chennai-service.xml"
 Type: filesandordirs; Name: "{app}\backend\logs"
 
 [Code]
@@ -134,11 +129,15 @@ begin
 end;
 
 {
-  Refuses to install over a running service without stopping it first.
+  Stops a running copy before replacing its files.
 
-  Windows will not replace a file that is in use, so an upgrade that skipped this
-  would copy some files and silently leave others at the old version — the worst
-  possible state, because the till still starts.
+  Windows will not overwrite a file that is in use, so an upgrade that skipped
+  this would copy some files and leave others at the old version — the worst
+  state to be in, because the till still starts.
+
+  Both processes are ended: the app, and the backend it spawned. Killing only
+  the app would leave a detached node holding port 4000, and the newly installed
+  copy would then find the port taken.
 }
 function PrepareToInstall(var NeedsRestart: Boolean): String;
 var
@@ -146,31 +145,24 @@ var
 begin
   Result := '';
 
-  if Exec('sc.exe', 'query {#ServiceName}', '', SW_HIDE, ewWaitUntilTerminated, ResultCode) then
-  begin
-    if ResultCode = 0 then
-    begin
-      { Through the wrapper if it is there, so the child node process is stopped
-        too — sc.exe stop reaches the wrapper but need not reach its children. }
-      if FileExists(ExpandConstant('{app}\backend\chennai-service.exe')) then
-        Exec(ExpandConstant('{cmd}'),
-             '/c ""' + ExpandConstant('{app}\backend\chennai-service.exe') + '" stop"',
-             '', SW_HIDE, ewWaitUntilTerminated, ResultCode)
-      else
-        Exec('sc.exe', 'stop {#ServiceName}', '', SW_HIDE, ewWaitUntilTerminated, ResultCode);
+  Exec('taskkill.exe', '/F /IM {#DesktopExe}', '', SW_HIDE, ewWaitUntilTerminated, ResultCode);
 
-      { The service manager returns before the process has exited. }
-      Sleep(3000);
-    end;
-  end;
+  { By path, not by name: a developer's own node.exe must not be killed by
+    installing this. }
+  Exec(ExpandConstant('{cmd}'),
+       '/c wmic process where "ExecutablePath=''' +
+         ExpandConstant('{app}\backend\node\node.exe') + '''" delete',
+       '', SW_HIDE, ewWaitUntilTerminated, ResultCode);
+
+  Sleep(1500);
 end;
 
 {
   Runs a PowerShell step and returns its exit code.
 
-  Output is captured to a log rather than hidden. When one of these fails, the
-  message is the only thing that tells anyone why — an earlier version ran both
-  steps with runhidden and reported success while installing no service at all.
+  Output is captured to a log rather than hidden. When this fails, the message is
+  the only thing that tells anyone why — an earlier version ran it with runhidden
+  and reported success while having done nothing.
 }
 function RunPowerShell(const ScriptArgs: String; var Output: String): Integer;
 var
@@ -206,11 +198,11 @@ begin
 end;
 
 {
-  Writes the configuration and installs the service, after the files are copied.
+  Writes the encrypted configuration, after the files are copied.
 
-  Both must succeed. Without the service there is no backend, and the app shows
-  nothing but an unreachable-service screen — so a failure here aborts the
-  install rather than leaving a half-working product behind.
+  It must succeed. Without it the backend starts with no cloud connection and a
+  signing secret that changes on every launch, so a failure aborts the install
+  rather than leaving a half-working product behind.
 }
 procedure CurStepChanged(CurStep: TSetupStep);
 var
@@ -232,16 +224,8 @@ begin
     Abort;
   end;
 
-  WizardForm.StatusLabel.Caption := 'Installing the billing service...';
-  Code := RunPowerShell(
-    '& ''' + ExpandConstant('{app}\backend\service.ps1') +
-      ''' install -Path ''' + ExpandConstant('{app}\backend') + '''', Output);
-
-  if Code <> 0 then
-  begin
-    MsgBox('The billing service could not be installed.' + NL + NL + Output + NL +
-      'The application cannot run without it. Setup will not continue.',
-      mbCriticalError, MB_OK);
-    Abort;
-  end;
+  { No service is registered. The app starts the backend itself as a child
+    process — see desktop\lib\core\backend\backend_process.dart. node.exe does
+    not speak the Service Control Manager protocol, and every attempt to
+    register it produced a service the SCM killed after ninety seconds. }
 end;

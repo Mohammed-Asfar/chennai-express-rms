@@ -805,22 +805,37 @@ Accepted deliberately, listed so they are not mistaken for oversights:
 | NFR-5 | Offline capability | Fully functional with no internet, indefinitely |
 | NFR-6 | Backend availability | Auto-restarts on crash; health check exposed |
 | NFR-7 | Data durability | SQLite WAL mode; nightly local backup |
-| NFR-8 | Install | Single installer; Node runs as an auto-starting Windows service |
+| NFR-8 | Install | Single installer; the app starts the backend as a child process |
 | NFR-9 | Configuration secrecy | No connection string or signing secret readable on the billing PC |
-| NFR-10 | Install directory | Readable and writable only by Administrators and SYSTEM |
+| NFR-10 | Install directory | Under Program Files, so a standard user cannot modify it |
 
 **On NFR-6:** because Flutter holds no data, the backend being down means a
 non-functional UI. Auto-restart and a health check with a clear error state are
 required, not optional.
 
-**On NFR-9 and NFR-10, and their limit.** The configuration is DPAPI-encrypted to
-the machine, so a file copied elsewhere is useless, and the install directory is
-locked to Administrators and SYSTEM so a cashier cannot read or replace anything.
+**On NFR-8, and why not a service.** `node.exe` never calls
+`StartServiceCtrlDispatcher`, so a Windows service registered against it is killed
+after ninety seconds with error 1053. A wrapper works around that at the cost of a
+vendored binary and an elevated registration step that can fail in several ways.
+The app starting its own backend needs none of it, and is what Electron and Tauri
+applications do with a local server. The backend stops when the app closes, which
+for a till is arguably correct: nothing is orphaned and no stale process holds the
+port.
 
-Neither stops an administrator on the billing PC: the service must decrypt the
-config to run, so anyone able to execute code as the service account can read what
-it reads. That is true of every scheme short of a hardware security module. The
-ACL is the load-bearing control; the encryption stops the file travelling.
+**On NFR-9 and NFR-10, and their limit.** The configuration is DPAPI-encrypted to
+the machine, so a file copied elsewhere is useless, and Program Files is
+write-protected for standard users — a cashier cannot replace `server.mjs` or
+delete `config.dat`.
+
+Neither stops an administrator on the billing PC: the backend must decrypt the
+config to run, so anyone able to execute code as that user can read what it reads.
+That is true of every scheme short of a hardware security module.
+
+Without a service account there is no ACL restricting reads, so a determined
+standard user can *read* `config.dat` — it is encrypted, and useless on another
+machine, but no longer unreadable in place. That is the price of dropping the
+service, and it is accepted deliberately: an install that reliably works beats one
+that is marginally harder to inspect and does not.
 
 ---
 

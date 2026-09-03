@@ -60,10 +60,10 @@ backup and updates do not.
 1. Copies the Flutter app and the bundled backend
 2. Runs `configure.ps1` — generates a JWT secret unique to that installation and
    DPAPI-encrypts the configuration to that machine
-3. Runs `service.ps1 install` — registers the service, locks the directory to
-   Administrators and SYSTEM, starts it, waits for `/health`
+3. That is all. No service is registered — the app starts the backend itself as a
+   child process when it launches
 
-Uninstalling removes the service and `config.dat` but **not the database**. Bills
+Uninstalling removes `config.dat` but **not the database**. Bills
 must survive an uninstall — that is also what an operator runs before a clean
 reinstall, and GST requires six years of retention.
 
