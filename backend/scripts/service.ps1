@@ -84,7 +84,11 @@ function Install-BillingService {
   # straight at it is killed after 90 seconds with error 1053 - the SCM waits
   # for a handshake that never comes. The binary is fine; it does not speak the
   # protocol. WinSW does, and runs node as a child.
-  cmd /c ('""{0}" install"' -f $wrapper) | Out-Null
+  #
+  # Invoked with the call operator rather than through cmd. Wrapping the path in
+  # cmd's own quoting produced ""C:\Program Files\... - a doubled leading quote
+  # cmd cannot parse - and the install failed before the wrapper ever ran.
+  & $wrapper install 2>&1 | ForEach-Object { Write-Host "  $_" }
 
   # 1073 is ERROR_SERVICE_EXISTS. Reinstalling over an existing service is a
   # normal upgrade, not a failure.
@@ -96,7 +100,7 @@ function Install-BillingService {
 
   Protect-InstallDirectory -Directory $resolved
 
-  cmd /c ('""{0}" start"' -f $wrapper) | Out-Null
+  & $wrapper start 2>&1 | ForEach-Object { Write-Host "  $_" }
   if ($LASTEXITCODE -ne 0) {
     throw "The service was registered but did not start (exit code $LASTEXITCODE). Check $resolved\logs."
   }
@@ -158,14 +162,14 @@ function Uninstall-BillingService {
   $wrapper = if ($Path) { Join-Path (Resolve-Path $Path).Path 'chennai-service.exe' } else { $null }
 
   if ($wrapper -and (Test-Path $wrapper)) {
-    cmd /c ('""{0}" stop"' -f $wrapper) | Out-Null
+    & $wrapper stop 2>&1 | Out-Null
     Start-Sleep -Seconds 2
-    cmd /c ('""{0}" uninstall"' -f $wrapper) | Out-Null
+    & $wrapper uninstall 2>&1 | Out-Null
   } else {
     # The wrapper is already gone - an uninstall that removed files first.
-    cmd /c "sc.exe stop $ServiceName" | Out-Null
+    & sc.exe stop $ServiceName | Out-Null
     Start-Sleep -Seconds 2
-    cmd /c "sc.exe delete $ServiceName" | Out-Null
+    & sc.exe delete $ServiceName | Out-Null
   }
 
   # Deletion is asynchronous, and a reinstall started too soon fails with
