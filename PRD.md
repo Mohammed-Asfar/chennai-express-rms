@@ -839,7 +839,7 @@ ACL is the load-bearing control; the encryption stops the file travelling.
 | 9 | Reports + restaurant settings |
 | 10 | Flutter UI |
 | 11 | Neon sync worker |
-| 12 | Packaging — installer, Windows service, auto-update |
+| 12 | Packaging — installer, Windows service, auto-update. Releases are built locally and published with `npm run publish:release`; see `RELEASING.md` |
 
 Reservations sit at step 8 rather than beside tables: they depend on orders existing
 (seating a booking creates one) and are not on the critical path to a printed bill.
