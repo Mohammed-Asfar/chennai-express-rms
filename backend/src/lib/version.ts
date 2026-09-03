@@ -7,8 +7,8 @@
  *
  * Bump both on every release. The installer and this constant must agree.
  */
-export const APP_VERSION = '1.0.1'
-export const APP_BUILD_NUMBER = 2
+export const APP_VERSION = '1.0.2'
+export const APP_BUILD_NUMBER = 3
 
 export interface ReleaseInfo {
   version: string
