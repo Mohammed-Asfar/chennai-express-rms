@@ -89,6 +89,20 @@ Source: "{#DesktopDir}\*"; DestDir: "{app}"; Flags: ignoreversion recursesubdirs
 ; The bundled backend, its private Node runtime and migrations.
 Source: "{#BackendDir}\*"; DestDir: "{app}\backend"; Flags: ignoreversion recursesubdirs createallsubdirs
 
+[Dirs]
+; The database directory, created here rather than left to the backend.
+;
+; ProgramData's default ACL gives standard users read and execute only. The
+; backend runs elevated on a first install, so it created this directory and its
+; -wal and -shm files with that inherited ACL — and SQLite in WAL mode must
+; write all three. A cashier on a standard Windows account could then open the
+; app and not bill: SQLITE_READONLY, on a machine where it worked perfectly for
+; the administrator who installed it.
+;
+; users-modify is what makes the till usable by the account a restaurant
+; actually runs it under.
+Name: "{commonappdata}\{#AppName}"; Permissions: users-modify
+
 [Icons]
 Name: "{group}\{#AppName}"; Filename: "{app}\{#DesktopExe}"
 Name: "{autodesktop}\{#AppName}"; Filename: "{app}\{#DesktopExe}"; Tasks: desktopicon

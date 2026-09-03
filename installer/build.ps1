@@ -66,7 +66,16 @@ function Get-AppVersion {
 }
 
 function Get-CloudUrl {
-  if ($PSBoundParameters.ContainsKey('CloudDatabaseUrl')) { return $CloudDatabaseUrl }
+  # $PSBoundParameters is per-scope: inside a function it describes that
+  # function's own arguments, and this one takes none. Testing it here was
+  # always false, so -CloudDatabaseUrl '' was ignored and the build fell through
+  # to .env — printing "Cloud backup and updates configured" while producing an
+  # installer carrying a production credential the caller had asked to omit.
+  #
+  # $script: reaches the parameter actually passed to the script.
+  if ($script:PSBoundParameters.ContainsKey('CloudDatabaseUrl')) {
+    return $script:CloudDatabaseUrl
+  }
 
   $envFile = Join-Path $backend '.env'
   if (-not (Test-Path $envFile)) { return '' }
