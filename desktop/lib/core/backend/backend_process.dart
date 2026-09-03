@@ -75,20 +75,39 @@ class BackendProcess {
   ///
   /// Called when the window closes. A detached child would otherwise outlive
   /// the app and hold port 4000 against the next launch.
+  ///
+  /// Deliberately does not rely on `_current` alone. Three cases leave a backend
+  /// running that this app has no handle for:
+  ///
+  ///   - the installer started one, elevated, and the app never spawned its own
+  ///   - `start()` is unawaited, so closing the window during the seconds it
+  ///     takes to launch reaches here before `_current` is set
+  ///   - a previous run crashed
+  ///
+  /// All three were observed as a node.exe still listening on 4000 with the app
+  /// window closed — the first of them on a real install, where `stop()` found
+  /// `_current` null and returned having done nothing.
+  ///
+  /// So the handle is used when there is one, and the port is swept either way.
   static Future<void> stop() async {
     final current = _current;
-    if (current == null) return;
-
     _current = null;
 
-    // SIGTERM first so the server can close SQLite cleanly — a WAL left
-    // uncheckpointed is recoverable, but an orderly shutdown is free here.
-    current._process.kill(ProcessSignal.sigterm);
+    if (current != null) {
+      // SIGTERM first so the server can close SQLite cleanly — a WAL left
+      // uncheckpointed is recoverable, but an orderly shutdown is free here.
+      current._process.kill(ProcessSignal.sigterm);
 
-    // Windows does not deliver SIGTERM, so kill() falls back to terminating the
-    // process anyway. The wait is for the orderly case.
-    await Future<void>.delayed(const Duration(milliseconds: 800));
-    current._process.kill(ProcessSignal.sigkill);
+      // Windows does not deliver SIGTERM, so kill() falls back to terminating
+      // the process anyway. The wait is for the orderly case.
+      await Future<void>.delayed(const Duration(milliseconds: 800));
+      current._process.kill(ProcessSignal.sigkill);
+    }
+
+    // Whatever still holds the port, whoever started it. Without this the next
+    // launch finds 4000 taken and the new backend dies unable to bind.
+    final executable = _executable();
+    if (executable != null) await _killOrphans(executable.path);
   }
 
   /// Ends any backend left over from a previous run.
