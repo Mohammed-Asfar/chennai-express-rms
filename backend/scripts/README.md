@@ -184,9 +184,14 @@ their own database, and the licence check is decoration.
 
 ---
 
-## Still to build
+## The installer
 
-| | |
-|---|---|
-| Inno Setup installer | One `.exe`, plus its SHA-256 for the `app_releases` row |
-| Release publishing | GitHub Actions on a `v*` tag → upload → insert the release row |
+Built by `installer/build.ps1`, which runs this bundle first. See `RELEASING.md`.
+
+The installer calls `configure.ps1` and `service.ps1` from the installed
+directory, so both ship inside the bundle.
+
+`configure.ps1` exists because the equivalent TypeScript tool needs the source
+tree and tsx, and an installed till has neither. Both write the same DPAPI
+format — verified by having the PowerShell script write a config and the bundled
+Node server read it back.

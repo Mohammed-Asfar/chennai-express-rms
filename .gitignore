@@ -40,3 +40,9 @@ Thumbs.db
 
 # Built by scripts/bundle.mjs — 177 MB of Node runtime and native modules.
 backend/dist-bundle/
+
+# Staged installer input — build.ps1 bakes the connection string into a copy here.
+installer/staging/
+
+# Built installers.
+dist/

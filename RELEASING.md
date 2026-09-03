@@ -27,12 +27,45 @@ they never got the fix.
 
 ## 2. Build
 
-```bash
-cd backend && npm run bundle       # verifies itself; fails if it will not start
-cd ../desktop && flutter build windows --release
+```powershell
+.\installer\build.ps1
+.\installer\build.ps1 -SkipFlutter    # reuse the last Flutter build
 ```
 
-Then the installer, which packages both.
+One command. It bundles the backend (which smoke-tests itself and fails if the
+result will not start), builds the Flutter app, compiles the installer, and
+prints the SHA-256:
+
+```
+  dist\chennai-express-setup-1.1.0.exe
+  57.7 MB
+  sha256  a4b9710244bed07068289b911583461a39b0b965ffe82c0b5be70816145c943e
+```
+
+**The connection string is baked in at build time.** It is read from
+`backend\.env` and written into a *copy* of `configure.ps1` inside
+`installer\staging\`, which is gitignored — the script in the repository keeps
+its `@CLOUD_DATABASE_URL@` placeholder, so a connection string is never
+committed.
+
+Check `.env` points where you intend before building. A local `localhost:5432`
+URL produces an installer that tells every till to look for a database on its own
+machine.
+
+Pass `-CloudDatabaseUrl ''` to build an offline-only till: billing works, cloud
+backup and updates do not.
+
+### What the installer does on the restaurant's PC
+
+1. Copies the Flutter app and the bundled backend
+2. Runs `configure.ps1` — generates a JWT secret unique to that installation and
+   DPAPI-encrypts the configuration to that machine
+3. Runs `service.ps1 install` — registers the service, locks the directory to
+   Administrators and SYSTEM, starts it, waits for `/health`
+
+Uninstalling removes the service and `config.dat` but **not the database**. Bills
+must survive an uninstall — that is also what an operator runs before a clean
+reinstall, and GST requires six years of retention.
 
 ---
 
