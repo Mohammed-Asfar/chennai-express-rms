@@ -177,6 +177,17 @@ $configureStaged = Join-Path $stagedBackend 'configure.ps1'
 
 if ($cloudUrl -eq '') {
   Write-Warning '  No CLOUD_DATABASE_URL - this installer produces an offline-only till.'
+} elseif ($cloudUrl -match '(localhost|127\.0\.0\.1|::1)') {
+  # A development connection string in a shipped installer tells every till to
+  # look for a database on its own machine. Cloud backup, updates and — because
+  # licences live in the cloud — activation all fail, and the error names the
+  # internet rather than the build.
+  throw ("CLOUD_DATABASE_URL points at localhost.`n" +
+         "  An installer built from this would tell every till to look for a`n" +
+         "  database on its own PC. Activation would fail, because licences`n" +
+         "  live in the cloud.`n`n" +
+         "  Point backend\.env at Neon, or pass -CloudDatabaseUrl '' to build`n" +
+         "  a deliberately offline-only till.")
 } else {
   Write-Host '    Cloud backup and updates configured.'
 }

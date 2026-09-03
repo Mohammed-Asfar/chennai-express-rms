@@ -32,6 +32,11 @@ class ActivationRepository {
   /// deliberately returns the same message for a wrong key, one already bound to
   /// another PC, and a revoked one, so nothing here can distinguish them either.
   Future<ActivationStatus> claim(String key) async {
+    // Waits for the service, exactly as status() does. Someone who types their
+    // key quickly on a cold start would otherwise get "cannot reach the billing
+    // service" for a backend that is seconds from ready.
+    await _api.waitUntilHealthy();
+
     try {
       final json = await _api.post('/activation/claim', {'key': key});
       return ActivationStatus.fromJson(json);
