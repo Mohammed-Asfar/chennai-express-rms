@@ -71,10 +71,11 @@ function atMidday(offsetMinutes = 0): string {
   const now = new Date()
 
   // Before the day starts, the business date is the previous calendar day.
-  const [startHour, startMinute] = SEEDED_DAY_START.split(':').map(Number)
+  // Compared in minutes, as businessDateFor itself does, so the two agree on
+  // the boundary rather than approximating it.
+  const [startHour = 0, startMinute = 0] = SEEDED_DAY_START.split(':').map(Number)
   const beforeDayStart =
-    now.getHours() < startHour ||
-    (now.getHours() === startHour && now.getMinutes() < startMinute)
+    now.getHours() * 60 + now.getMinutes() < startHour * 60 + startMinute
 
   const when = new Date(now)
   if (beforeDayStart) when.setDate(when.getDate() - 1)

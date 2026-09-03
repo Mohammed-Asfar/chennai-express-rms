@@ -398,12 +398,12 @@ test('printed jobs past the window are dropped', async () => {
 
   assertEqual(removed, 1, 'one job removed')
   assertEqual(
-    db.prepare('SELECT count(*) n FROM print_jobs WHERE id = ?').get(old).n,
+    (db.prepare('SELECT count(*) n FROM print_jobs WHERE id = ?').get(old) as { n: number }).n,
     0,
     'the old job is gone',
   )
   assertEqual(
-    db.prepare('SELECT count(*) n FROM print_jobs WHERE id = ?').get(recent).n,
+    (db.prepare('SELECT count(*) n FROM print_jobs WHERE id = ?').get(recent) as { n: number }).n,
     1,
     'the recent one is kept',
   )
@@ -420,7 +420,7 @@ test('a pending job is never pruned, however old', async () => {
   prunePrintJobs(db)
 
   assertEqual(
-    db.prepare('SELECT count(*) n FROM print_jobs WHERE id = ?').get(stuck).n,
+    (db.prepare('SELECT count(*) n FROM print_jobs WHERE id = ?').get(stuck) as { n: number }).n,
     1,
     'still queued',
   )
@@ -436,7 +436,7 @@ test('a failed job is never pruned, however old', async () => {
   prunePrintJobs(db)
 
   assertEqual(
-    db.prepare('SELECT count(*) n FROM print_jobs WHERE id = ?').get(failed).n,
+    (db.prepare('SELECT count(*) n FROM print_jobs WHERE id = ?').get(failed) as { n: number }).n,
     1,
     'still retryable',
   )
@@ -448,11 +448,11 @@ test('pruning does not touch the bill the job printed', async () => {
   // bills, and GST retention applies to that — this must never be a route to
   // deleting one.
   const { db, branchId, app } = await setup()
-  const before = db.prepare('SELECT count(*) n FROM bills').get().n
+  const before = (db.prepare('SELECT count(*) n FROM bills').get() as { n: number }).n
   insertJob(db, branchId, 'printed', KEEP_FINISHED_DAYS + 1)
 
   prunePrintJobs(db)
 
-  assertEqual(db.prepare('SELECT count(*) n FROM bills').get().n, before, 'bills untouched')
+  assertEqual((db.prepare('SELECT count(*) n FROM bills').get() as { n: number }).n, before, 'bills untouched')
   await app.close()
 })
