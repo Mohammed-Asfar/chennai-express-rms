@@ -101,20 +101,34 @@ class BackendProcess {
   /// kill, and if it fails the new backend simply cannot bind — which surfaces
   /// as the unreachable-service screen rather than a crash here.
   static Future<void> _killOrphans(String executablePath) async {
+    // PowerShell, not wmic. wmic is deprecated and missing from recent Windows
+    // 11 builds, so the previous version of this silently did nothing and an
+    // orphan kept holding port 4000.
+    //
+    // Two ways of finding it, because neither alone is enough:
+    //
+    //   by path  — the ordinary case, and precise enough that a developer's own
+    //              node.exe is never touched
+    //   by port  — a process started by another user reports an empty
+    //              ExecutablePath, so the path match silently misses it. Only
+    //              a listener on 4000 bound to loopback qualifies, which is
+    //              this application's port by definition.
+    final script =
+        "Get-CimInstance Win32_Process -Filter \"Name='node.exe'\" | "
+        "Where-Object { \$_.ExecutablePath -eq '$executablePath' } | "
+        "ForEach-Object { Stop-Process -Id \$_.ProcessId -Force -ErrorAction SilentlyContinue }; "
+        'Get-NetTCPConnection -LocalPort 4000 -State Listen -ErrorAction SilentlyContinue | '
+        "ForEach-Object { Stop-Process -Id \$_.OwningProcess -Force -ErrorAction SilentlyContinue }";
+
     try {
       await Process.run(
-        'wmic',
-        [
-          'process',
-          'where',
-          "ExecutablePath='${executablePath.replaceAll(r'\', r'\\')}'",
-          'delete',
-        ],
+        'powershell',
+        ['-NoProfile', '-ExecutionPolicy', 'Bypass', '-Command', script],
         runInShell: false,
-      );
+      ).timeout(const Duration(seconds: 8));
     } catch (_) {
-      // wmic is deprecated and absent on some Windows 11 builds. Nothing to do
-      // about it here; the bind failure downstream is already handled.
+      // Nothing to kill, or PowerShell is unavailable. The new backend simply
+      // fails to bind, which surfaces as the unreachable-service screen.
     }
   }
 

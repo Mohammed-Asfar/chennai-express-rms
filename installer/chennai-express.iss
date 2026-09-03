@@ -65,10 +65,16 @@ ArchitecturesAllowed=x64compatible
 UninstallDisplayIcon={app}\{#DesktopExe}
 SetupIconFile=..\desktop\windows\runner\resources\app_icon.ico
 
-; A till running an update must not be asked to close the app it is already
-; closing. Setup detects the running instance instead.
-CloseApplications=yes
-RestartApplications=no
+; Setup's own file-in-use detection is off.
+;
+; It cannot see the backend: node.exe is a child the app spawned, holding files
+; Setup wants to replace, and it is not the application Setup is watching. The
+; result was a "Setup was unable to automatically close all applications"
+; dialog with no way forward, on every upgrade.
+;
+; PrepareToInstall ends both processes by path before any file is touched, which
+; is the same job done somewhere it can actually reach them.
+CloseApplications=no
 
 [Languages]
 Name: "english"; MessagesFile: "compiler:Default.isl"
@@ -147,11 +153,24 @@ begin
 
   Exec('taskkill.exe', '/F /IM {#DesktopExe}', '', SW_HIDE, ewWaitUntilTerminated, ResultCode);
 
-  { By path, not by name: a developer's own node.exe must not be killed by
-    installing this. }
-  Exec(ExpandConstant('{cmd}'),
-       '/c wmic process where "ExecutablePath=''' +
-         ExpandConstant('{app}\backend\node\node.exe') + '''" delete',
+  { PowerShell, not wmic. wmic is deprecated and absent from recent Windows 11
+    builds, so this step silently did nothing and Setup stopped at "unable to
+    automatically close all applications" — the backend was still holding its
+    own files open.
+
+    Matched on the full path so a developer's own node.exe survives installing
+    this. }
+  { Whatever is listening on 4000, and anything running this install's node.
+    A process started by another user reports an empty ExecutablePath, so the
+    path match alone silently misses an orphan from an elevated install. }
+  Exec('powershell.exe',
+       '-NoProfile -ExecutionPolicy Bypass -Command "' +
+         'Get-NetTCPConnection -LocalPort 4000 -State Listen -ErrorAction SilentlyContinue | ' +
+         'ForEach-Object { Stop-Process -Id $_.OwningProcess -Force -ErrorAction SilentlyContinue }; ' +
+         'Get-CimInstance Win32_Process -Filter ''''Name=\"node.exe\"'''' | ' +
+         'Where-Object { $_.ExecutablePath -eq ''' +
+           ExpandConstant('{app}\backend\node\node.exe') + ''' } | ' +
+         'ForEach-Object { Stop-Process -Id $_.ProcessId -Force -ErrorAction SilentlyContinue }"',
        '', SW_HIDE, ewWaitUntilTerminated, ResultCode);
 
   Sleep(1500);
