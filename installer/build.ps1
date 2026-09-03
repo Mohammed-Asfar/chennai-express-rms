@@ -129,8 +129,31 @@ if (-not $SkipFlutter) {
 }
 
 $desktopDir = Join-Path $desktop 'build\windows\x64\runner\Release'
-if (-not (Test-Path (Join-Path $desktopDir 'chennai_express_pos.exe'))) {
+$desktopExe = Join-Path $desktopDir 'chennai_express_pos.exe'
+if (-not (Test-Path $desktopExe)) {
   throw "No Flutter build at $desktopDir. Run without -SkipFlutter."
+}
+
+# Refuse a build older than the source it was built from.
+#
+# Only meaningful when the build was skipped — a build that just ran is current
+# by definition, and checking it anyway would reject the very command that fixes
+# the problem.
+#
+# -SkipFlutter packaged a day-old build for several attempts, and the installed
+# app failed with "could not resolve the kernel binary" — an error that says
+# nothing about staleness and sent the investigation into the installer instead.
+if ($SkipFlutter) {
+  $newestSource = Get-ChildItem (Join-Path $desktop 'lib') -Recurse -Filter '*.dart' |
+    Sort-Object LastWriteTime -Descending |
+    Select-Object -First 1
+
+  if ($newestSource -and $newestSource.LastWriteTime -gt (Get-Item $desktopExe).LastWriteTime) {
+    throw ("The Flutter build is older than the source.`n" +
+           "  built:   $((Get-Item $desktopExe).LastWriteTime)`n" +
+           "  newest:  $($newestSource.LastWriteTime)  ($($newestSource.Name))`n" +
+           "Run without -SkipFlutter.")
+  }
 }
 
 # --- stage, with the connection string baked in ---

@@ -49,6 +49,12 @@ class BackendProcess {
     final server = File('${directory.path}${Platform.pathSeparator}server.mjs');
     if (!server.existsSync()) return null;
 
+    // A backend left behind by a crash, or by the app being killed from Task
+    // Manager, still holds port 4000 — and the new one would fail to bind and
+    // die silently. Only this install's runtime is matched, by full path, so a
+    // developer's own node is never touched.
+    await _killOrphans(executable.path);
+
     final process = await Process.start(
       executable.path,
       [server.path],
@@ -83,6 +89,33 @@ class BackendProcess {
     // process anyway. The wait is for the orderly case.
     await Future<void>.delayed(const Duration(milliseconds: 800));
     current._process.kill(ProcessSignal.sigkill);
+  }
+
+  /// Ends any backend left over from a previous run.
+  ///
+  /// Matched on the full executable path, never on the name: killing every
+  /// `node.exe` would take out a developer's own work, and on a till it would
+  /// take out anything else that happens to embed Node.
+  ///
+  /// Failure is ignored. If there is no orphan the command reports nothing to
+  /// kill, and if it fails the new backend simply cannot bind — which surfaces
+  /// as the unreachable-service screen rather than a crash here.
+  static Future<void> _killOrphans(String executablePath) async {
+    try {
+      await Process.run(
+        'wmic',
+        [
+          'process',
+          'where',
+          "ExecutablePath='${executablePath.replaceAll(r'\', r'\\')}'",
+          'delete',
+        ],
+        runInShell: false,
+      );
+    } catch (_) {
+      // wmic is deprecated and absent on some Windows 11 builds. Nothing to do
+      // about it here; the bind failure downstream is already handled.
+    }
   }
 
   /// The bundled Node runtime, or null when running from source.
