@@ -7,12 +7,19 @@
 
     powershell -ExecutionPolicy Bypass -File installer\diagnose.ps1
 
-  It checks each precondition in turn and tries the service creation itself,
-  printing the real exit code and message. Nothing is left behind — a service it
-  manages to create is removed again before it finishes.
+  It checks each precondition in turn and, if no service is installed, runs the
+  real install and reports what happened.
 
-  This exists because the installer runs elevated and this shell usually is not,
-  so the failure cannot be reproduced from a normal terminal.
+  **It never removes a service it did not create.** An earlier version deleted a
+  running service to "start clean", then recreated it the wrong way and reported
+  the resulting failure as the installer's fault — turning a working till into a
+  broken one and sending the investigation in the wrong direction for an hour.
+
+  A healthy service short-circuits everything: it reports the health response and
+  exits without touching anything.
+
+  This exists because the installer runs elevated and a normal shell is not, so
+  the failure cannot otherwise be reproduced.
 #>
 
 $ErrorActionPreference = 'Continue'
@@ -45,12 +52,41 @@ foreach ($f in @('server.mjs', 'node\node.exe', 'db', 'config.dat', 'service.ps1
 Section 'Existing service'
 $existing = Get-Service -Name $ServiceName -ErrorAction SilentlyContinue
 if ($existing) {
-  Write-Host "  $ServiceName is already installed, status $($existing.Status)"
-  Write-Host '  Removing it so the test below starts clean.'
-  cmd /c "sc.exe stop $ServiceName" | Out-Null
-  Start-Sleep -Seconds 2
-  cmd /c "sc.exe delete $ServiceName" | Out-Null
-  Start-Sleep -Seconds 2
+  Write-Host "  $ServiceName is installed, status $($existing.Status)"
+
+  # Never touched. An earlier version of this script deleted a working service
+  # and recreated it the wrong way, turning a healthy till into a broken one —
+  # a diagnostic that breaks what it is inspecting is worse than none.
+  if ($existing.Status -eq 'Running') {
+    try {
+      $h = Invoke-WebRequest -Uri 'http://127.0.0.1:4000/health' -TimeoutSec 3 -UseBasicParsing
+      Write-Host "  health            $($h.Content)" -ForegroundColor Green
+      Write-Host ''
+      Write-Host '  Nothing is wrong. The service is installed and answering.' -ForegroundColor Green
+      exit 0
+    } catch {
+      Write-Host '  health            running, but not answering on 127.0.0.1:4000' -ForegroundColor Red
+    }
+  }
+
+  Write-Host ''
+  Write-Host '  Wrapper log (the service runs node as a child; its errors are here):'
+  $wrapperLog = Join-Path $InstallDir 'logs\chennai-service.wrapper.log'
+  $errLog = Join-Path $InstallDir 'logs\chennai-service.err.log'
+  foreach ($f in @($wrapperLog, $errLog)) {
+    if (Test-Path $f) {
+      Write-Host "  --- $(Split-Path $f -Leaf)"
+      Get-Content $f -Tail 15 | ForEach-Object { Write-Host "    $_" }
+    } else {
+      Write-Host "  --- $(Split-Path $f -Leaf): not present"
+    }
+  }
+
+  Write-Host ''
+  Write-Host '  To reinstall the service, run:'
+  Write-Host "    powershell -File `"$InstallDir\service.ps1`" uninstall -Path `"$InstallDir`""
+  Write-Host "    powershell -File `"$InstallDir\service.ps1`" install -Path `"$InstallDir`""
+  exit 0
 } else {
   Write-Host '  not installed'
 }
@@ -97,52 +133,46 @@ if ((Test-Path $node) -and (Test-Path $server)) {
   Write-Host '  skipped - node.exe or server.mjs is missing'
 }
 
-Section 'Creating the service'
-$binPath = '\"{0}\" \"{1}\"' -f $node, $server
-$create = 'sc.exe create {0} binPath= "{1}" start= auto obj= "LocalSystem" DisplayName= "Chennai Express Billing Service"' -f `
-  $ServiceName, $binPath
+Section 'Installing the service through the wrapper'
 
-Write-Host '  command:'
-Write-Host "    $create"
-Write-Host ''
-Write-Host '  output:'
-cmd /c $create 2>&1 | ForEach-Object { Write-Host "    $_" }
+# The same path the installer takes. node.exe does not speak the Service Control
+# Manager protocol, so registering it directly with sc.exe produces error 1053 -
+# an earlier version of this script did exactly that and blamed the installer.
+$wrapper = Join-Path $InstallDir 'chennai-service.exe'
+
+if (-not (Test-Path $wrapper)) {
+  Write-Host '  chennai-service.exe is MISSING from the install directory.' -ForegroundColor Red
+  Write-Host '  The bundle was built before the wrapper was added. Rebuild and reinstall.'
+  exit 1
+}
+
+Write-Host '  writing chennai-service.xml and registering...'
+& (Join-Path $InstallDir 'service.ps1') install -Path $InstallDir 2>&1 |
+  ForEach-Object { Write-Host "    $_" }
+
 Write-Host "  exit code         $LASTEXITCODE"
 
-if ($LASTEXITCODE -eq 0) {
-  Write-Host ''
-  Write-Host '  Created. Checking what Windows recorded:'
-  $wmi = Get-CimInstance Win32_Service -Filter "Name='$ServiceName'"
-  Write-Host "    PathName        $($wmi.PathName)"
-  Write-Host "    StartName       $($wmi.StartName)"
-
-  Write-Host ''
-  Write-Host '  Starting it:'
-  cmd /c "sc.exe start $ServiceName" 2>&1 | Select-Object -First 6 | ForEach-Object { Write-Host "    $_" }
-  Start-Sleep -Seconds 8
-
-  $svc = Get-Service -Name $ServiceName -ErrorAction SilentlyContinue
-  Write-Host "    status          $($svc.Status)"
-
+$svc = Get-Service -Name $ServiceName -ErrorAction SilentlyContinue
+if ($svc) {
+  Write-Host "  status            $($svc.Status)"
   try {
-    $h = Invoke-WebRequest -Uri 'http://127.0.0.1:4000/health' -TimeoutSec 3 -UseBasicParsing
-    Write-Host "    health          $($h.Content)" -ForegroundColor Green
-  } catch {
-    Write-Host '    health          not answering' -ForegroundColor Red
+    $h = Invoke-WebRequest -Uri 'http://127.0.0.1:4000/health' -TimeoutSec 5 -UseBasicParsing
+    Write-Host "  health            $($h.Content)" -ForegroundColor Green
     Write-Host ''
-    Write-Host '  Most recent service errors from the event log:'
-    Get-WinEvent -FilterHashtable @{ LogName = 'System'; StartTime = (Get-Date).AddMinutes(-5) } `
-      -ErrorAction SilentlyContinue |
-      Where-Object { $_.Message -like "*$ServiceName*" -or $_.Message -like '*Chennai*' } |
-      Select-Object -First 3 |
-      ForEach-Object { Write-Host "    $($_.TimeCreated): $($_.Message)" }
+    Write-Host '  The service is installed and answering. Leaving it running.' -ForegroundColor Green
+  } catch {
+    Write-Host '  health            not answering' -ForegroundColor Red
+    Write-Host ''
+    Write-Host '  Wrapper log:'
+    $log = Join-Path $InstallDir 'logs\chennai-service.wrapper.log'
+    if (Test-Path $log) {
+      Get-Content $log -Tail 15 | ForEach-Object { Write-Host "    $_" }
+    } else {
+      Write-Host '    not present - the wrapper never ran'
+    }
   }
-
-  Write-Host ''
-  Write-Host '  Cleaning up the test service.'
-  cmd /c "sc.exe stop $ServiceName" | Out-Null
-  Start-Sleep -Seconds 2
-  cmd /c "sc.exe delete $ServiceName" | Out-Null
+} else {
+  Write-Host '  the service was not registered' -ForegroundColor Red
 }
 
 Write-Host ''
