@@ -208,14 +208,40 @@ async function assertBuildIsNewer(sql: Sql, channel: string): Promise<void> {
 function uploadToGitHub(file: string, name: string): string {
   const tag = `v${APP_VERSION}`
 
+  let exists = true
   try {
     execFileSync('gh', ['release', 'view', tag], { stdio: 'ignore' })
-    console.log(`  Release ${tag} exists; attaching the installer.`)
   } catch {
+    exists = false
+  }
+
+  const notes =
+    `Chennai Express ${APP_VERSION} (build ${APP_BUILD_NUMBER}).\n\n` +
+    'Run the installer as an administrator on the till. Existing bills, ' +
+    'settings and activation are kept.'
+
+  if (exists) {
+    console.log(`  Release ${tag} exists; attaching the installer.`)
+
+    // Replace the notes as well as the file.
+    //
+    // CI publishes a release for the same tag whose body says the installer
+    // cannot be activated — true of the one CI built, and false of this one,
+    // which is about to overwrite it. Leaving that text in place would tell
+    // everyone the shippable installer is unusable.
+    //
+    // Deliberately outside the existence check above: a failure here must not
+    // fall through to `release create` for a tag that already exists.
+    execFileSync(
+      'gh',
+      ['release', 'edit', tag, '--title', `Chennai Express ${APP_VERSION}`, '--notes', notes],
+      { stdio: 'ignore' },
+    )
+  } else {
     console.log(`  Creating release ${tag}.`)
     execFileSync(
       'gh',
-      ['release', 'create', tag, '--title', `Chennai Express ${APP_VERSION}`, '--notes', ''],
+      ['release', 'create', tag, '--title', `Chennai Express ${APP_VERSION}`, '--notes', notes],
       { stdio: 'inherit' },
     )
   }

@@ -13,11 +13,24 @@ cannot live in a GitHub secret, and CI cannot produce a shippable build.
 `.github/workflows/ci.yml` runs the backend and Flutter suites on every push.
 Green CI is the gate for merging, not for shipping.
 
-`.github/workflows/release.yml` builds an installer on a `v*` tag and attaches
-it to a GitHub Release. **That artefact is deliberately offline-only**: it is
-built with `-CloudDatabaseUrl ''`, so it has no cloud backup, no auto-update,
-and cannot be activated — activation checks a licence that lives in the cloud.
-It exists to prove a tag builds cleanly on a clean machine.
+`.github/workflows/release.yml` builds an installer and attaches it to a GitHub
+Release, on a `v*` tag **or on a push to `main` that changes the version**.
+
+On `main` it first reads `APP_VERSION` and checks whether a release for it
+already exists. If it does, nothing is built — a merge that fixes a doc or a
+test should not mint a release. Bumping the version is what asks for one, which
+makes releasing a deliberate act inside an ordinary merge rather than a separate
+ritual.
+
+**That artefact is deliberately offline-only**: it is built with
+`-CloudDatabaseUrl ''`, so it has no cloud backup, no auto-update, and cannot be
+activated — activation checks a licence that lives in the cloud. It exists to
+prove `main` always packages cleanly on a machine that is not yours.
+
+So there are two different releases with the same version number: the one CI
+attaches to GitHub, which nobody can install, and the one you build locally and
+publish with `publish:release`, which is the one tills download. The GitHub
+Release body says which is which.
 
 The installer a restaurant runs is the one built by step 2 below, on a machine
 that has `backend\.env`.

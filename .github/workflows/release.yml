@@ -21,11 +21,13 @@ name: Release
 
 on:
   push:
+    branches: [main]
     tags: ['v*']
-  # A tag is the normal path; this is for testing the workflow itself without
-  # burning a version number.
+  # For testing the workflow itself without burning a version number.
   workflow_dispatch:
 
+# Never cancel a release in progress. A half-uploaded asset is worse than a
+# duplicate run.
 concurrency:
   group: release-${{ github.ref }}
   cancel-in-progress: false
@@ -34,9 +36,62 @@ permissions:
   contents: write
 
 jobs:
+  # Decides whether there is anything to release.
+  #
+  # A push to main that did not change the version is a doc fix, a test, or a
+  # refactor — real work that should not mint a release. Only a version bump
+  # does, which makes releasing an explicit act inside an ordinary merge.
+  version:
+    name: Check the version
+    runs-on: ubuntu-latest
+    outputs:
+      version: ${{ steps.read.outputs.version }}
+      build: ${{ steps.read.outputs.build }}
+      should_release: ${{ steps.read.outputs.should_release }}
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - id: read
+        shell: bash
+        run: |
+          file=backend/src/lib/version.ts
+
+          # sed, not grep -oP. PCRE is a GNU build option and it refuses to run
+          # under a non-UTF-8 locale — an empty version would then either abort
+          # the run or, without the guard below, try to publish a release called
+          # "v".
+          version=$(sed -n "s/.*APP_VERSION *= *'\([^']*\)'.*/\1/p" "$file")
+          build=$(sed -n 's/.*APP_BUILD_NUMBER *= *\([0-9][0-9]*\).*/\1/p' "$file")
+
+          if [ -z "$version" ] || [ -z "$build" ]; then
+            echo "Could not read the version from $file" >&2
+            exit 1
+          fi
+
+          echo "version=$version" >> "$GITHUB_OUTPUT"
+          echo "build=$build"     >> "$GITHUB_OUTPUT"
+
+          # A tag was pushed deliberately, so it always releases. On main, only
+          # a version with no existing release does — pushing twice without a
+          # bump would otherwise fail on the second run, or overwrite the first.
+          if [[ "$GITHUB_REF" == refs/tags/* ]]; then
+            echo "should_release=true" >> "$GITHUB_OUTPUT"
+          elif gh release view "v$version" >/dev/null 2>&1; then
+            echo "v$version is already released — nothing to do."
+            echo "should_release=false" >> "$GITHUB_OUTPUT"
+          else
+            echo "v$version has no release yet — building."
+            echo "should_release=true" >> "$GITHUB_OUTPUT"
+          fi
+        env:
+          GH_TOKEN: ${{ github.token }}
+
   installer:
     name: Windows installer
     runs-on: windows-latest
+    needs: version
+    if: needs.version.outputs.should_release == 'true'
 
     steps:
       - uses: actions/checkout@v4
@@ -107,10 +162,16 @@ jobs:
           path: dist/chennai-express-setup-*.exe
           retention-days: 30
 
+      # workflow_dispatch produces an artefact but no release: it exists to test
+      # this workflow, and a test run should not mint a version.
       - name: Publish the release
-        if: startsWith(github.ref, 'refs/tags/v')
+        if: github.event_name == 'push'
         uses: softprops/action-gh-release@v2
         with:
+          # On a main push there is no tag yet, so name it. On a tag push this
+          # is the tag that is already there, and naming it again is harmless.
+          tag_name: v${{ needs.version.outputs.version }}
+          name: Chennai Express ${{ needs.version.outputs.version }}
           files: dist/chennai-express-setup-*.exe
           body: |
             ## ⚠️ Offline-only build — not for a restaurant PC
