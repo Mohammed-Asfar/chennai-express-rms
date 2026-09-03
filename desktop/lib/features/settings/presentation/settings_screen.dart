@@ -3,6 +3,7 @@ import '../../../core/theme/app_colors.dart';
 import '../../../core/theme/app_spacing.dart';
 import '../../printers/presentation/printer_settings_screen.dart';
 import '../../sync/presentation/sync_screen.dart';
+import 'about_screen.dart';
 import 'branch_screen.dart';
 import 'tax_billing_screen.dart';
 
@@ -68,6 +69,15 @@ class SettingsScreen extends StatelessWidget {
           onTap: () => Navigator.of(
             context,
           ).push(MaterialPageRoute<void>(builder: (_) => const SyncScreen())),
+        ),
+
+        _SettingsRow(
+          icon: Icons.info_outline,
+          title: 'About',
+          subtitle: 'Version and support contact',
+          onTap: () => Navigator.of(
+            context,
+          ).push(MaterialPageRoute<void>(builder: (_) => const AboutScreen())),
         ),
 
         // Users is deliberately absent. Everyone shares the admin login, and
