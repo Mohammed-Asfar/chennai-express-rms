@@ -152,14 +152,28 @@ if (-not (Test-Path $desktopExe)) {
 # -SkipFlutter packaged a day-old build for several attempts, and the installed
 # app failed with "could not resolve the kernel binary" — an error that says
 # nothing about staleness and sent the investigation into the installer instead.
+#
+# Compared against data\app.so, not the exe. chennai_express_pos.exe is a native
+# loader: it is rebuilt only when the C++ runner or a plugin changes, so a
+# Dart-only change leaves it untouched while app.so — which holds the compiled
+# Dart — moves. One build produced an exe stamped 21:13 and an app.so stamped
+# 23:36, so the check both cried stale on a current build and would have passed
+# a genuinely stale one.
 if ($SkipFlutter) {
+  $compiledDart = Join-Path $desktopDir 'data\app.so'
+  if (-not (Test-Path $compiledDart)) {
+    throw "No compiled Dart at $compiledDart. Run without -SkipFlutter."
+  }
+
   $newestSource = Get-ChildItem (Join-Path $desktop 'lib') -Recurse -Filter '*.dart' |
     Sort-Object LastWriteTime -Descending |
     Select-Object -First 1
 
-  if ($newestSource -and $newestSource.LastWriteTime -gt (Get-Item $desktopExe).LastWriteTime) {
+  $builtAt = (Get-Item $compiledDart).LastWriteTime
+
+  if ($newestSource -and $newestSource.LastWriteTime -gt $builtAt) {
     throw ("The Flutter build is older than the source.`n" +
-           "  built:   $((Get-Item $desktopExe).LastWriteTime)`n" +
+           "  built:   $builtAt  (data\app.so)`n" +
            "  newest:  $($newestSource.LastWriteTime)  ($($newestSource.Name))`n" +
            "Run without -SkipFlutter.")
   }
