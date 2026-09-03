@@ -151,8 +151,16 @@ Only keys on an allow list are read. A rewritten `config.dat` cannot set
 
 ## The service
 
-`sc.exe`, not a third-party wrapper. Windows already restarts a failed service;
-a wrapper would be one more binary to trust, patch, and download at build time.
+WinSW, vendored as `chennai-service.exe`. See `installer/vendor/README.md`.
+
+**Not `sc.exe` alone.** An earlier version registered `node.exe` directly and
+the service was killed after 90 seconds with **error 1053** — `node` never calls
+`StartServiceCtrlDispatcher`, so the Service Control Manager waits for a
+handshake that never arrives. The binary is fine; it does not speak the protocol,
+and correcting the `binPath` quoting does not change that.
+
+WinSW speaks it, and runs `node.exe server.mjs` as a child. Configuration is
+`chennai-service.xml`, written beside it by `service.ps1`.
 
 | | |
 |---|---|

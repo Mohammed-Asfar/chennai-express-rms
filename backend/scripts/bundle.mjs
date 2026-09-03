@@ -136,6 +136,17 @@ console.log('  db/migrations')
 cpSync(join(here, 'service.ps1'), join(out, 'service.ps1'))
 console.log('  service.ps1')
 
+// The service wrapper. node.exe does not speak the Service Control Manager
+// protocol, so a service registered against it directly is killed after 90
+// seconds with error 1053. See installer/vendor/README.md.
+const wrapper = join(root, '..', 'installer', 'vendor', 'chennai-service.exe')
+if (!existsSync(wrapper)) {
+  console.error('  installer/vendor/chennai-service.exe is missing — the service cannot start without it')
+  process.exit(1)
+}
+cpSync(wrapper, join(out, 'chennai-service.exe'))
+console.log('  chennai-service.exe   service wrapper')
+
 // --- 4. the launcher ---
 
 writeFileSync(

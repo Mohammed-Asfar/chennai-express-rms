@@ -46,3 +46,7 @@ installer/staging/
 
 # Built installers.
 dist/
+
+# The service wrapper is vendored deliberately — without it the backend cannot
+# run as a Windows service. See installer/vendor/README.md.
+!installer/vendor/*.exe

@@ -82,35 +82,40 @@ Name: "{group}\{#AppName}"; Filename: "{app}\{#DesktopExe}"
 Name: "{autodesktop}\{#AppName}"; Filename: "{app}\{#DesktopExe}"; Tasks: desktopicon
 
 [Run]
-; Order matters. Configuration is written before the service starts, or the
-; backend comes up with no cloud and no stable signing secret.
-Filename: "powershell.exe"; \
-  Parameters: "-NoProfile -ExecutionPolicy Bypass -File ""{app}\backend\configure.ps1"" -Path ""{app}\backend"""; \
-  StatusMsg: "Preparing configuration..."; \
-  Flags: runhidden waituntilterminated
-
-Filename: "powershell.exe"; \
-  Parameters: "-NoProfile -ExecutionPolicy Bypass -File ""{app}\backend\service.ps1"" install -Path ""{app}\backend"""; \
-  StatusMsg: "Installing the billing service..."; \
-  Flags: runhidden waituntilterminated
-
+; Only the app launch lives here. Configuration and the service are run from
+; [Code] instead, so their exit codes are checked — a [Run] entry that fails is
+; reported nowhere, and an install that skips the service produces an app which
+; looks installed and can never start.
 Filename: "{app}\{#DesktopExe}"; \
   Description: "Start {#AppName}"; \
   Flags: nowait postinstall skipifsilent
 
 [UninstallRun]
-; Before the files go, while service.ps1 still exists.
-Filename: "powershell.exe"; \
-  Parameters: "-NoProfile -ExecutionPolicy Bypass -File ""{app}\backend\service.ps1"" uninstall"; \
+; Through the wrapper, and before the files go: it cannot deregister itself once
+; its own executable has been deleted.
+Filename: "{app}\backend\chennai-service.exe"; Parameters: "stop"; \
+  RunOnceId: "StopService"; Flags: runhidden waituntilterminated
+
+Filename: "{app}\backend\chennai-service.exe"; Parameters: "uninstall"; \
   RunOnceId: "RemoveService"; \
   Flags: runhidden waituntilterminated
 
 [UninstallDelete]
 ; Generated after install, so Setup does not know about them.
 Type: files; Name: "{app}\backend\config.dat"
+Type: files; Name: "{app}\backend\chennai-service.xml"
 Type: filesandordirs; Name: "{app}\backend\logs"
 
 [Code]
+
+{
+  A line beginning with a hash is read as a preprocessor directive, even inside
+  a comment, so the usual character-code escape cannot start a continuation
+  line. Naming it sidesteps that and reads better in the messages below.
+}
+const
+  NL = #13#10;
+
 {
   The local database is deliberately NOT deleted on uninstall.
 
@@ -145,9 +150,98 @@ begin
   begin
     if ResultCode = 0 then
     begin
-      Exec('sc.exe', 'stop {#ServiceName}', '', SW_HIDE, ewWaitUntilTerminated, ResultCode);
+      { Through the wrapper if it is there, so the child node process is stopped
+        too — sc.exe stop reaches the wrapper but need not reach its children. }
+      if FileExists(ExpandConstant('{app}\backend\chennai-service.exe')) then
+        Exec(ExpandConstant('{cmd}'),
+             '/c ""' + ExpandConstant('{app}\backend\chennai-service.exe') + '" stop"',
+             '', SW_HIDE, ewWaitUntilTerminated, ResultCode)
+      else
+        Exec('sc.exe', 'stop {#ServiceName}', '', SW_HIDE, ewWaitUntilTerminated, ResultCode);
+
       { The service manager returns before the process has exited. }
       Sleep(3000);
     end;
+  end;
+end;
+
+{
+  Runs a PowerShell step and returns its exit code.
+
+  Output is captured to a log rather than hidden. When one of these fails, the
+  message is the only thing that tells anyone why — an earlier version ran both
+  steps with runhidden and reported success while installing no service at all.
+}
+function RunPowerShell(const ScriptArgs: String; var Output: String): Integer;
+var
+  ResultCode: Integer;
+  LogFile: String;
+  Lines: TArrayOfString;
+  I: Integer;
+begin
+  LogFile := ExpandConstant('{tmp}\step.log');
+
+  { Out-File -Encoding ASCII, not Tee-Object: Tee-Object writes UTF-16, and
+    LoadStringsFromFile reads bytes, so the message arrives as mojibake — the
+    first attempt at this showed a three-character error nobody could act on. }
+  if not Exec(
+    'powershell.exe',
+    '-NoProfile -ExecutionPolicy Bypass -Command "& { ' + ScriptArgs +
+      ' } *>&1 | Out-File -FilePath ''' + LogFile + ''' -Encoding ASCII"',
+    '', SW_HIDE, ewWaitUntilTerminated, ResultCode) then
+  begin
+    Output := 'PowerShell could not be started.';
+    Result := -1;
+    Exit;
+  end;
+
+  Output := '';
+  if LoadStringsFromFile(LogFile, Lines) then
+  begin
+    for I := 0 to GetArrayLength(Lines) - 1 do
+      Output := Output + Lines[I] + #13#10;
+  end;
+
+  Result := ResultCode;
+end;
+
+{
+  Writes the configuration and installs the service, after the files are copied.
+
+  Both must succeed. Without the service there is no backend, and the app shows
+  nothing but an unreachable-service screen — so a failure here aborts the
+  install rather than leaving a half-working product behind.
+}
+procedure CurStepChanged(CurStep: TSetupStep);
+var
+  Code: Integer;
+  Output: String;
+begin
+  if CurStep <> ssPostInstall then
+    Exit;
+
+  WizardForm.StatusLabel.Caption := 'Preparing configuration...';
+  Code := RunPowerShell(
+    '& ''' + ExpandConstant('{app}\backend\configure.ps1') +
+      ''' -Path ''' + ExpandConstant('{app}\backend') + '''', Output);
+
+  if Code <> 0 then
+  begin
+    MsgBox('The configuration could not be written.' + NL + NL + Output + NL +
+      'Setup will not continue.', mbCriticalError, MB_OK);
+    Abort;
+  end;
+
+  WizardForm.StatusLabel.Caption := 'Installing the billing service...';
+  Code := RunPowerShell(
+    '& ''' + ExpandConstant('{app}\backend\service.ps1') +
+      ''' install -Path ''' + ExpandConstant('{app}\backend') + '''', Output);
+
+  if Code <> 0 then
+  begin
+    MsgBox('The billing service could not be installed.' + NL + NL + Output + NL +
+      'The application cannot run without it. Setup will not continue.',
+      mbCriticalError, MB_OK);
+    Abort;
   end;
 end;

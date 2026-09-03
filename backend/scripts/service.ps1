@@ -71,34 +71,79 @@ function Install-BillingService {
     Uninstall-BillingService
   }
 
-  $node = Join-Path $resolved 'node\node.exe'
-  $server = Join-Path $resolved 'server.mjs'
+  $wrapper = Join-Path $resolved 'chennai-service.exe'
+  if (-not (Test-Path $wrapper)) {
+    throw "The service wrapper is missing from $resolved. Rebuild the bundle."
+  }
 
-  # binPath is passed to CreateService verbatim, so the quoting has to survive
-  # both PowerShell and sc.exe. The space in "Program Files" is why.
-  $binPath = '"{0}" "{1}"' -f $node, $server
+  Write-ServiceConfig -Directory $resolved
 
-  & sc.exe create $ServiceName binPath= $binPath start= auto obj= $Account DisplayName= $DisplayName | Out-Null
-  if ($LASTEXITCODE -ne 0) { throw "sc.exe create failed with exit code $LASTEXITCODE" }
+  # The wrapper registers the service, not sc.exe.
+  #
+  # node.exe never calls StartServiceCtrlDispatcher, so a service pointing
+  # straight at it is killed after 90 seconds with error 1053 - the SCM waits
+  # for a handshake that never comes. The binary is fine; it does not speak the
+  # protocol. WinSW does, and runs node as a child.
+  cmd /c ('""{0}" install"' -f $wrapper) | Out-Null
 
-  & sc.exe description $ServiceName 'Local billing, printing and cloud backup for Chennai Express. Stopping this service stops billing.' | Out-Null
+  # 1073 is ERROR_SERVICE_EXISTS. Reinstalling over an existing service is a
+  # normal upgrade, not a failure.
+  if ($LASTEXITCODE -ne 0 -and $LASTEXITCODE -ne 1073) {
+    throw "The service could not be registered (exit code $LASTEXITCODE)."
+  }
 
-  # Restart on failure: 5s, then 10s, then every 30s, with the count resetting
-  # after a day. A till that crashes at 9pm must be running again before anyone
-  # notices, and PRD 7.5 requires no committed order is lost.
-  & sc.exe failure $ServiceName reset= 86400 actions= restart/5000/restart/10000/restart/30000 | Out-Null
-
-  # The working directory is not settable through sc.exe, and the server resolves
-  # its migrations relative to server.mjs, so it does not need one.
-
-  Write-Host "Installed $ServiceName, running as $Account."
+  Write-Host "Installed $ServiceName."
 
   Protect-InstallDirectory -Directory $resolved
 
-  & sc.exe start $ServiceName | Out-Null
-  if ($LASTEXITCODE -ne 0) { throw "sc.exe start failed with exit code $LASTEXITCODE" }
+  cmd /c ('""{0}" start"' -f $wrapper) | Out-Null
+  if ($LASTEXITCODE -ne 0) {
+    throw "The service was registered but did not start (exit code $LASTEXITCODE). Check $resolved\logs."
+  }
 
   Wait-ForHealth
+}
+
+<#
+.SYNOPSIS
+  Writes the wrapper's configuration.
+
+.DESCRIPTION
+  WinSW reads chennai-service.xml from beside its own executable. Everything the
+  service needs to know lives here rather than in the service registration, so
+  changing it is a file edit and a restart.
+#>
+function Write-ServiceConfig {
+  param([Parameter(Mandatory)][string]$Directory)
+
+  $node = Join-Path $Directory 'node\node.exe'
+  $server = Join-Path $Directory 'server.mjs'
+  $logs = Join-Path $Directory 'logs'
+
+  $xml = @"
+<service>
+  <id>$ServiceName</id>
+  <name>$DisplayName</name>
+  <description>Local billing, printing and cloud backup for Chennai Express. Stopping this service stops billing.</description>
+  <executable>$node</executable>
+  <arguments>"$server"</arguments>
+  <workingdirectory>$Directory</workingdirectory>
+  <startmode>Automatic</startmode>
+  <logpath>$logs</logpath>
+  <log mode="roll-by-size">
+    <sizeThreshold>10240</sizeThreshold>
+    <keepFiles>8</keepFiles>
+  </log>
+  <!-- A till that crashes mid-service must come back on its own. -->
+  <onfailure action="restart" delay="5 sec"/>
+  <onfailure action="restart" delay="10 sec"/>
+  <resetfailure>1 hour</resetfailure>
+</service>
+"@
+
+  $target = Join-Path $Directory 'chennai-service.xml'
+  [IO.File]::WriteAllText($target, $xml)
+  Write-Host "Wrote $target"
 }
 
 function Uninstall-BillingService {
@@ -109,18 +154,25 @@ function Uninstall-BillingService {
     return
   }
 
-  & sc.exe stop $ServiceName | Out-Null
+  # Through the wrapper when it is there, so it can clean up its own state.
+  $wrapper = if ($Path) { Join-Path (Resolve-Path $Path).Path 'chennai-service.exe' } else { $null }
 
-  # sc.exe delete returns before the service manager has finished, and a create
-  # immediately afterwards fails with "marked for deletion".
+  if ($wrapper -and (Test-Path $wrapper)) {
+    cmd /c ('""{0}" stop"' -f $wrapper) | Out-Null
+    Start-Sleep -Seconds 2
+    cmd /c ('""{0}" uninstall"' -f $wrapper) | Out-Null
+  } else {
+    # The wrapper is already gone - an uninstall that removed files first.
+    cmd /c "sc.exe stop $ServiceName" | Out-Null
+    Start-Sleep -Seconds 2
+    cmd /c "sc.exe delete $ServiceName" | Out-Null
+  }
+
+  # Deletion is asynchronous, and a reinstall started too soon fails with
+  # "marked for deletion".
   $deadline = (Get-Date).AddSeconds(30)
   while ((Get-Date) -lt $deadline) {
-    $service = Get-Service-Safe
-    if (-not $service) { break }
-    if ($service.Status -eq 'Stopped') {
-      & sc.exe delete $ServiceName | Out-Null
-      Start-Sleep -Milliseconds 500
-    }
+    if (-not (Get-Service-Safe)) { break }
     Start-Sleep -Milliseconds 500
   }
 
@@ -217,10 +269,22 @@ function Show-Status {
   }
 }
 
-switch ($Action) {
-  'install'   { Install-BillingService }
-  'uninstall' { Uninstall-BillingService }
-  'restart'   { Assert-Elevated; Restart-Service -Name $ServiceName -Force; Show-Status }
-  'harden'    { if (-not $Path) { throw 'Specify -Path.' }; Protect-InstallDirectory -Directory (Resolve-Path $Path).Path }
-  default     { Show-Status }
+try {
+  switch ($Action) {
+    'install'   { Install-BillingService }
+    'uninstall' { Uninstall-BillingService }
+    'restart'   { Assert-Elevated; Restart-Service -Name $ServiceName -Force; Show-Status }
+    'harden'    { if (-not $Path) { throw 'Specify -Path.' }; Protect-InstallDirectory -Directory (Resolve-Path $Path).Path }
+    default     { Show-Status }
+  }
+}
+catch {
+  # One readable line, then a non-zero exit. The installer shows this verbatim,
+  # and a PowerShell exception dump tells whoever is standing at the till
+  # nothing they can act on.
+  Write-Host "FAILED: $($_.Exception.Message)"
+  if ($_.InvocationInfo -and $_.InvocationInfo.ScriptLineNumber) {
+    Write-Host "  at line $($_.InvocationInfo.ScriptLineNumber)"
+  }
+  exit 1
 }
