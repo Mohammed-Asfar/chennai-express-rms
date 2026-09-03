@@ -183,6 +183,19 @@ export function readLicenseState(db: Db): LicenseState | null {
   }
 }
 
+/**
+ * A cloud timestamp as the text SQLite stores.
+ *
+ * postgres decodes TIMESTAMPTZ into a Date; better-sqlite3 binds only numbers,
+ * strings, bigints, buffers and null. This is the same class of mismatch as the
+ * boolean conversion on sync push — what Postgres returns is not what SQLite
+ * accepts — and it lives here, beside the write that would otherwise throw.
+ */
+export function claimedTimestamp(value: Date | string | null): string | null {
+  if (value === null) return null
+  return value instanceof Date ? value.toISOString() : value
+}
+
 export function writeLicenseState(db: Db, state: LicenseState, now = new Date()): void {
   const at = now.toISOString()
   db.prepare(

@@ -8,6 +8,7 @@ import {
   readLicenseState,
   writeLicenseState,
   markVerified,
+  claimedTimestamp,
   machineFingerprint,
   setFingerprintForTesting,
   type LicenseState,
@@ -218,4 +219,51 @@ test('a revocation seen by a check is recorded locally', () => {
   assertEqual(verdict.allowed, true, 'grace period still applies')
   assertEqual(verdict.warn, true, 'and the client is told')
   db.close()
+})
+
+// --- what the cloud actually hands back ---
+
+test('a cloud timestamp is stored, not rejected', () => {
+  // postgres decodes TIMESTAMPTZ into a Date, and better-sqlite3 binds only
+  // numbers, strings, bigints, buffers and null. Passing a claim's activated_at
+  // straight through threw on the local insert *after* the cloud claim had
+  // already succeeded — so the licence read as active in Postgres while
+  // license_state stayed empty, and the app showed "cannot reach the billing
+  // service" on a machine whose network was fine.
+  //
+  // Every other test here passes strings, which is exactly why this shipped.
+  const db = freshDb()
+
+  // What the driver hands back, typed as the route receives it.
+  const fromCloud: { activated_at: Date | string | null } = {
+    activated_at: new Date('2026-09-03T16:15:56.515Z'),
+  }
+
+  // Unconverted, this is the exact call that threw in production. It must not.
+  writeLicenseState(
+    db,
+    state({ activatedAt: claimedTimestamp(fromCloud.activated_at)! }),
+    NOW,
+  )
+
+  const read = readLicenseState(db)
+  assertEqual(read?.activatedAt, '2026-09-03T16:15:56.515Z', 'stored as ISO text')
+
+  // And the verdict must be usable, not merely stored: a Date that reached the
+  // column as something Date.parse cannot read would fail closed and block a
+  // legitimately activated till.
+  const verdict = evaluate(readLicenseState(db), NOW)
+  assertEqual(verdict.allowed, true, 'an activated till may bill')
+  db.close()
+})
+
+test('a timestamp that is already text is left alone', () => {
+  // The driver's type mapping is configurable, and a string must not be
+  // double-converted into something unparseable.
+  assertEqual(
+    claimedTimestamp('2026-09-03T16:15:56.515Z'),
+    '2026-09-03T16:15:56.515Z',
+    'passed through unchanged',
+  )
+  assertEqual(claimedTimestamp(null), null, 'null survives as null')
 })

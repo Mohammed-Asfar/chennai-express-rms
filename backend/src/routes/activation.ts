@@ -1,6 +1,7 @@
 import type { FastifyInstance } from 'fastify'
 import { z } from 'zod'
 import {
+  claimedTimestamp,
   evaluate,
   machineFingerprint,
   markVerified,
@@ -62,8 +63,17 @@ export async function activationRoutes(app: FastifyInstance): Promise<void> {
 
     const fingerprint = machineFingerprint()
 
+    // Whether the cloud was reached, so the failure below can name the right
+    // cause. A claim that succeeds in Postgres and then fails to write locally
+    // reported "check this PC's internet connection" — with the licence already
+    // activated in the cloud and the network demonstrably fine. The message sent
+    // the search to firewalls and connection strings; the fault was a Date the
+    // local insert would not accept.
+    let reachedCloud = false
+
     try {
       const claimed = await claimInCloud(app, key, fingerprint)
+      reachedCloud = true
 
       if (!claimed) {
         // One message for every failure: wrong key, already on another machine,
@@ -79,14 +89,26 @@ export async function activationRoutes(app: FastifyInstance): Promise<void> {
         restaurant: claimed.restaurant,
         fingerprint,
         status: claimed.status as LicenseStatus,
-        activatedAt: claimed.activated_at ?? new Date().toISOString(),
+        activatedAt: claimedTimestamp(claimed.activated_at) ?? new Date().toISOString(),
         lastVerifiedAt: new Date().toISOString(),
       })
 
       request.log.info({ branchCode: claimed.branch_code }, 'activated')
       return evaluate(readLicenseState(app.db))
     } catch (error) {
-      request.log.warn({ err: error }, 'activation failed')
+      request.log.error({ err: error, reachedCloud }, 'activation failed')
+
+      if (reachedCloud) {
+        // The licence is claimed in the cloud but the local cache was not
+        // written. Blaming the network would be false, and it is what made this
+        // fault so hard to find. Retrying is genuinely the right advice: the
+        // claim is idempotent for this machine's own fingerprint, so a second
+        // attempt re-runs the local write against a row that already matches.
+        return reply.status(500).send({
+          error: 'The licence was verified but could not be saved on this PC. Try again.',
+        })
+      }
+
       return reply.status(503).send({
         error: 'Could not reach the licence server. Check this PC’s internet connection.',
       })
@@ -98,7 +120,12 @@ interface ClaimedRow {
   branch_code: string
   restaurant: string
   status: string
-  activated_at: string | null
+
+  // A Date, not a string. postgres decodes TIMESTAMPTZ into a Date object, and
+  // better-sqlite3 binds only numbers, strings, bigints, buffers and null — so
+  // passing this through unconverted throws on the local write, after the cloud
+  // claim has already succeeded. Use claimedTimestamp() to read it.
+  activated_at: Date | string | null
 }
 
 /**
