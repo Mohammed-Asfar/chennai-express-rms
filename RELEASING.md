@@ -2,9 +2,48 @@
 
 How a new version reaches the restaurants.
 
-Built locally, published from local. GitHub's Windows runners are slow for
-Flutter, and the release step is a handful of commands — CI would add a wait and
-a secret to manage without removing any real work.
+Built locally, published from local. The connection string is baked into the
+installer at build time, and this repository is public — so the credential
+cannot live in a GitHub secret, and CI cannot produce a shippable build.
+
+---
+
+## What CI does and does not do
+
+`.github/workflows/ci.yml` runs the backend and Flutter suites on every push.
+Green CI is the gate for merging, not for shipping.
+
+`.github/workflows/release.yml` builds an installer on a `v*` tag and attaches
+it to a GitHub Release. **That artefact is deliberately offline-only**: it is
+built with `-CloudDatabaseUrl ''`, so it has no cloud backup, no auto-update,
+and cannot be activated — activation checks a licence that lives in the cloud.
+It exists to prove a tag builds cleanly on a clean machine.
+
+The installer a restaurant runs is the one built by step 2 below, on a machine
+that has `backend\.env`.
+
+Both workflows pin Flutter to the SDK the product is built with. `stable` floats,
+and a runner that moved ahead of the local SDK once failed on a deprecation whose
+replacement did not exist in the local version — so satisfying CI would have
+broken the build that produces the installer. Raise the pin deliberately, in both
+workflows, together with the local SDK.
+
+---
+
+## 0. Before you build
+
+```bash
+cd backend
+npm run typecheck     # tsc --noEmit
+npm test
+cd ../desktop
+flutter analyze
+flutter test
+```
+
+**Run typecheck, not just the tests.** `npm test` does not run `tsc`, so a full
+green suite says nothing about types — a push with 503 passing tests failed CI on
+two type errors in the tests themselves.
 
 ---
 
@@ -48,34 +87,55 @@ prints the SHA-256:
 its `@CLOUD_DATABASE_URL@` placeholder, so a connection string is never
 committed.
 
-Check `.env` points where you intend before building. A local `localhost:5432`
-URL produces an installer that tells every till to look for a database on its own
-machine.
+Check `.env` points where you intend before building. A `localhost` URL is now a
+hard error rather than a warning — an installer built from one tells every till
+to look for a database on its own PC, and activation fails because licences live
+in the cloud.
 
 Pass `-CloudDatabaseUrl ''` to build an offline-only till: billing works, cloud
-backup and updates do not.
+backup and updates do not. Watch for the line the build prints:
+
+```
+    Cloud backup and updates configured.          <- shippable
+WARNING:   No CLOUD_DATABASE_URL - offline-only    <- not shippable
+```
+
+Do not trust `-SkipFlutter` blindly. The staleness guard compares the newest
+`.dart` file against `data\app.so` — the compiled Dart — and not against
+`chennai_express_pos.exe`, which is a native loader that only changes when the
+C++ runner or a plugin does. A Dart-only change leaves the exe untouched.
 
 ### What the installer does on the restaurant's PC
 
 1. Copies the Flutter app and the bundled backend
-2. Runs `configure.ps1` — generates a JWT secret unique to that installation and
+2. Creates `C:\ProgramData\Chennai Express` with `users-modify`, so a cashier on
+   a standard Windows account can write the database and its `-wal`/`-shm` files
+3. Runs `configure.ps1` — generates a JWT secret unique to that installation and
    DPAPI-encrypts the configuration to that machine
-3. That is all. No service is registered — the app starts the backend itself as a
+4. That is all. No service is registered — the app starts the backend itself as a
    child process when it launches
 
 Uninstalling removes `config.dat` but **not the database**. Bills
 must survive an uninstall — that is also what an operator runs before a clean
 reinstall, and GST requires six years of retention.
 
+A reinstall on the same PC keeps the licence: the activation is cached in
+`license_state` inside that database, and the machine fingerprint is derived
+from the registry's `MachineGuid`, which an uninstall does not touch. Nobody has
+to re-enter a key. Reimaging Windows does change `MachineGuid` — that needs the
+fingerprint cleared in the cloud before the key will bind again.
+
 ---
 
 ## 3. Publish
 
-```bash
+```powershell
 cd backend
-npm run publish:release -- --file ..\dist\chennai-express-setup-1.1.0.exe \
-  --notes "Fixes the round-off on split payments"
+npm run publish:release -- --file ..\dist\chennai-express-setup-1.1.0.exe --notes "Fixes the round-off on split payments"
 ```
+
+One line. A `\` continuation is bash syntax and PowerShell will not join the
+lines — it runs the first half, publishing with no notes.
 
 What it does, in order:
 
