@@ -1,5 +1,7 @@
 import { z } from 'zod'
 import { existsSync, readFileSync } from 'node:fs'
+import { join } from 'node:path'
+import { fileURLToPath } from 'node:url'
 import { loadSecureConfig } from './secure-config.js'
 
 /**
@@ -28,10 +30,32 @@ function loadDotEnv(path = '.env'): void {
   }
 }
 
+/**
+ * Where the database lives when nothing overrides it.
+ *
+ * An installed copy sits under Program Files, which is read-only for anyone
+ * who is not an administrator — creating `data/` beside the server fails with
+ * EPERM and the backend dies before it listens. Per-machine application data
+ * belongs in ProgramData on Windows, which is writable by design.
+ *
+ * A source checkout keeps `./data`, so a developer's database stays in the
+ * working tree where it can be inspected and deleted freely.
+ *
+ * The distinction is the bundle: an installed build is a single `server.mjs`
+ * at the install root, while the source runs as `src/lib/env.ts`.
+ */
+export function defaultDatabasePath(moduleUrl: string = import.meta.url): string {
+  const bundled = fileURLToPath(moduleUrl).endsWith("server.mjs")
+  if (!bundled) return './data/chennai-express.db'
+
+  const base = process.env.PROGRAMDATA ?? 'C:\\ProgramData'
+  return join(base, 'Chennai Express', 'chennai-express.db')
+}
+
 const schema = z.object({
   PORT: z.coerce.number().int().positive().default(4000),
   HOST: z.string().default('127.0.0.1'),
-  DB_PATH: z.string().default('./data/chennai-express.db'),
+  DB_PATH: z.string().default(defaultDatabasePath()),
   LOG_LEVEL: z.enum(['fatal', 'error', 'warn', 'info', 'debug', 'trace']).default('info'),
   NODE_ENV: z.enum(['development', 'production', 'test']).default('development'),
 

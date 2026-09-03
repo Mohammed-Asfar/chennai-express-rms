@@ -142,7 +142,7 @@ writeFileSync(
   join(out, 'start.cmd'),
   [
     '@echo off',
-    'rem Starts the billing service. Run by the Windows service wrapper.',
+    'rem Starts the backend by hand. The app normally spawns it itself.',
     'setlocal',
     'cd /d "%~dp0"',
     'node\\node.exe server.mjs',
@@ -183,6 +183,7 @@ writeFileSync(
 
 // --- 7. prove it starts ---
 
+assertWritableDefaults(out)
 smokeTest(out)
 
 console.log('')
@@ -190,6 +191,32 @@ console.log(`Bundled ${appVersion} (build ${buildNumber}) to dist-bundle/`)
 console.log('')
 console.log('The bundle carries no .env. Configuration is written by the installer')
 console.log('to an encrypted config file — see scripts/README.md.')
+
+/**
+ * Refuses to ship a bundle that would write beside itself.
+ *
+ * An installed copy lives under Program Files, which is read-only for anyone who
+ * is not an administrator. A default of `./data` fails there with EPERM and the
+ * backend dies before it listens — and the smoke test cannot catch it, because
+ * the bundle directory *is* writable while it runs. Only the shipped default can
+ * be checked, so it is checked directly.
+ */
+function assertWritableDefaults(bundleDir) {
+  // The shipped default is asserted in test/env.test.ts, where the function is
+  // importable and both branches can be exercised. This only confirms the
+  // fallback survived bundling — a string check, which is weak: it passes on
+  // dead code. It is a tripwire, not the test.
+  const source = readFileSync(join(bundleDir, 'server.mjs'), 'utf8')
+
+  if (!source.includes('PROGRAMDATA')) {
+    console.error('')
+    console.error('  The bundle has no ProgramData fallback for its database.')
+    console.error('  A default beside the server fails with EPERM under Program Files.')
+    process.exit(1)
+  }
+
+  console.log('  writable defaults     ProgramData fallback present')
+}
 
 /**
  * Starts the bundle and asks it a question.
@@ -219,6 +246,11 @@ function smokeTest(bundleDir) {
   const childEnv = { ...process.env }
   delete childEnv.NODE_ENV
   delete childEnv.CLOUD_DATABASE_URL
+  // DB_PATH is deleted so the bundle's own default is exercised. Setting it here
+  // hid an EPERM: the default was `./data` beside the server, which cannot be
+  // created under Program Files, so every installed copy died before listening
+  // while this test passed.
+  delete childEnv.DB_PATH
 
   const child = spawn(join(bundleDir, 'node', 'node.exe'), ['server.mjs'], {
     cwd: bundleDir,
@@ -228,7 +260,6 @@ function smokeTest(bundleDir) {
       // start with no internet at all.
       PORT: '45999',
       HOST: '127.0.0.1',
-      DB_PATH: join(scratch, 'smoke.db'),
       // NODE_ENV stays deleted above: it defaults to development, which is what
       // a service started without it gets — and development once selected a pino
       // transport that is not in the bundle, so the server threw before it ever
