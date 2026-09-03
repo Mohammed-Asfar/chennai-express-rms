@@ -57,17 +57,34 @@ async function makeTable(ctx: Ctx, name: string, seats = 4): Promise<string> {
 }
 
 /**
- * A time inside today's trading day.
+ * Midday of the current *business* day.
  *
- * Fixed at midday rather than "now": a suite run at 3 AM would otherwise book
- * into the previous business date and the list queries would find nothing.
+ * Not midday of the current calendar day. The trading day starts at 05:00, so
+ * between midnight and 05:00 the business date is still yesterday's — and
+ * midday by the wall clock then falls on the *next* business date. A booking
+ * made there is invisible to a list query asking for today, and the suite
+ * failed every night in that window and passed the rest of the day.
+ *
+ * Anchoring on the business date makes the hour the suite runs irrelevant.
  */
 function atMidday(offsetMinutes = 0): string {
-  const when = new Date()
+  const now = new Date()
+
+  // Before the day starts, the business date is the previous calendar day.
+  const [startHour, startMinute] = SEEDED_DAY_START.split(':').map(Number)
+  const beforeDayStart =
+    now.getHours() < startHour ||
+    (now.getHours() === startHour && now.getMinutes() < startMinute)
+
+  const when = new Date(now)
+  if (beforeDayStart) when.setDate(when.getDate() - 1)
   when.setHours(12, 0, 0, 0)
   when.setMinutes(when.getMinutes() + offsetMinutes)
   return when.toISOString()
 }
+
+/** Matches the seeded `business_day_start`. */
+const SEEDED_DAY_START = '05:00'
 
 interface BookingResponse {
   reservation: {
