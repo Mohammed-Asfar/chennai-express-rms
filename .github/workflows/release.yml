@@ -51,8 +51,11 @@ jobs:
           cache: pnpm
           cache-dependency-path: backend/pnpm-lock.yaml
 
+      # Pinned to the SDK the installer is built with locally. A release must not
+      # be compiled by whatever version stable happened to move to that morning.
       - uses: subosito/flutter-action@v2
         with:
+          flutter-version: 3.41.1
           channel: stable
           cache: true
 

@@ -68,8 +68,18 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
+      # Pinned, not "stable".
+      #
+      # stable floats: CI pulled 3.47 against a project built on 3.41 and failed
+      # on a deprecation that does not exist locally. Worse than the noise is the
+      # direction — the fix it asks for (onReorderItem) is not in 3.41, so
+      # satisfying CI would have broken the build that produces the installer.
+      #
+      # The version that ships the product is the version that should gate it.
+      # Raise this deliberately, together with the local SDK.
       - uses: subosito/flutter-action@v2
         with:
+          flutter-version: 3.41.1
           channel: stable
           cache: true
 
