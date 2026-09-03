@@ -81,7 +81,7 @@ void main() {
 
   group('key entry', () {
     testWidgets('typing is grouped and upper-cased as you go', (tester) async {
-      await tester.pumpWidget(_wrap(const ActivationScreen()));
+      await tester.pumpWidget(_wrapBlocked(const ActivationScreen()));
       await tester.pump();
 
       await tester.enterText(find.byType(TextFormField), 'cxv8g8gwaekd9f');
@@ -91,7 +91,7 @@ void main() {
     });
 
     testWidgets('a key pasted with its dashes is not doubled up', (tester) async {
-      await tester.pumpWidget(_wrap(const ActivationScreen()));
+      await tester.pumpWidget(_wrapBlocked(const ActivationScreen()));
       await tester.pump();
 
       await tester.enterText(find.byType(TextFormField), 'CX-V8G8-GWAE-KD9F');
@@ -101,7 +101,7 @@ void main() {
     });
 
     testWidgets('the field stops at a full key', (tester) async {
-      await tester.pumpWidget(_wrap(const ActivationScreen()));
+      await tester.pumpWidget(_wrapBlocked(const ActivationScreen()));
       await tester.pump();
 
       await tester.enterText(find.byType(TextFormField), 'CXV8G8GWAEKD9FEXTRA');
@@ -111,7 +111,7 @@ void main() {
     });
 
     testWidgets('the screen asks for a key and explains the binding', (tester) async {
-      await tester.pumpWidget(_wrap(const ActivationScreen()));
+      await tester.pumpWidget(_wrapBlocked(const ActivationScreen()));
       await tester.pump();
 
       expect(find.text('Activate this PC'), findsOneWidget);
@@ -156,7 +156,19 @@ void main() {
   });
 }
 
-Widget _wrap(Widget child) => ProviderScope(
+/// The activation screen with its controller pinned to "not activated".
+///
+/// Without the override the real controller runs, and it now waits up to thirty
+/// seconds for a backend that does not exist in a test.
+Widget _wrapBlocked(Widget child) => ProviderScope(
+      overrides: [
+        activationControllerProvider.overrideWith(
+          (ref) => _StubController(
+            const ActivationStatus(allowed: false, activated: false),
+            phase: ActivationPhase.blocked,
+          ),
+        ),
+      ],
       child: MaterialApp(theme: AppTheme.light, home: child),
     );
 
@@ -172,8 +184,9 @@ Widget _wrapWith(Widget child, ActivationStatus status) => ProviderScope(
     );
 
 class _StubController extends ActivationController {
-  _StubController(ActivationStatus status) : super(_FakeRepository(status)) {
-    state = ActivationState(phase: ActivationPhase.allowed, status: status);
+  _StubController(ActivationStatus status, {ActivationPhase phase = ActivationPhase.allowed})
+      : super(_FakeRepository(status)) {
+    state = ActivationState(phase: phase, status: status);
   }
 
   @override

@@ -11,11 +11,17 @@ class ActivationRepository {
 
   /// Asks the backend whether this installation may run.
   ///
-  /// Rethrows only when the backend itself is unreachable — that is a different
-  /// problem with its own screen, and treating it as "not activated" would send
-  /// an activated till to the key entry screen every time the service is slow
-  /// to start.
+  /// Waits for the service first. On a packaged build the app spawns the
+  /// backend itself, and it needs several seconds to apply migrations and
+  /// listen — asking immediately produced "Cannot reach the billing service"
+  /// on a till whose backend was seconds away from being ready, with no retry
+  /// and nothing to do but restart the app.
+  ///
+  /// Rethrows only when the backend is still unreachable after that. It is a
+  /// different problem with its own screen, and treating it as "not activated"
+  /// would send an activated till to the key entry screen.
   Future<ActivationStatus> status() async {
+    await _api.waitUntilHealthy();
     final json = await _api.get('/activation/status');
     return ActivationStatus.fromJson(json);
   }

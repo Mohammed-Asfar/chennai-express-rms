@@ -122,5 +122,26 @@ class ApiClient {
     }
   }
 
+  /// Polls `/health` until the backend answers, or the timeout passes.
+  ///
+  /// A packaged build spawns its own backend, which needs several seconds to
+  /// apply migrations and start listening. Anything that runs before the user
+  /// can act — the activation check, restoring a session — has to wait for it
+  /// rather than report a failure the user cannot do anything about.
+  ///
+  /// Returns false on timeout rather than throwing. The caller decides whether
+  /// that is an error worth showing.
+  Future<bool> waitUntilHealthy({
+    Duration timeout = const Duration(seconds: 30),
+    Duration interval = const Duration(milliseconds: 500),
+  }) async {
+    final deadline = DateTime.now().add(timeout);
+    while (DateTime.now().isBefore(deadline)) {
+      if (await isHealthy()) return true;
+      await Future<void>.delayed(interval);
+    }
+    return false;
+  }
+
   void dispose() => _http.close();
 }
