@@ -1,0 +1,83 @@
+# Tests, on every push and pull request.
+#
+# Runs on Ubuntu deliberately: the suite is platform-independent and a Linux
+# runner costs a tenth of a Windows one. The Windows-specific paths — DPAPI
+# config, the bundled Node, the installer — are exercised by release.yml, which
+# only runs on a tag.
+#
+# No cloud credentials. This repository is public, so a connection string in a
+# secret would be one workflow edit away from being printed to a world-readable
+# log. Cloud tests skip themselves when TEST_CLOUD_DATABASE_URL is unset, which
+# is why the suite passes here without one.
+
+name: CI
+
+on:
+  push:
+    branches: ['**']
+  pull_request:
+
+# A second push to the same branch makes the first run irrelevant.
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+
+jobs:
+  backend:
+    name: Backend
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: backend
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: pnpm/action-setup@v4
+        with:
+          version: 11.18.0
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: pnpm
+          cache-dependency-path: backend/pnpm-lock.yaml
+
+      - name: Install
+        run: pnpm install --frozen-lockfile
+
+      - name: Typecheck
+        run: pnpm typecheck
+
+      # Money, tax and the billing paths. A failure here must stop the build:
+      # a wrong total is the one defect that ships silently and surfaces weeks
+      # later at reconciliation.
+      - name: Test
+        run: pnpm test
+
+  desktop:
+    name: Desktop
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: desktop
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: subosito/flutter-action@v2
+        with:
+          channel: stable
+          cache: true
+
+      - name: Install
+        run: flutter pub get
+
+      - name: Analyze
+        run: flutter analyze
+
+      - name: Test
+        run: flutter test

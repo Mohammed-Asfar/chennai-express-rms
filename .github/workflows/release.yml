@@ -1,0 +1,138 @@
+# Builds the Windows installer on a tag, and attaches it to a GitHub Release.
+#
+# WHAT THIS PRODUCES IS NOT SHIPPABLE TO A TILL.
+#
+# The installer bakes CLOUD_DATABASE_URL in at build time, and this repository is
+# public, so no Neon credential is available here. The result is an offline-only
+# build: no cloud backup, no auto-update, and — because licences live in the
+# cloud — no way past the activation screen.
+#
+# It exists to prove the whole chain compiles and packages on a clean machine,
+# and to archive an artefact per tag. The installer a restaurant actually runs is
+# still built locally:
+#
+#   .\installer\build.ps1
+#   cd backend; npm run publish:release -- --file ... --notes "..."
+#
+# The release notes say the same thing, so an artefact downloaded from the
+# Releases page cannot be mistaken for a shippable one.
+
+name: Release
+
+on:
+  push:
+    tags: ['v*']
+  # A tag is the normal path; this is for testing the workflow itself without
+  # burning a version number.
+  workflow_dispatch:
+
+concurrency:
+  group: release-${{ github.ref }}
+  cancel-in-progress: false
+
+permissions:
+  contents: write
+
+jobs:
+  installer:
+    name: Windows installer
+    runs-on: windows-latest
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: pnpm/action-setup@v4
+        with:
+          version: 11.18.0
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: pnpm
+          cache-dependency-path: backend/pnpm-lock.yaml
+
+      - uses: subosito/flutter-action@v2
+        with:
+          channel: stable
+          cache: true
+
+      - name: Install backend dependencies
+        working-directory: backend
+        run: pnpm install --frozen-lockfile
+
+      # The same gate as CI. A tag must not produce an installer whose backend
+      # fails its own tests.
+      - name: Test backend
+        working-directory: backend
+        run: pnpm test
+
+      - name: Install desktop dependencies
+        working-directory: desktop
+        run: flutter pub get
+
+      - name: Test desktop
+        working-directory: desktop
+        run: flutter test
+
+      - name: Install Inno Setup
+        run: choco install innosetup --no-progress -y
+
+      # -CloudDatabaseUrl '' is explicit, not a default. build.ps1 falls back to
+      # backend\.env, which does not exist here; passing the empty string states
+      # the intent and takes the script's documented offline-only path instead of
+      # relying on a missing file.
+      - name: Build the installer
+        shell: pwsh
+        run: .\installer\build.ps1 -CloudDatabaseUrl ''
+
+      - name: Checksum
+        id: hash
+        shell: pwsh
+        run: |
+          $exe = Get-ChildItem dist\chennai-express-setup-*.exe | Select-Object -First 1
+          $sha = (Get-FileHash -Algorithm SHA256 $exe).Hash.ToLower()
+          $mb  = [Math]::Round($exe.Length / 1MB, 1)
+          "path=$($exe.FullName)" >> $env:GITHUB_OUTPUT
+          "sha=$sha"              >> $env:GITHUB_OUTPUT
+          "size=$mb"              >> $env:GITHUB_OUTPUT
+          Write-Host "$($exe.Name)  $mb MB  sha256 $sha"
+
+      # Kept for a workflow_dispatch run, which creates no release.
+      - uses: actions/upload-artifact@v4
+        with:
+          name: chennai-express-installer
+          path: dist/chennai-express-setup-*.exe
+          retention-days: 30
+
+      - name: Publish the release
+        if: startsWith(github.ref, 'refs/tags/v')
+        uses: softprops/action-gh-release@v2
+        with:
+          files: dist/chennai-express-setup-*.exe
+          body: |
+            ## ⚠️ Offline-only build — not for a restaurant PC
+
+            This installer was built by CI and carries **no cloud connection
+            string**. It cannot back up, cannot auto-update, and **cannot be
+            activated**, because licences live in the cloud. It stops at the
+            activation screen.
+
+            It is here to show the tag builds and packages cleanly.
+
+            The installer for a till is built locally, where the Neon
+            credential lives:
+
+            ```
+            .\installer\build.ps1
+            cd backend
+            npm run publish:release -- --file dist\chennai-express-setup-<version>.exe --notes "..."
+            ```
+
+            ---
+
+            **This artefact**
+            `${{ steps.hash.outputs.size }} MB`
+            `sha256 ${{ steps.hash.outputs.sha }}`
+
+            The SHA-256 is not the one tills verify. That belongs to the
+            locally built installer recorded in `app_releases`.
