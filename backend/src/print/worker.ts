@@ -1,6 +1,6 @@
 import type { FastifyBaseLogger } from 'fastify'
 import type { Db } from '../db/client.js'
-import { drainPending } from './queue.js'
+import { drainPending, prunePrintJobs } from './queue.js'
 
 /**
  * Retries print jobs that have not gone out yet.
@@ -23,9 +23,31 @@ export interface PrintWorker {
  * at the pass is not waiting on a whole minute. */
 const INTERVAL_MS = 20_000
 
+/** Old jobs are not urgent. Sweeping them on the print tick would run a DELETE
+ *  three times a minute for a table that changes slowly. */
+const PRUNE_EVERY_MS = 60 * 60 * 1000
+
 export function createPrintWorker(db: Db, log: FastifyBaseLogger): PrintWorker {
   let timer: NodeJS.Timeout | undefined
+  let pruneTimer: NodeJS.Timeout | undefined
   let running = false
+
+  /**
+   * Drops finished jobs past the retention window.
+   *
+   * `print_jobs` is never synced and nothing deleted from it, so it grew for
+   * the life of an install — every bill and every KOT keeping its full ESC/POS
+   * payload for ever.
+   */
+  const prune = (): void => {
+    try {
+      const removed = prunePrintJobs(db)
+      if (removed > 0) log.info({ removed }, 'old print jobs pruned')
+    } catch (error) {
+      // Housekeeping. A failure here must never affect printing or a sale.
+      log.error({ err: error }, 'print job prune failed')
+    }
+  }
 
   const tick = async (): Promise<void> => {
     // A slow spooler must not let two sweeps overlap and send the same ticket
@@ -51,10 +73,18 @@ export function createPrintWorker(db: Db, log: FastifyBaseLogger): PrintWorker {
       timer = setInterval(() => void tick(), INTERVAL_MS)
       // Does not hold the process open on its own.
       timer.unref?.()
+
+      // At boot as well as hourly: a till that is switched off each night would
+      // otherwise never reach the first hourly sweep.
+      prune()
+      pruneTimer = setInterval(prune, PRUNE_EVERY_MS)
+      pruneTimer.unref?.()
     },
     stop(): void {
       if (timer) clearInterval(timer)
       timer = undefined
+      if (pruneTimer) clearInterval(pruneTimer)
+      pruneTimer = undefined
     },
   }
 }

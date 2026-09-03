@@ -228,3 +228,38 @@ export async function drainPending(db: Db, branchId?: string): Promise<number> {
   }
   return printed
 }
+
+/**
+ * How long a finished print job is kept.
+ *
+ * Long enough that "reprint yesterday's bill" and a Monday-morning look at
+ * Friday's queue both still work; short enough that the table does not grow
+ * without limit. A bill's payload is the full ESC/POS byte stream, so a busy
+ * branch adds a few megabytes a month to a database that is otherwise small.
+ */
+export const KEEP_FINISHED_DAYS = 30
+
+/**
+ * Deletes finished print jobs older than the retention window.
+ *
+ * Only `printed` and `cancelled` rows. A `pending` job has not gone out yet and
+ * a `failed` one is what the queue panel offers a Retry for — deleting either
+ * would silently discard a ticket someone is still waiting for.
+ *
+ * Nothing here is a financial record: print jobs are never synced to the cloud
+ * and the bill itself lives in `bills`. Removing a printed job loses the byte
+ * stream, not the sale.
+ */
+export function prunePrintJobs(db: Db, now = new Date()): number {
+  const cutoff = new Date(now.getTime() - KEEP_FINISHED_DAYS * 24 * 60 * 60 * 1000).toISOString()
+
+  const result = db
+    .prepare(
+      `DELETE FROM print_jobs
+        WHERE status IN ('printed', 'cancelled')
+          AND COALESCE(printed_at, updated_at) < ?`,
+    )
+    .run(cutoff)
+
+  return result.changes
+}

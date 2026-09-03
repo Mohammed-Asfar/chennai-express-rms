@@ -5,6 +5,7 @@ import { migrate } from '../src/db/migrate.js'
 import { seedIfEmpty } from '../src/db/seed.js'
 import { buildServer } from '../src/server.js'
 import { loadEnv } from '../src/lib/env.js'
+import { prunePrintJobs, KEEP_FINISHED_DAYS } from '../src/print/queue.js'
 import { test, assertEqual } from './helpers.js'
 
 const env = loadEnv({ NODE_ENV: 'test', DB_PATH: ':memory:', SEED_ADMIN_PASSWORD: 'admin123' })
@@ -361,4 +362,97 @@ test('the sweep leaves a cancelled job alone', async () => {
   assertEqual(statusOf(ctx, printed), 'printed')
 
   await ctx.app.close()
+})
+
+// --- retention ---
+
+/**
+ * Inserts a job directly, with a chosen age and status.
+ *
+ * The API will not create a job dated last month, and the point of these cases
+ * is what happens to one that is.
+ */
+function insertJob(
+  db: Db,
+  branchId: string,
+  status: string,
+  daysOld: number,
+): string {
+  const id = randomUUID()
+  const at = new Date(Date.now() - daysOld * 24 * 60 * 60 * 1000).toISOString()
+  db.prepare(
+    `INSERT INTO print_jobs
+       (id, branch_id, printer_id, type, ref_id, payload, status, attempts,
+        printed_at, created_at, updated_at)
+     VALUES (?, ?, NULL, 'bill', NULL, 'x', ?, 0, ?, ?, ?)`,
+  ).run(id, branchId, status, status === 'printed' ? at : null, at, at)
+  return id
+}
+
+test('printed jobs past the window are dropped', async () => {
+  const { db, branchId, app } = await setup()
+  const old = insertJob(db, branchId, 'printed', KEEP_FINISHED_DAYS + 1)
+  const recent = insertJob(db, branchId, 'printed', 1)
+
+  const removed = prunePrintJobs(db)
+
+  assertEqual(removed, 1, 'one job removed')
+  assertEqual(
+    db.prepare('SELECT count(*) n FROM print_jobs WHERE id = ?').get(old).n,
+    0,
+    'the old job is gone',
+  )
+  assertEqual(
+    db.prepare('SELECT count(*) n FROM print_jobs WHERE id = ?').get(recent).n,
+    1,
+    'the recent one is kept',
+  )
+  await app.close()
+})
+
+test('a pending job is never pruned, however old', async () => {
+  // The ticket has not gone out. A printer offline over a long weekend, or a
+  // branch that reopens after a fortnight, must still print what it owes —
+  // deleting it here would lose an order the kitchen never saw.
+  const { db, branchId, app } = await setup()
+  const stuck = insertJob(db, branchId, 'pending', KEEP_FINISHED_DAYS * 10)
+
+  prunePrintJobs(db)
+
+  assertEqual(
+    db.prepare('SELECT count(*) n FROM print_jobs WHERE id = ?').get(stuck).n,
+    1,
+    'still queued',
+  )
+  await app.close()
+})
+
+test('a failed job is never pruned, however old', async () => {
+  // Failed is what the queue panel offers a Retry for. Pruning it would remove
+  // the row and the button along with it, with nothing saying why.
+  const { db, branchId, app } = await setup()
+  const failed = insertJob(db, branchId, 'failed', KEEP_FINISHED_DAYS * 10)
+
+  prunePrintJobs(db)
+
+  assertEqual(
+    db.prepare('SELECT count(*) n FROM print_jobs WHERE id = ?').get(failed).n,
+    1,
+    'still retryable',
+  )
+  await app.close()
+})
+
+test('pruning does not touch the bill the job printed', async () => {
+  // print_jobs holds a byte stream, not a financial record. The sale lives in
+  // bills, and GST retention applies to that — this must never be a route to
+  // deleting one.
+  const { db, branchId, app } = await setup()
+  const before = db.prepare('SELECT count(*) n FROM bills').get().n
+  insertJob(db, branchId, 'printed', KEEP_FINISHED_DAYS + 1)
+
+  prunePrintJobs(db)
+
+  assertEqual(db.prepare('SELECT count(*) n FROM bills').get().n, before, 'bills untouched')
+  await app.close()
 })
