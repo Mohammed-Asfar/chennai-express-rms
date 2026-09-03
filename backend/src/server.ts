@@ -7,6 +7,7 @@ import Fastify, {
 } from 'fastify'
 import cors from '@fastify/cors'
 import websocket from '@fastify/websocket'
+import { fileURLToPath } from 'node:url'
 import { ZodError } from 'zod'
 import type { Db } from './db/client.js'
 import type { Env } from './lib/env.js'
@@ -39,7 +40,12 @@ type LoggerConfig = NonNullable<FastifyServerOptions['logger']>
 
 function loggerConfig(env: Env): LoggerConfig {
   if (env.NODE_ENV === 'test') return false
-  if (env.NODE_ENV === 'development') {
+
+  // pino-pretty is loaded by name at runtime, so a bundler cannot see it and it
+  // is not in the shipped bundle. Asking for it there throws "unable to
+  // determine transport target" before the server ever listens — so the pretty
+  // transport is used only when running from source.
+  if (env.NODE_ENV === 'development' && !isBundled()) {
     return {
       level: env.LOG_LEVEL,
       transport: {
@@ -48,7 +54,19 @@ function loggerConfig(env: Env): LoggerConfig {
       },
     }
   }
+
   return { level: env.LOG_LEVEL }
+}
+
+/**
+ * True when running from the shipped bundle rather than the source tree.
+ *
+ * The bundle is a single `server.mjs` at the install root; the source runs as
+ * `src/server.ts`. Anything that only exists in `node_modules` at development
+ * time has to be gated on this.
+ */
+function isBundled(): boolean {
+  return fileURLToPath(import.meta.url).endsWith('server.mjs')
 }
 
 export async function buildServer({ db, env, sync }: BuildOptions): Promise<FastifyInstance> {

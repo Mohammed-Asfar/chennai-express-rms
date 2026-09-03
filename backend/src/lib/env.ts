@@ -1,5 +1,6 @@
 import { z } from 'zod'
 import { existsSync, readFileSync } from 'node:fs'
+import { loadSecureConfig } from './secure-config.js'
 
 /**
  * Loads `.env` into `process.env` without a dependency.
@@ -51,7 +52,12 @@ const schema = z.object({
 export type Env = z.infer<typeof schema> & { JWT_SECRET: string }
 
 export function loadEnv(source: NodeJS.ProcessEnv = process.env): Env {
-  if (source === process.env) loadDotEnv()
+  if (source === process.env) {
+    // An installed service reads config.dat, encrypted to this machine. A
+    // development checkout has no such file and falls through to .env.
+    loadSecureConfig()
+    loadDotEnv()
+  }
   const parsed = schema.safeParse(source)
   if (!parsed.success) {
     const issues = parsed.error.issues.map((i) => `  ${i.path.join('.')}: ${i.message}`).join('\n')

@@ -15,6 +15,7 @@
     "start": "node dist/index.js",
     "typecheck": "tsc --noEmit",
     "bundle": "node scripts/bundle.mjs",
+    "configure": "tsx src/db/configure.ts",
     "bundle:smoke": "node scripts/bundle.mjs --smoke-only",
     "test": "tsx test/run.ts",
     "db:migrate": "tsx src/db/migrate.ts",

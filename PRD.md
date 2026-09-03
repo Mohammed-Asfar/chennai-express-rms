@@ -806,10 +806,21 @@ Accepted deliberately, listed so they are not mistaken for oversights:
 | NFR-6 | Backend availability | Auto-restarts on crash; health check exposed |
 | NFR-7 | Data durability | SQLite WAL mode; nightly local backup |
 | NFR-8 | Install | Single installer; Node runs as an auto-starting Windows service |
+| NFR-9 | Configuration secrecy | No connection string or signing secret readable on the billing PC |
+| NFR-10 | Install directory | Readable and writable only by Administrators and SYSTEM |
 
 **On NFR-6:** because Flutter holds no data, the backend being down means a
 non-functional UI. Auto-restart and a health check with a clear error state are
 required, not optional.
+
+**On NFR-9 and NFR-10, and their limit.** The configuration is DPAPI-encrypted to
+the machine, so a file copied elsewhere is useless, and the install directory is
+locked to Administrators and SYSTEM so a cashier cannot read or replace anything.
+
+Neither stops an administrator on the billing PC: the service must decrypt the
+config to run, so anyone able to execute code as the service account can read what
+it reads. That is true of every scheme short of a hardware security module. The
+ACL is the load-bearing control; the encryption stops the file travelling.
 
 ---
 

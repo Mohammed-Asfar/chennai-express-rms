@@ -251,17 +251,32 @@ guessed at scale, and the fingerprint binding is the real control.
 
 ---
 
-## 8. Known limitation
+## 8. What an installed till actually protects
 
-Until the app is packaged, `.env` is a readable file on the billing PC. Someone
-who can edit it can point the backend at their own database and mint themselves a
-licence.
+Packaging is in place. On a PC installed with `service.ps1 install`:
 
-Activation is still worth having now — it stops the realistic threat, which is a
-restaurant copying the folder to a second till. But it is not airtight until
-packaging lands (PRD step 12): Node bundled to a single binary, the connection
-string embedded rather than sitting in a file, and the install directory
-ACL-locked so a non-administrator cannot write to it.
+| | |
+|---|---|
+| Source code | Not present — one bundled `server.mjs` |
+| Connection string | In `config.dat`, DPAPI-encrypted to that machine |
+| JWT secret | Generated per installation |
+| Install directory | Readable only by Administrators and SYSTEM |
+
+A cashier cannot read the connection string, replace the server, or point the
+backend at their own database. A `config.dat` copied to another PC will not
+decrypt.
+
+**What it still does not stop: an administrator on the billing PC.** The service
+must decrypt the config to work, so anyone who can run code as the service
+account can read what the service reads. That is true of every scheme short of a
+hardware security module, and it is the reason the ACL — not the encryption — is
+the load-bearing part.
+
+The threat this is built for is a restaurant copying the install to a second
+till, or a curious member of staff opening files. It is not built to withstand a
+determined attacker with administrator rights on hardware they own.
+
+See `backend/scripts/README.md` for the install steps.
 
 ---
 

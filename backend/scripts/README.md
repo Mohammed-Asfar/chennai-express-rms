@@ -96,14 +96,97 @@ megabytes a billing PC will never load.
 
 ---
 
+## Installing on a billing PC
+
+Three steps, all run elevated, in this order.
+
+```powershell
+# 1. Encrypt the configuration to this machine
+npm run configure -- --dir "C:\Program Files\Chennai Express\backend"
+
+# 2. Install the service, lock the directory, and start it
+powershell -File scripts\service.ps1 install -Path "C:\Program Files\Chennai Express\backend"
+
+# 3. Confirm
+powershell -File scripts\service.ps1 status
+```
+
+`install` hardens the directory and waits for `/health` before returning, so a
+broken install fails while you are still standing at the till.
+
+Other actions: `uninstall`, `restart`, `harden`, `status`.
+
+---
+
+## Configuration
+
+`config.dat` sits beside `server.mjs`, encrypted with Windows DPAPI at machine
+scope. `npm run configure` reads the current `.env`, encrypts what the service
+needs, and writes it.
+
+**The JWT secret is generated per installation.** A token forged on one
+restaurant's PC is meaningless on another.
+
+Loading order, first match wins:
+
+1. The process environment — an operator or the service definition
+2. `config.dat` — an installed service
+3. `.env` — development only
+
+**What this protects against:** the file copied to another machine (DPAPI
+refuses), and a member of staff opening it in Notepad.
+
+**What it does not:** an administrator on the billing PC. The service must
+decrypt it to work, so anyone who can run code as the service account can read
+what the service reads. Nothing short of a hardware module changes that — the
+directory ACL is what stops a non-administrator getting that far.
+
+A config that cannot be decrypted throws with a message naming the cause, rather
+than starting half-configured and behaving strangely later.
+
+Only keys on an allow list are read. A rewritten `config.dat` cannot set
+`NODE_OPTIONS` or `PATH` and get code loaded into the service.
+
+---
+
+## The service
+
+`sc.exe`, not a third-party wrapper. Windows already restarts a failed service;
+a wrapper would be one more binary to trust, patch, and download at build time.
+
+| | |
+|---|---|
+| Name | `ChennaiExpressRMS` |
+| Account | `LocalSystem` |
+| Startup | Automatic |
+| On failure | Restart after 5s, 10s, then every 30s; count resets daily |
+
+**Why LocalSystem.** The service binds only to `127.0.0.1` and touches nothing
+outside its own directory and the print spooler, but it must start before anyone
+logs in and survive the cashier signing out. A per-user account cannot do either,
+and a low-privilege service account cannot reach a printer installed for another
+user — which is the first thing a restaurant does.
+
+---
+
+## Directory ACLs
+
+`harden` runs as part of `install`, and can be run alone.
+
+Inheritance is disabled first — `Program Files` grants Users read access, and an
+inherited allow rule cannot be removed, only overridden. `Users`, `Everyone`,
+`Authenticated Users` and `INTERACTIVE` are then removed, leaving
+`Administrators` and `SYSTEM`.
+
+**This is the step that makes everything above it mean something.** Without it a
+cashier can read `config.dat`, replace `server.mjs`, or point the backend at
+their own database, and the licence check is decoration.
+
+---
+
 ## Still to build
 
 | | |
 |---|---|
-| Windows service wrapper | WinSW pointing at `start.cmd`; auto-start, restart on crash |
-| Config encryption | The installer writes the connection string; the service reads it |
-| Directory ACLs | The service account reads, the cashier cannot. **This is what makes the licence check meaningful** |
 | Inno Setup installer | One `.exe`, plus its SHA-256 for the `app_releases` row |
-
-Until the ACL work lands, a technical user on the billing PC can still point the
-backend at their own database. See `LICENSING.md` §8.
+| Release publishing | GitHub Actions on a `v*` tag → upload → insert the release row |

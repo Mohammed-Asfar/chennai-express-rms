@@ -129,6 +129,13 @@ copyRuntimeDeps(out)
 cpSync(join(root, 'db'), join(out, 'db'), { recursive: true })
 console.log('  db/migrations')
 
+// --- 3b. the service tooling ---
+
+// Ships with the bundle so a till can be diagnosed, hardened or reinstalled
+// without the source tree.
+cpSync(join(here, 'service.ps1'), join(out, 'service.ps1'))
+console.log('  service.ps1')
+
 // --- 4. the launcher ---
 
 writeFileSync(
@@ -206,18 +213,27 @@ function smokeTest(bundleDir) {
   const logPath = join(scratch, 'smoke.log')
   const log = openSync(logPath, 'w')
 
+  // Built by copying rather than spreading with overrides, so NODE_ENV can be
+  // genuinely absent. An empty string is not the same thing — it fails schema
+  // validation, where absent falls back to the default.
+  const childEnv = { ...process.env }
+  delete childEnv.NODE_ENV
+  delete childEnv.CLOUD_DATABASE_URL
+
   const child = spawn(join(bundleDir, 'node', 'node.exe'), ['server.mjs'], {
     cwd: bundleDir,
     env: {
-      ...process.env,
+      ...childEnv,
       // A port nothing else is likely to hold, and no cloud: the bundle must
       // start with no internet at all.
       PORT: '45999',
       HOST: '127.0.0.1',
       DB_PATH: join(scratch, 'smoke.db'),
-      NODE_ENV: 'production',
+      // NODE_ENV stays deleted above: it defaults to development, which is what
+      // a service started without it gets — and development once selected a pino
+      // transport that is not in the bundle, so the server threw before it ever
+      // listened. Testing only the production path missed that entirely.
       JWT_SECRET: 'smoke-test-secret-not-used-for-anything-real',
-      CLOUD_DATABASE_URL: '',
     },
     stdio: ['ignore', log, log],
     detached: false,
