@@ -331,11 +331,21 @@ class _CategoryTileState extends State<_CategoryTile> {
                         fontWeight:
                             widget.selected ? FontWeight.w600 : FontWeight.w400,
                       ),
-                      maxLines: 1,
+                      // Two lines before truncating. On one line the two
+                      // "Fried Rice & Noodles" categories both became
+                      // "Fried Rice & Noodle…", so the only thing telling the
+                      // veg list from the non-veg one was its item count.
+                      maxLines: 2,
                       overflow: TextOverflow.ellipsis,
                     ),
                   ),
-                  Text('${category.itemCount}', style: theme.textTheme.bodySmall),
+                  // The count sat against the last letter of the name with no
+                  // gap at all, reading as part of the word.
+                  const SizedBox(width: AppSpacing.sm),
+                  Text(
+                    '${category.itemCount}',
+                    style: theme.textTheme.bodySmall?.copyWith(color: AppColors.inkMuted),
+                  ),
                   if (_hovered || widget.selected)
                     PopupMenuButton<String>(
                       icon: const Icon(Icons.more_horiz, size: 18),
