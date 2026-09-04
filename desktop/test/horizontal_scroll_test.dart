@@ -96,8 +96,18 @@ void main() {
     await tester.pumpWidget(_harness());
     await tester.pumpAndSettle();
 
-    final scrollbar = tester.widget<Scrollbar>(find.byType(Scrollbar));
+    final scrollbar = tester.widget<RawScrollbar>(find.byType(RawScrollbar));
     expect(scrollbar.thumbVisibility, isTrue);
+  });
+
+  testWidgets('the scrollbar is a hairline, not a bar', (tester) async {
+    // At the default thickness it sits under the chips looking like another
+    // control, competing with the categories it is only meant to hint at.
+    await tester.pumpWidget(_harness());
+    await tester.pumpAndSettle();
+
+    final scrollbar = tester.widget<RawScrollbar>(find.byType(RawScrollbar));
+    expect(scrollbar.thickness, lessThanOrEqualTo(4));
   });
 
   testWidgets('a trackpad swipe is not doubled up', (tester) async {

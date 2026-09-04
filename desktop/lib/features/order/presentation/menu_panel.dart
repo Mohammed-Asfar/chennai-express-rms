@@ -53,10 +53,10 @@ class _MenuPanelState extends ConsumerState<MenuPanel> {
         categories.when(
           loading: () => const SizedBox.shrink(),
           error: (_, __) => const SizedBox.shrink(),
-          // Taller than the chips: the scrollbar sits underneath them, and
-          // without the room it would be drawn over the chip labels.
+          // Just enough over the chips for the hairline scrollbar to sit
+          // clear of them without being drawn over the labels.
           data: (list) => SizedBox(
-            height: 52,
+            height: 46,
             child: HorizontalScroller(
               padding: const EdgeInsets.symmetric(horizontal: AppSpacing.lg),
               child: Row(

@@ -1,5 +1,10 @@
 import 'package:flutter/material.dart';
 import 'package:flutter/gestures.dart';
+import '../theme/app_colors.dart';
+import '../theme/app_spacing.dart';
+
+/// Thin enough to read as a hint rather than a control.
+const double _thickness = 4;
 
 /// A horizontal strip that a mouse wheel can actually move.
 ///
@@ -58,11 +63,23 @@ class _HorizontalScrollerState extends State<HorizontalScroller> {
   Widget build(BuildContext context) {
     return Listener(
       onPointerSignal: _onPointerSignal,
-      child: Scrollbar(
+      child: RawScrollbar(
         controller: _controller,
         // Always visible: a strip that silently hides half the menu is the bug
         // this widget exists to fix. Staff need to see there is more.
         thumbVisibility: true,
+        // A hairline, not a bar. The default is sized for a page-height
+        // scrollbar and under a row of chips it reads as another control —
+        // competing with the categories it is only meant to hint at.
+        thickness: _thickness,
+        radius: const Radius.circular(_thickness / 2),
+        // borderStrong measured 1.49:1 against the canvas — a thumb nobody can
+        // see defeats the point of showing one. inkFaint is 2.65:1: visible at
+        // a glance, still quiet enough not to compete with the chips.
+        thumbColor: AppColors.inkFaint,
+        // Clear of the chips above it, so the two never touch.
+        crossAxisMargin: 2,
+        mainAxisMargin: AppSpacing.lg,
         // Mouse included, so the strip can also be dragged directly.
         child: ScrollConfiguration(
           behavior: const _DragScrollBehavior(),
