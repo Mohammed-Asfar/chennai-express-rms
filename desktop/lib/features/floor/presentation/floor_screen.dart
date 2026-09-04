@@ -354,16 +354,17 @@ class FloorScreen extends ConsumerWidget {
     }
   }
 
-  /// A free table starts an order. An occupied one opens its order, or asks
-  /// which party when more than one is seated.
+  /// A free table starts an order. An occupied one asks which party is meant,
+  /// including the option of a new one.
+  ///
+  /// The picker is shown for one party as well as for several. Opening the only
+  /// party's order directly reads like a shortcut, but it left no way to seat a
+  /// second party at all: the option to start one lives in this dialog, and the
+  /// dialog only appeared once two parties already existed — which nothing
+  /// could bring about.
   Future<void> _openTable(BuildContext context, WidgetRef ref, DiningTable table) async {
-    if (table.parties.isEmpty) {
+    if (!table.needsPartyChoice) {
       await _startOrder(context, ref, table);
-      return;
-    }
-
-    if (table.parties.length == 1) {
-      await _openOrder(context, ref, table.parties.first.orderId);
       return;
     }
 
@@ -526,7 +527,10 @@ class _PartyChoice {
   final bool newParty;
 }
 
-/// Shown when a table already holds more than one party.
+/// Shown whenever a table already holds anyone.
+///
+/// Including a single party: this dialog is the only route to seating another,
+/// so skipping it for one made a second party impossible to create.
 class _PartyPicker extends StatelessWidget {
   const _PartyPicker({required this.table});
 

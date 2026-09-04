@@ -57,6 +57,14 @@ class DiningTable {
   bool get isFree => status == TableStatus.free;
   bool get hasMultipleParties => parties.length > 1;
 
+  /// Whether tapping this table has to ask who is meant.
+  ///
+  /// True for one party as well as several. The picker is the only place that
+  /// offers "seat another party", so a table holding exactly one person must
+  /// still show it — opening that person's order directly, as a shortcut, left
+  /// no way to seat a second party at all.
+  bool get needsPartyChoice => parties.isNotEmpty;
+
   factory DiningTable.fromJson(Map<String, dynamic> json) => DiningTable(
         id: json['id'] as String,
         sectionId: json['sectionId'] as String,
