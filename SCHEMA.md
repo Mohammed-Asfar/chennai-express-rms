@@ -858,7 +858,7 @@ their cloud reports are complete when they are not.
 | Trigger | Timing |
 |---|---|
 | After a write | ~2s debounce, so a burst of order edits becomes one push |
-| Idle heartbeat | Every 60s |
+| Idle heartbeat | Every 5 min |
 | On reconnect | Immediately, rather than waiting for the next tick |
 | On startup | Whatever was pending when the process last stopped |
 

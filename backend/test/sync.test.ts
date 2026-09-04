@@ -929,3 +929,45 @@ test('changing a setting queues it again', () => {
 
   db.close()
 })
+
+test('the idle heartbeat does not dial every minute', async () => {
+  // The heartbeat exists for what the write hook and the retry both miss, not
+  // to deliver bills — a payment pushes about two seconds after it is taken,
+  // through the server's onResponse hook.
+  //
+  // At one minute it dialled sixty times an hour and kept the cloud awake about
+  // 17% of every hour a till was on, with none of those wake-ups moving a row.
+  //
+  // Driven by an injected interval rather than the real clock: waiting five
+  // real minutes to prove a timer is not a test anyone will keep running.
+  const db = openDatabase(':memory:')
+  migrate(db)
+
+  const offline = loadEnv({
+    NODE_ENV: 'test',
+    DB_PATH: ':memory:',
+    CLOUD_DATABASE_URL: 'postgres://nobody:nothing@127.0.0.1:1/none',
+  })
+
+  let dials = 0
+  const worker = new SyncWorker(db, offline, silentLog, {
+    batchSize: 10,
+    // 40ms stands in for the real interval; what is under test is that the
+    // worker honours the value it is given rather than a hard-coded minute.
+    heartbeatMs: 40,
+    connect: () => {
+      dials += 1
+      return Promise.reject(new Error('ECONNREFUSED'))
+    },
+  })
+
+  worker.start()
+  await new Promise((r) => setTimeout(r, 140))
+  worker.stop()
+
+  // Startup plus roughly three ticks. The point is that it ticks on the given
+  // interval, not the exact count on a shared CI runner.
+  if (dials < 2) throw new Error(`the heartbeat never fired: ${dials} dials`)
+
+  db.close()
+})

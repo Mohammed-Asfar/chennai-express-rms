@@ -108,14 +108,26 @@ export class SyncWorker {
     // Whatever was pending when the process last stopped.
     void this.runCycle('startup')
 
-    // A minute, not five. This is the safety net for anything the write hook
-    // and the retry both missed, and five minutes of an unnoticed backlog is
-    // a long time on a till that is taking money.
+    // Five minutes, not one.
+    //
+    // A bill does not wait for this. Every successful write signals the worker
+    // through the server's onResponse hook, so a payment pushes about two
+    // seconds after it is taken, and a failed cycle retries on its own backoff.
+    // The heartbeat only covers what those miss: a batch capped at 200 rows
+    // leaving more behind, a row written straight into SQLite by a script, and
+    // — the reason it runs at all on a till doing nothing — confirming the
+    // cloud is still reachable, which is what the backup screen reports.
+    //
+    // At a minute that check ran sixty times an hour and kept the cloud awake
+    // about 17% of every hour a till was switched on. None of those wake-ups
+    // moved a row. The cost of five is that a till sitting idle can take five
+    // minutes to notice the cloud has gone; one taking orders still notices in
+    // two seconds, because a write dials immediately either way.
     //
     // Not unref'd: an unref'd timer does not hold the process open, and on an
     // otherwise idle event loop it can be left unscheduled — the backup must
     // keep running whether or not anything else is happening.
-    const heartbeat = this.options.heartbeatMs ?? 60_000
+    const heartbeat = this.options.heartbeatMs ?? 5 * 60_000
     this.heartbeatTimer = setInterval(() => {
       void this.runCycle('heartbeat')
     }, heartbeat)
