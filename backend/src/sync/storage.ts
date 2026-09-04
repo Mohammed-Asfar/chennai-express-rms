@@ -36,8 +36,14 @@ export interface CloudStorage {
   largest: { table: string; bytes: number }[]
 }
 
-/** Neon's free plan: 0.5 GB per project. */
-export const FREE_TIER_BYTES = 512 * 1024 * 1024
+/**
+ * Neon's free plan: 0.5 GB per project.
+ *
+ * Neon counts a GB as 1000³, not 1024³, so the limit is 500 MB — reporting it
+ * as 512 MiB overstated the allowance by 2% and would have shown "within
+ * limits" slightly past the point of being over it.
+ */
+export const FREE_TIER_BYTES = 500 * 1000 * 1000
 
 /**
  * Measures the cloud database and projects its growth.
@@ -50,7 +56,17 @@ export async function readCloudStorage(
   sql: Sql,
   limitBytes = FREE_TIER_BYTES,
 ): Promise<CloudStorage> {
-  const size = (await sql`SELECT pg_database_size(current_database()) AS bytes`) as unknown as {
+  // Every database in the project, not just this one.
+  //
+  // The limit is per project, so measuring current_database() alone reported
+  // less than Neon bills for — a project also carrying the default `postgres`
+  // database read 9 MB here against 17 MB on the dashboard. A quota screen that
+  // understates usage warns too late, which is the one thing it must not do.
+  const size = (await sql`
+    SELECT COALESCE(SUM(pg_database_size(datname)), 0) AS bytes
+      FROM pg_database
+     WHERE datistemplate = false
+  `) as unknown as {
     bytes: string | number
   }[]
   const usedBytes = Number(size[0]?.bytes ?? 0)
