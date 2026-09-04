@@ -50,6 +50,42 @@ class ApiClient {
 
   Future<Map<String, dynamic>> delete(String path) => _send('DELETE', path, null);
 
+  /// Fetches a response body as text rather than decoding it as JSON.
+  ///
+  /// For the CSV exports, whose body is the file itself. Errors still arrive as
+  /// JSON, so a failure is decoded the usual way and thrown as an
+  /// [ApiException] — a screen showing an error object as if it were a
+  /// spreadsheet would be worse than no export at all.
+  Future<String> getText(String path) async {
+    final uri = Uri.parse('$baseUrl$path');
+    final request = http.Request('GET', uri)..headers.addAll(_headersFor(hasBody: false));
+
+    try {
+      final streamed = await _http.send(request).timeout(_timeout);
+      final response = await http.Response.fromStream(streamed);
+
+      if (response.statusCode >= 200 && response.statusCode < 300) {
+        // bodyBytes, not body: http decodes as latin-1 unless the charset says
+        // otherwise, and a dish name outside ASCII would arrive mangled.
+        return utf8.decode(response.bodyBytes);
+      }
+
+      // Reuse the JSON error path so the message is the one the backend sent.
+      _decode(response);
+      throw const ApiException(
+        code: 'UNKNOWN',
+        message: 'The export could not be produced.',
+        statusCode: 0,
+      );
+    } on SocketException {
+      throw const ApiException(
+        code: 'BACKEND_UNREACHABLE',
+        message: 'Cannot reach the billing service. Make sure it is running.',
+        statusCode: 0,
+      );
+    }
+  }
+
   Future<Map<String, dynamic>> _send(
     String method,
     String path,

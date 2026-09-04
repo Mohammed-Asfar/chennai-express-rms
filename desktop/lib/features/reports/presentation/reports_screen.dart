@@ -11,6 +11,7 @@ import '../../billing/data/bill_models.dart' show PaymentStatus;
 import '../data/report_models.dart';
 import '../data/report_repository.dart';
 import 'report_charts.dart';
+import 'export_dialog.dart';
 import 'report_range.dart';
 import 'report_section.dart';
 
@@ -219,6 +220,20 @@ class _RangeBar extends StatelessWidget {
             selected: !isPreset,
             icon: Icons.calendar_today_outlined,
             onTap: onCustom,
+          ),
+
+          const Spacer(),
+
+          // Beside the range it exports, rather than in a menu: what gets
+          // written is exactly the period on screen, and putting the two
+          // together is what makes that obvious.
+          OutlinedButton.icon(
+            onPressed: () => showDialog<bool>(
+              context: context,
+              builder: (_) => ExportDialog(range: range),
+            ),
+            icon: const Icon(Icons.download_outlined, size: 18),
+            label: const Text('Export'),
           ),
         ],
       ),

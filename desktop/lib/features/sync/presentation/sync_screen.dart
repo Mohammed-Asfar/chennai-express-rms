@@ -6,6 +6,7 @@ import '../../../core/theme/app_spacing.dart';
 import '../../../core/widgets/app_loading.dart';
 import '../../../core/widgets/error_banner.dart';
 import '../data/sync_repository.dart';
+import 'purge_dialog.dart';
 
 /// Cloud backup: what state it is in, and the two things that can be done
 /// about it.
@@ -142,10 +143,50 @@ class _SyncScreenState extends ConsumerState<SyncScreen> {
                 style: Theme.of(context).textTheme.bodySmall,
               ),
             ],
+
+            // Set apart from the backup actions above, and below them.
+            // Everything else on this screen protects data; this is the one
+            // control that destroys it, and it should not sit in the same row
+            // as the button someone presses when they are worried.
+            const SizedBox(height: AppSpacing.xxl),
+            const Divider(),
+            const SizedBox(height: AppSpacing.lg),
+
+            Text('Storage', style: Theme.of(context).textTheme.titleSmall),
+            const SizedBox(height: AppSpacing.xs),
+            Text(
+              'Old bills can be cleared from this PC and the cloud once you have '
+              'exported them. Your menu, tables, staff and settings are never '
+              'touched.',
+              style: Theme.of(context).textTheme.bodySmall,
+            ),
+            const SizedBox(height: AppSpacing.md),
+            OutlinedButton.icon(
+              onPressed: _busy ? null : () => _clearOldData(context),
+              icon: const Icon(Icons.delete_outline, size: 18),
+              label: const Text('Clear old data'),
+              style: OutlinedButton.styleFrom(
+                foregroundColor: Theme.of(context).colorScheme.error,
+              ),
+            ),
           ],
         ),
       ),
     );
+  }
+
+  Future<void> _clearOldData(BuildContext context) async {
+    final cleared = await showDialog<bool>(
+      context: context,
+      builder: (_) => const PurgeDialog(),
+    );
+    // The counts on this screen are now wrong, and a stale "waiting to send"
+    // after a purge reads as data that failed to back up. This screen reads the
+    // stream, so that is what has to be rebuilt.
+    if (cleared == true && mounted) {
+      ref.invalidate(syncStreamProvider);
+      ref.invalidate(syncStatusProvider);
+    }
   }
 
   Future<void> _syncNow() => _run((r) => r.syncNow());
