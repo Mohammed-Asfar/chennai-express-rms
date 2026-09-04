@@ -157,30 +157,53 @@ const MENU = [
   {
     category: 'Fried Rice & Noodles - Non Veg',
     items: [
-      ['Mutton Fried Rice / Noodles', 250],
-      ['Mutton Szechwan Fried Rice / Noodles', 250],
-      ['Chicken Fried Rice / Noodles', 160],
-      ['Chicken Szechwan Fried Rice / Noodles', 160],
-      ['Egg Fried Rice / Noodles', 130],
-      ['Egg Szechwan Fried Rice / Noodles', 130],
-      ['Mixed Fried Rice / Noodles', 250],
-      ['Mixed Szechwan Fried Rice / Noodles', 250],
-      ['Prawn Fried Rice / Noodles', 250],
-      ['Prawn Szechwan Fried Rice / Noodles', 250],
+      // The card prices rice and noodles together — "Mutton Fried Rice /
+      // Noodles  250.00" — but they are two dishes. Sold as one line, nobody
+      // can tell which the customer asked for, and the kitchen ticket does not
+      // say. Split, at the shared price the card gives.
+      ['Mutton Fried Rice', 250],
+      ['Mutton Fried Noodles', 250],
+      ['Mutton Szechwan Fried Rice', 250],
+      ['Mutton Szechwan Fried Noodles', 250],
+      ['Chicken Fried Rice', 160],
+      ['Chicken Fried Noodles', 160],
+      ['Chicken Szechwan Fried Rice', 160],
+      ['Chicken Szechwan Fried Noodles', 160],
+      ['Egg Fried Rice', 130],
+      ['Egg Fried Noodles', 130],
+      ['Egg Szechwan Fried Rice', 130],
+      ['Egg Szechwan Fried Noodles', 130],
+      ['Mixed Fried Rice', 250],
+      ['Mixed Fried Noodles', 250],
+      ['Mixed Szechwan Fried Rice', 250],
+      ['Mixed Szechwan Fried Noodles', 250],
+      ['Prawn Fried Rice', 250],
+      ['Prawn Fried Noodles', 250],
+      ['Prawn Szechwan Fried Rice', 250],
+      ['Prawn Szechwan Fried Noodles', 250],
     ],
   },
   {
     category: 'Fried Rice & Noodles - Veg',
     items: [
-      ['Veg Fried Rice / Noodles', 120],
-      ['Veg Szechwan Fried Rice / Noodles', 120],
-      ['Paneer Fried Rice / Noodles', 190],
-      ['Paneer Szechwan Fried Rice / Noodles', 190],
-      ['Mushroom Fried Rice / Noodles', 180],
-      ['Mushroom Szechwan Fried Rice / Noodles', 180],
-      ['Gobi Fried Rice / Noodles', 160],
-      ['Gobi Szechwan Fried Rice / Noodles', 160],
-      ['Mixed Veg Fried Rice / Noodles', 200],
+      ['Veg Fried Rice', 120],
+      ['Veg Fried Noodles', 120],
+      ['Veg Szechwan Fried Rice', 120],
+      ['Veg Szechwan Fried Noodles', 120],
+      ['Paneer Fried Rice', 190],
+      ['Paneer Fried Noodles', 190],
+      ['Paneer Szechwan Fried Rice', 190],
+      ['Paneer Szechwan Fried Noodles', 190],
+      ['Mushroom Fried Rice', 180],
+      ['Mushroom Fried Noodles', 180],
+      ['Mushroom Szechwan Fried Rice', 180],
+      ['Mushroom Szechwan Fried Noodles', 180],
+      ['Gobi Fried Rice', 160],
+      ['Gobi Fried Noodles', 160],
+      ['Gobi Szechwan Fried Rice', 160],
+      ['Gobi Szechwan Fried Noodles', 160],
+      ['Mixed Veg Fried Rice', 200],
+      ['Mixed Veg Fried Noodles', 200],
     ],
   },
   {
@@ -388,9 +411,20 @@ async function seedLocal() {
     let categories = 0
     let items = 0
 
+    // Soft-deleted, never removed: an item that has been ordered is referenced
+    // by order lines and by the bills printed from them. Retiring it takes it
+    // off the till without touching what it was sold for.
+    const retire = db.prepare(
+      `UPDATE menu_items
+          SET deleted_at = ?, updated_at = ?, synced_at = NULL
+        WHERE branch_id = ? AND deleted_at IS NULL AND id NOT IN (SELECT value FROM json_each(?))`,
+    )
+
     // One transaction: a menu half-written is worse than one not written, and
     // a cashier must never see a category whose items did not arrive.
     const write = db.transaction(() => {
+      const wanted = []
+
       for (const [index, group] of MENU.entries()) {
         const categoryId = stableId(branch.id, `category:${group.category}`)
         category.run(categoryId, branch.id, group.category, index, now, now)
@@ -402,8 +436,15 @@ async function seedLocal() {
           item.run(itemId, branch.id, categoryId, name, TAX_RATE, order, now, now)
           variant.run(variantId, itemId, 'Regular', toPaise(rupees), now, now)
           items++
+          wanted.push(itemId)
         }
       }
+
+      // Anything the card no longer lists. Splitting "Mutton Fried Rice /
+      // Noodles" into two dishes leaves the combined item behind otherwise,
+      // and the till would offer all three.
+      const { changes } = retire.run(now, now, branch.id, JSON.stringify(wanted))
+      if (changes > 0) console.log(`retired ${changes} items no longer on the menu`)
     })
 
     for (const group of MENU) {
