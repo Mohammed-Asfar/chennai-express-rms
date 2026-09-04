@@ -166,5 +166,15 @@ its job — the alternative is one restaurant's order silently overwriting
 another's.
 
 This happened with `pnpm run dev`, which uses its own SQLite but the same
-`.env`. A development server now needs `SYNC_IN_DEV=true` to reach the cloud at
-all; without it, it runs offline.
+`.env`.
+
+The guard tried for a while was `NODE_ENV`: a development server refused to sync
+unless `SYNC_IN_DEV=true` was set. It was removed. Deciding whether a restaurant
+is backed up from a variable a build can inherit by accident is the wrong trade —
+the failure is silent, visible only as one log line, and what it costs is every
+bill on that till. A guard against a developer's inconvenience must not be able
+to switch off a real branch's backup.
+
+**`CLOUD_DATABASE_URL` is the only control.** Set, sync runs; unset, it does not,
+and the backup screen says so plainly. To develop without touching a live branch,
+point that variable at your own Neon branch or leave it out of your `.env`.

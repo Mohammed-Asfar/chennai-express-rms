@@ -26,10 +26,18 @@ import { fileURLToPath } from 'node:url'
 
 const CONFIG_FILENAME = 'config.dat'
 
-/** Keys the installer may write. Anything else in the file is ignored. */
-const ALLOWED = new Set([
+/**
+ * Keys the installer may write. Anything else in the file is ignored.
+ *
+ * Must list every key `configure.ts` writes. NODE_ENV was missing from here
+ * while the installer wrote it, so every installed till silently ran as
+ * `development` — the key was dropped without a word and the default applied.
+ * A silently discarded configuration line is worse than a rejected one.
+ */
+export const ALLOWED_CONFIG_KEYS = new Set([
   'CLOUD_DATABASE_URL',
   'JWT_SECRET',
+  'NODE_ENV',
   'UPDATE_CHANNEL',
   'PORT',
   'HOST',
@@ -73,7 +81,7 @@ export function loadSecureConfig(directory?: string): { loaded: boolean; keys: n
     if (eq === -1) continue
 
     const key = trimmed.slice(0, eq).trim()
-    if (!ALLOWED.has(key)) continue
+    if (!ALLOWED_CONFIG_KEYS.has(key)) continue
     if (process.env[key] !== undefined) continue
 
     process.env[key] = trimmed.slice(eq + 1).trim()

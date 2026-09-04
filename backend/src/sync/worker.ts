@@ -87,23 +87,15 @@ export class SyncWorker {
       return
     }
 
-    // A development server shares the production cloud only when told to.
+    // Sync runs wherever CLOUD_DATABASE_URL is set, development included.
     //
-    // `pnpm run dev` uses its own SQLite but the same .env, so it pushed to the
-    // same branch as the installed till. Both then allocated order numbers from
-    // one sequence and both issued a #1 for the same trading day — which the
-    // unique index on (branch_id, business_date, order_no) rejected, stalling
-    // the real till's sync behind test data.
-    //
-    // Refusing by default is right: a developer who has not thought about this
-    // wants an offline dev server, not a second till competing with a live one.
-    if (this.env.NODE_ENV === 'development' && process.env.SYNC_IN_DEV !== 'true') {
-      this.log.warn(
-        {},
-        'sync disabled in development - set SYNC_IN_DEV=true to push to the cloud from a dev server',
-      )
-      return
-    }
+    // It used to refuse in development unless SYNC_IN_DEV was set, because a
+    // dev server sharing the production .env allocated order numbers from the
+    // same sequence as the installed till and both issued a #1 for one trading
+    // day. The cost of that guard was worse: it is silent unless someone reads
+    // the log, and a till whose backend reports NODE_ENV=development then backs
+    // nothing up at all. Point a dev server at its own CLOUD_DATABASE_URL, or
+    // leave it unset, to keep it off a live branch.
 
     // Whatever was pending when the process last stopped.
     void this.runCycle('startup')

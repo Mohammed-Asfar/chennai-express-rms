@@ -1,8 +1,38 @@
-import { mkdtempSync, rmSync, writeFileSync } from 'node:fs'
+import { mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
-import { encrypt, decrypt, loadSecureConfig } from '../src/lib/secure-config.js'
+import {
+  encrypt,
+  decrypt,
+  loadSecureConfig,
+  ALLOWED_CONFIG_KEYS,
+} from '../src/lib/secure-config.js'
 import { test, assertEqual } from './helpers.js'
+
+// Runs everywhere, not only on Windows: it reads source text and needs no DPAPI.
+test('every key the installer writes is on the allow list', () => {
+  // These two lists are one contract in two files. NODE_ENV fell out of the
+  // allow list while configure.ts kept writing it, so every installed till read
+  // `development` and its sync worker refused to back anything up — silently,
+  // because an unknown key is skipped without a word.
+  //
+  // Read as text rather than imported: configure.ts runs main() on import and
+  // would exit the test process.
+  const source = readFileSync(new URL('../src/db/configure.ts', import.meta.url), 'utf8')
+
+  // The `KEY=` left-hand side of each line configure.ts pushes into config.dat,
+  // whether a literal ('NODE_ENV=production') or a template (`JWT_SECRET=${x}`).
+  const written = [...source.matchAll(/["'`]([A-Z][A-Z0-9_]+)=/g)].map((m) => m[1]!)
+
+  assertEqual(written.length > 0, true, 'found the keys configure.ts writes')
+
+  const missing = written.filter((key) => !ALLOWED_CONFIG_KEYS.has(key))
+  assertEqual(
+    missing.join(', '),
+    '',
+    'keys written by the installer but dropped by the loader',
+  )
+})
 
 /**
  * DPAPI is Windows-only. Elsewhere these skip rather than fail — the product
@@ -52,6 +82,25 @@ if (!onWindows) {
     } finally {
       if (previous === undefined) delete process.env[key]
       else process.env[key] = previous
+      rmSync(dir, { recursive: true, force: true })
+    }
+  })
+
+  test('NODE_ENV from the installer reaches the environment', () => {
+    // The specific key that was dropped. An installed till reading
+    // `development` is not a cosmetic difference: it decided whether the
+    // restaurant's sales were backed up at all.
+    const dir = mkdtempSync(join(tmpdir(), 'cfg-'))
+    const previous = process.env.NODE_ENV
+    delete process.env.NODE_ENV
+
+    try {
+      writeFileSync(join(dir, 'config.dat'), encrypt('NODE_ENV=production'))
+      loadSecureConfig(dir)
+      assertEqual(process.env.NODE_ENV, 'production', 'the installed value was applied')
+    } finally {
+      if (previous === undefined) delete process.env.NODE_ENV
+      else process.env.NODE_ENV = previous
       rmSync(dir, { recursive: true, force: true })
     }
   })

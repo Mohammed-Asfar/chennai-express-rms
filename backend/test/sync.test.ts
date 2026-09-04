@@ -785,14 +785,11 @@ async function cleanup(db: Db, sql: Sql): Promise<void> {
   db.close()
 }
 
-// --- a dev server must not push to a live branch ---
+// --- NODE_ENV never decides whether a backup happens ---
 
-test('a dev server does not reach the cloud unless asked', async () => {
-  // `pnpm run dev` uses its own SQLite but the same .env, so it pushed to the
-  // same cloud branch as the installed till. Both then allocated order numbers
-  // from one sequence, both issued a #1 for the same trading day, and the
-  // unique index rejected the real till's push — its sync stalled behind test
-  // data it had no way to see.
+test('sync runs whatever NODE_ENV says', async () => {
+  // A build that reported NODE_ENV=development backed nothing up at all, and
+  // said so only in a log line nobody reads. Only CLOUD_DATABASE_URL decides.
   const db = openDatabase(':memory:')
   migrate(db)
 
@@ -803,66 +800,54 @@ test('a dev server does not reach the cloud unless asked', async () => {
   })
 
   let connected = false
-  const before = process.env.SYNC_IN_DEV
-  delete process.env.SYNC_IN_DEV
+  const worker = new SyncWorker(db, dev, silentLog, {
+    batchSize: 10,
+    connect: () => {
+      connected = true
+      return Promise.reject(new Error('ECONNREFUSED'))
+    },
+  })
+  // start() alone, with no syncNow() to cover for it. syncNow bypasses the
+  // startup path entirely, so a guard inside start() would go unnoticed — which
+  // is exactly the bug this test exists to catch.
+  worker.start()
+  await settle()
+  worker.stop()
 
-  try {
-    const worker = new SyncWorker(db, dev, silentLog, {
-      batchSize: 10,
-      connect: () => {
-        connected = true
-        return Promise.reject(new Error('should not have been called'))
-      },
-    })
-    worker.start()
-    await Promise.resolve()
-    worker.stop()
-
-    assertEqual(connected, false, 'start() did not dial the cloud')
-  } finally {
-    if (before === undefined) delete process.env.SYNC_IN_DEV
-    else process.env.SYNC_IN_DEV = before
-  }
-
+  assertEqual(connected, true, 'the cloud was dialled in development')
   db.close()
 })
 
-test('SYNC_IN_DEV=true opts a dev server in', async () => {
-  // Deliberately still possible: testing the sync path itself needs it, and a
-  // developer who sets this has been told what it means.
+test('no CLOUD_DATABASE_URL is still the off switch', async () => {
+  // Keeping a dev server off a live branch means not giving it the URL. That
+  // is the one control, and it is explicit rather than a mode a build inherits.
   const db = openDatabase(':memory:')
   migrate(db)
 
-  const dev = loadEnv({
-    NODE_ENV: 'development',
-    DB_PATH: ':memory:',
-    CLOUD_DATABASE_URL: 'postgres://nobody:nothing@127.0.0.1:1/none',
-  })
+  const offline = loadEnv({ NODE_ENV: 'development', DB_PATH: ':memory:' })
 
   let connected = false
-  const before = process.env.SYNC_IN_DEV
-  process.env.SYNC_IN_DEV = 'true'
+  const worker = new SyncWorker(db, offline, silentLog, {
+    batchSize: 10,
+    connect: () => {
+      connected = true
+      return Promise.reject(new Error('should not have been called'))
+    },
+  })
+  worker.start()
+  await settle()
+  await worker.syncNow()
+  worker.stop()
 
-  try {
-    const worker = new SyncWorker(db, dev, silentLog, {
-      batchSize: 10,
-      connect: () => {
-        connected = true
-        return Promise.reject(new Error('ECONNREFUSED'))
-      },
-    })
-    worker.start()
-    await worker.syncNow()
-    worker.stop()
-
-    assertEqual(connected, true, 'the cloud was dialled when opted in')
-  } finally {
-    if (before === undefined) delete process.env.SYNC_IN_DEV
-    else process.env.SYNC_IN_DEV = before
-  }
-
+  assertEqual(connected, false, 'start() did not dial the cloud')
+  assertEqual(worker.status().enabled, false, 'sync reports itself off')
   db.close()
 })
+
+/** Lets the startup cycle's async work reach the connect call. */
+function settle(): Promise<void> {
+  return new Promise((resolve) => setTimeout(resolve, 0))
+}
 
 // --- settings push on change, not on every cycle ---
 
