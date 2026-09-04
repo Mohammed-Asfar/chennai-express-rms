@@ -1,9 +1,8 @@
-import { createHash } from 'node:crypto'
 import { readdirSync, readFileSync } from 'node:fs'
 import { join, dirname } from 'node:path'
 import { fileURLToPath, pathToFileURL } from 'node:url'
 import type { Sql } from 'postgres'
-import { resolveMigrationsDir } from './migrate.js'
+import { resolveMigrationsDir, contentChecksum, checksumMatches } from './migrate.js'
 
 const MIGRATIONS_DIR = resolveMigrationsDir('postgres')
 
@@ -22,7 +21,10 @@ function loadMigrationFiles(dir = MIGRATIONS_DIR): MigrationFile[] {
       const sql = readFileSync(join(dir, name), 'utf8')
       const version = name.split('_')[0]
       if (!version) throw new Error(`Migration filename must start with a version: ${name}`)
-      return { version, name, sql, checksum: createHash('sha256').update(sql, 'utf8').digest('hex') }
+      // Line endings normalised, same as the SQLite runner: git rewrites them
+      // on checkout, and a migration's identity is its SQL rather than the
+      // bytes one machine happened to receive.
+      return { version, name, sql, checksum: contentChecksum(sql) }
     })
 }
 
@@ -52,7 +54,7 @@ export async function migrateCloud(sql: Sql, dir = MIGRATIONS_DIR): Promise<stri
 
   for (const file of files) {
     const previous = applied.get(file.version)
-    if (previous !== undefined && previous !== file.checksum) {
+    if (previous !== undefined && !checksumMatches(previous, file.sql)) {
       throw new Error(
         `Migration ${file.name} has changed since it was applied to the cloud.\n` +
           `Migrations are append-only — fix forward with a new migration instead.`,

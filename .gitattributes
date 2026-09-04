@@ -1,0 +1,13 @@
+# Migrations are checksummed, so their bytes must not depend on the machine.
+#
+# core.autocrlf=true hands out CRLF on Windows while git stores LF. A migration
+# checked out on such a PC hashes differently from the one that ran, and the
+# append-only guard then refuses to start: "0006 has changed since it was
+# applied". Nothing had changed - only the line endings.
+#
+# The checksum is a property of the migration, not of who checked it out.
+*.sql text eol=lf
+
+# Same reasoning: these are read as bytes by the installer and the bundler.
+*.ps1 text eol=crlf
+*.cmd text eol=crlf

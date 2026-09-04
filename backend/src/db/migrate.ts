@@ -49,12 +49,40 @@ function loadMigrationFiles(dir = MIGRATIONS_DIR): MigrationFile[] {
       const sql = readFileSync(join(dir, name), 'utf8')
       const version = name.split('_')[0]
       if (!version) throw new Error(`Migration filename must start with a version: ${name}`)
-      return { version, name, sql, checksum: sha256(sql) }
+      return { version, name, sql, checksum: contentChecksum(sql) }
     })
 }
 
 function sha256(input: string): string {
   return createHash('sha256').update(input, 'utf8').digest('hex')
+}
+
+/**
+ * The checksum of a migration's content, ignoring how its lines end.
+ *
+ * git's `core.autocrlf` rewrites line endings on checkout, so the same
+ * migration hashed to one value on the machine that ran it and another on the
+ * next machine to check it out. The append-only guard then refused to start —
+ * "0006 has changed since it was applied" — when nothing had changed but CRLF.
+ *
+ * A migration's identity is its SQL, not the bytes a particular Windows PC
+ * happened to receive. `.gitattributes` pins these files to LF so new
+ * installations are consistent; this makes the check survive the databases that
+ * recorded a CRLF hash before that existed.
+ */
+export function contentChecksum(sql: string): string {
+  return sha256(sql.replace(/\r\n/g, '\n'))
+}
+
+/** True when `stored` is this migration under either line-ending convention. */
+export function checksumMatches(stored: string, sql: string): boolean {
+  return (
+    stored === contentChecksum(sql) ||
+    // Recorded before normalisation existed: the raw file, whichever way its
+    // lines ended on the machine that applied it.
+    stored === sha256(sql) ||
+    stored === sha256(sql.replace(/\r\n/g, '\n').replace(/\n/g, '\r\n'))
+  )
 }
 
 export function ensureMigrationsTable(db: Database.Database): void {
@@ -87,7 +115,7 @@ export function migrate(db: Database.Database, dir = MIGRATIONS_DIR): string[] {
 
   for (const file of files) {
     const previous = applied.get(file.version)
-    if (previous !== undefined && previous !== file.checksum) {
+    if (previous !== undefined && !checksumMatches(previous, file.sql)) {
       throw new Error(
         `Migration ${file.name} has changed since it was applied.\n` +
           `Migrations are append-only — fix forward with a new migration instead.\n` +

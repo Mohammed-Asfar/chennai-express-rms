@@ -48,6 +48,54 @@ test('rejects a migration edited after it was applied', () => {
   rmSync(dir, { recursive: true })
 })
 
+test('a line-ending change is not an edit', () => {
+  // git's core.autocrlf rewrites line endings on checkout, so the same
+  // migration hashed one way on the machine that ran it and another on the next
+  // machine to check it out. The guard then refused to start a till that was
+  // perfectly healthy — and it surfaced as a failed release build, not as
+  // anything a restaurant could act on.
+  const sql = 'CREATE TABLE a (\n  id TEXT PRIMARY KEY,\n  name TEXT\n);\n'
+  const dir = tempMigrations({ '0001_a.sql': sql })
+  const db = openDatabase(':memory:')
+  migrate(db, dir)
+
+  writeFileSync(join(dir, '0001_a.sql'), sql.replace(/\n/g, '\r\n'))
+  const again = migrate(db, dir)
+
+  assertEqual(again.length, 0, 'CRLF is the same migration, already applied')
+  db.close()
+  rmSync(dir, { recursive: true })
+})
+
+test('a database that recorded a CRLF checksum still starts', () => {
+  // Tills in the field recorded whichever form they happened to see. Pinning
+  // the files to LF fixes new installations and would strand those, so the
+  // stored hash is accepted under either convention.
+  const crlf = 'CREATE TABLE a (\r\n  id TEXT PRIMARY KEY\r\n);\r\n'
+  const dir = tempMigrations({ '0001_a.sql': crlf })
+  const db = openDatabase(':memory:')
+  migrate(db, dir)
+
+  writeFileSync(join(dir, '0001_a.sql'), crlf.replace(/\r\n/g, '\n'))
+  const again = migrate(db, dir)
+
+  assertEqual(again.length, 0, 'the LF file matches the CRLF hash on record')
+  db.close()
+  rmSync(dir, { recursive: true })
+})
+
+test('a real edit is still rejected when only line endings are forgiven', () => {
+  // The point of normalising is to stop false alarms, not to stop checking.
+  const dir = tempMigrations({ '0001_a.sql': 'CREATE TABLE a (id TEXT PRIMARY KEY);\n' })
+  const db = openDatabase(':memory:')
+  migrate(db, dir)
+
+  writeFileSync(join(dir, '0001_a.sql'), 'CREATE TABLE a (id TEXT PRIMARY KEY, extra TEXT);\r\n')
+  assertThrows(() => migrate(db, dir), 'a changed statement still throws')
+  db.close()
+  rmSync(dir, { recursive: true })
+})
+
 test('a failed migration leaves no partial state', () => {
   const dir = tempMigrations({
     '0001_ok.sql': 'CREATE TABLE ok (id TEXT PRIMARY KEY);',
