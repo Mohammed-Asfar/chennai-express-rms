@@ -50,3 +50,6 @@ dist/
 # The service wrapper is vendored deliberately — without it the backend cannot
 # run as a Windows service. See installer/vendor/README.md.
 !installer/vendor/*.exe
+
+# Database backups taken before a wipe. Trading data - never committed.
+backups/

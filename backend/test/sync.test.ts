@@ -780,3 +780,82 @@ async function cleanup(db: Db, sql: Sql): Promise<void> {
   await sql.end({ timeout: 5 }).catch(() => undefined)
   db.close()
 }
+
+// --- a dev server must not push to a live branch ---
+
+test('a dev server does not reach the cloud unless asked', async () => {
+  // `pnpm run dev` uses its own SQLite but the same .env, so it pushed to the
+  // same cloud branch as the installed till. Both then allocated order numbers
+  // from one sequence, both issued a #1 for the same trading day, and the
+  // unique index rejected the real till's push — its sync stalled behind test
+  // data it had no way to see.
+  const db = openDatabase(':memory:')
+  migrate(db)
+
+  const dev = loadEnv({
+    NODE_ENV: 'development',
+    DB_PATH: ':memory:',
+    CLOUD_DATABASE_URL: 'postgres://nobody:nothing@127.0.0.1:1/none',
+  })
+
+  let connected = false
+  const before = process.env.SYNC_IN_DEV
+  delete process.env.SYNC_IN_DEV
+
+  try {
+    const worker = new SyncWorker(db, dev, silentLog, {
+      batchSize: 10,
+      connect: () => {
+        connected = true
+        return Promise.reject(new Error('should not have been called'))
+      },
+    })
+    worker.start()
+    await Promise.resolve()
+    worker.stop()
+
+    assertEqual(connected, false, 'start() did not dial the cloud')
+  } finally {
+    if (before === undefined) delete process.env.SYNC_IN_DEV
+    else process.env.SYNC_IN_DEV = before
+  }
+
+  db.close()
+})
+
+test('SYNC_IN_DEV=true opts a dev server in', async () => {
+  // Deliberately still possible: testing the sync path itself needs it, and a
+  // developer who sets this has been told what it means.
+  const db = openDatabase(':memory:')
+  migrate(db)
+
+  const dev = loadEnv({
+    NODE_ENV: 'development',
+    DB_PATH: ':memory:',
+    CLOUD_DATABASE_URL: 'postgres://nobody:nothing@127.0.0.1:1/none',
+  })
+
+  let connected = false
+  const before = process.env.SYNC_IN_DEV
+  process.env.SYNC_IN_DEV = 'true'
+
+  try {
+    const worker = new SyncWorker(db, dev, silentLog, {
+      batchSize: 10,
+      connect: () => {
+        connected = true
+        return Promise.reject(new Error('ECONNREFUSED'))
+      },
+    })
+    worker.start()
+    await worker.syncNow()
+    worker.stop()
+
+    assertEqual(connected, true, 'the cloud was dialled when opted in')
+  } finally {
+    if (before === undefined) delete process.env.SYNC_IN_DEV
+    else process.env.SYNC_IN_DEV = before
+  }
+
+  db.close()
+})
