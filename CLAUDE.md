@@ -4,6 +4,8 @@ Restaurant management and billing system. Node.js + Fastify + SQLite backend,
 Flutter Windows frontend, Neon Postgres cloud sync, ESC/POS thermal printing.
 
 **Read first:** `PRD.md` (requirements), `SCHEMA.md` (database).
+**Before changing sync timing:** `SYNC.md` — the heartbeat, the write hook and
+the intervals have each been questioned and settled once already.
 
 ---
 
@@ -15,6 +17,7 @@ Flutter Windows frontend, Neon Postgres cloud sync, ESC/POS thermal printing.
 | An index | `SCHEMA.md` §4 |
 | A relationship between tables | `SCHEMA.md` §2 ER diagram |
 | Which tables sync | `SCHEMA.md` §5 |
+| A sync interval, trigger, or batch size | `SYNC.md` — including why, not just what |
 | A feature's behaviour | `PRD.md` §6 requirements |
 | A new edge case or its handling | `PRD.md` §7 |
 | A colour, text style, or spacing value | `core/theme/` only — never a widget |

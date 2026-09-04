@@ -787,6 +787,10 @@ CREATE INDEX idx_print_jobs_pending ON print_jobs(status)
 
 ## 5. Sync
 
+What syncs and how it is recorded is below. **Why the timing is what it is —
+what actually pushes a bill, why the heartbeat exists, and why it is five
+minutes — is in `SYNC.md`.**
+
 | Table | Synced to cloud |
 |---|---|
 | `branches`, `users`, `sections`, `tables`, `categories`, `menu_items`, `menu_item_variants` | Yes |
