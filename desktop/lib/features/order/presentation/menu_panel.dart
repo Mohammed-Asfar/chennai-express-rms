@@ -5,6 +5,7 @@ import '../../../core/theme/app_spacing.dart';
 import '../../../core/utils/money.dart';
 import '../../../core/widgets/app_loading.dart';
 import '../../../core/widgets/error_banner.dart';
+import '../../../core/widgets/horizontal_scroller.dart';
 import '../../../core/widgets/search_field.dart';
 import '../../menu/data/menu_models.dart';
 import '../../menu/data/menu_repository.dart';
@@ -52,24 +53,27 @@ class _MenuPanelState extends ConsumerState<MenuPanel> {
         categories.when(
           loading: () => const SizedBox.shrink(),
           error: (_, __) => const SizedBox.shrink(),
+          // Taller than the chips: the scrollbar sits underneath them, and
+          // without the room it would be drawn over the chip labels.
           data: (list) => SizedBox(
-            height: 40,
-            child: ListView(
-              scrollDirection: Axis.horizontal,
+            height: 52,
+            child: HorizontalScroller(
               padding: const EdgeInsets.symmetric(horizontal: AppSpacing.lg),
-              children: [
-                _CategoryChip(
-                  label: 'All',
-                  selected: _categoryId == null,
-                  onTap: () => setState(() => _categoryId = null),
-                ),
-                for (final category in list)
+              child: Row(
+                children: [
                   _CategoryChip(
-                    label: category.name,
-                    selected: _categoryId == category.id,
-                    onTap: () => setState(() => _categoryId = category.id),
+                    label: 'All',
+                    selected: _categoryId == null,
+                    onTap: () => setState(() => _categoryId = null),
                   ),
-              ],
+                  for (final category in list)
+                    _CategoryChip(
+                      label: category.name,
+                      selected: _categoryId == category.id,
+                      onTap: () => setState(() => _categoryId = category.id),
+                    ),
+                ],
+              ),
             ),
           ),
         ),
