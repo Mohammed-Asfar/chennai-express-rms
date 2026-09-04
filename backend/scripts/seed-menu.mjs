@@ -34,289 +34,10 @@ import { createHash } from 'node:crypto'
 // nothing from it. Importing it there keeps `node scripts/seed-menu.mjs --local`
 // working with a plain runtime.
 
-// --- the card ---------------------------------------------------------------
-//
-// Transcribed from the printed menu. Prices in rupees; converted to paise below
-// at the single boundary, never scattered through the data.
-
-const MENU = [
-  {
-    category: 'Soup - Veg',
-    items: [
-      ['Veg Clear Soup', 65],
-      ['Sweet Corn Veg Soup', 85],
-      ['Hot & Sour Veg Soup', 85],
-      ['Veg Manchow Soup', 85],
-      ['Veg Noodles Soup', 105],
-      ['Mushroom Soup', 115],
-      ['Cream of Mushroom Soup', 105],
-      ['Cream of Veg Soup', 95],
-    ],
-  },
-  {
-    category: 'Soup - Non Veg',
-    items: [
-      ['Chicken Clear Soup', 75],
-      ['Sweet Corn Chicken Soup', 95],
-      ['Chicken Manchow Soup', 95],
-      ['Chicken Noodles Soup', 120],
-      ['Hot & Sour Chicken Soup', 95],
-      ['Mutton Soup', 125],
-      ['Cream of Chicken Soup', 115],
-      ['Cream of Mutton Soup', 135],
-    ],
-  },
-  {
-    category: 'Non Veg Starters',
-    items: [
-      ['Prawn Szechwan Chilly', 265],
-      ['Prawn Manchurian', 265],
-      ['Prawn Pepper Fry', 270],
-      ['Prawn 65', 260],
-      ['Fish Chilly', 265],
-      ['Fish Manchurian', 265],
-      ['Fish Fry', 240],
-      ['Fish Finger', 260],
-      ['Crab Lollypop', 280],
-      ['Kadamba Chilly', 260],
-      ['Mutton Chilly', 260],
-      ['Chicken Lollypop', 180],
-      ['Lollypop Manchurian', 240],
-      ['Lemon Chicken', 215],
-      ['Ginger Chicken', 215],
-      ['Garlic Chicken', 215],
-      // "(Dry & Gravy)" on the card means both are available at one price, not
-      // that a plate arrives with each. The kitchen still has to be told which.
-      ['Chilly Chicken', [['Dry', 185], ['Gravy', 185]]],
-      ['Chicken Manchurian', 185],
-      // Two preparations at one price, so the kitchen ticket has to say which.
-      ['Pepper Chicken', [['Dry', 195], ['Fry', 195]]],
-      ['Chicken 65', 160],
-      ['Egg Chilly', 140],
-      ['Egg Manchurian', 140],
-      ['Egg Bhujee', 60],
-      ['Omlate', 50],
-      ['Masala Omlate', 55],
-      ['Cheese Omlate', 100],
-    ],
-  },
-  {
-    category: 'Veg Starters',
-    items: [
-      ['Paneer 65', 180],
-      ['Paneer Chilly', 195],
-      ['Paneer Manchurian', 195],
-      ['Mushroom Chilly', 165],
-      ['Mushroom Manchurian', 165],
-      ['Gobi Chilly', [['Dry', 165], ['Gravy', 165]]],
-      ['Gobi Manchurian', 165],
-      ['Gobi 65', 165],
-    ],
-  },
-  {
-    category: 'Tandoori - Roti / Naan',
-    items: [
-      ['Tandoori Roti', 40],
-      ['Butter Roti', 45],
-      ['Naan', 40],
-      ['Kulcha', 55],
-      ['Tandoori Paratha', 55],
-      ['Butter Naan', 45],
-      ['Garlic Naan', 75],
-      ['Kashmiri Naan', 75],
-      ['Masala Kulcha', 75],
-      ['Stuff Paratha', 75],
-      ['Aloo Paratha', 75],
-      ['Lachhaka Paratha', 75],
-      ['Paneer Paratha', 85],
-      ['Paneer Kulcha', 85],
-      ['Cheese Naan', 95],
-      ['Cheese Paratha', 95],
-    ],
-  },
-  {
-    category: 'Tandoori - Veg',
-    items: [
-      ['Aloo Tikka', 190],
-      ['Gobi Tikka', 190],
-      ['Paneer Tikka', 230],
-      ['Paneer Malai Tikka', 260],
-      ['Mushroom Tikka', 190],
-    ],
-  },
-  {
-    category: "Tandoori - Kabab's",
-    items: [
-      // One dish at three prices. As three items, staff had to find the right
-      // "(Half)" among them; as portions they tap the dish and pick the size.
-      ['Tandoori Chicken', [['Full', 440], ['Half', 240], ['Single', 120]]],
-      ['Chicken Tikka', 190],
-      ['Chicken Malai Tikka', 250],
-      ['Chicken Haryali Kabab', 240],
-      ['Lasuni Kabab', 250],
-      ['Tandoori Fish', 250],
-    ],
-  },
-  {
-    category: 'Fried Rice & Noodles - Non Veg',
-    items: [
-      // The card prices rice and noodles together — "Mutton Fried Rice /
-      // Noodles  250.00" — but they are two dishes. Sold as one line, nobody
-      // can tell which the customer asked for, and the kitchen ticket does not
-      // say. Split, at the shared price the card gives.
-      ['Mutton Fried Rice', 250],
-      ['Mutton Fried Noodles', 250],
-      ['Mutton Szechwan Fried Rice', 250],
-      ['Mutton Szechwan Fried Noodles', 250],
-      ['Chicken Fried Rice', 160],
-      ['Chicken Fried Noodles', 160],
-      ['Chicken Szechwan Fried Rice', 160],
-      ['Chicken Szechwan Fried Noodles', 160],
-      ['Egg Fried Rice', 130],
-      ['Egg Fried Noodles', 130],
-      ['Egg Szechwan Fried Rice', 130],
-      ['Egg Szechwan Fried Noodles', 130],
-      ['Mixed Fried Rice', 250],
-      ['Mixed Fried Noodles', 250],
-      ['Mixed Szechwan Fried Rice', 250],
-      ['Mixed Szechwan Fried Noodles', 250],
-      ['Prawn Fried Rice', 250],
-      ['Prawn Fried Noodles', 250],
-      ['Prawn Szechwan Fried Rice', 250],
-      ['Prawn Szechwan Fried Noodles', 250],
-    ],
-  },
-  {
-    category: 'Fried Rice & Noodles - Veg',
-    items: [
-      ['Veg Fried Rice', 120],
-      ['Veg Fried Noodles', 120],
-      ['Veg Szechwan Fried Rice', 120],
-      ['Veg Szechwan Fried Noodles', 120],
-      ['Paneer Fried Rice', 190],
-      ['Paneer Fried Noodles', 190],
-      ['Paneer Szechwan Fried Rice', 190],
-      ['Paneer Szechwan Fried Noodles', 190],
-      ['Mushroom Fried Rice', 180],
-      ['Mushroom Fried Noodles', 180],
-      ['Mushroom Szechwan Fried Rice', 180],
-      ['Mushroom Szechwan Fried Noodles', 180],
-      ['Gobi Fried Rice', 160],
-      ['Gobi Fried Noodles', 160],
-      ['Gobi Szechwan Fried Rice', 160],
-      ['Gobi Szechwan Fried Noodles', 160],
-      ['Mixed Veg Fried Rice', 200],
-      ['Mixed Veg Fried Noodles', 200],
-    ],
-  },
-  {
-    category: 'Rice',
-    items: [
-      ['Steam Rice', 80],
-      ['Jeera Rice', 140],
-      ['Ghee Rice', 140],
-      ['Peas Pulav', 170],
-      ['Butter Rice', 180],
-      ['Mushroom Pulav', 180],
-      ['Paneer Pulav', 200],
-      ['Veg Pulav', 170],
-    ],
-  },
-  {
-    category: 'Dum Biriyani',
-    items: [
-      ['Chicken Biriyani', 140],
-      ['Mutton Biriyani', 230],
-      ['Prawn Biriyani', 210],
-      ['Egg Biriyani', 110],
-      ['Veg Biriyani', 120],
-      ['Special Biriyani', 160],
-    ],
-  },
-  {
-    category: 'Indian Masala - Non Veg',
-    items: [
-      ['Chicken Jhalfareji', 195],
-      ['Chicken Dopiyaza', 195],
-      ['Chetinadu Chicken', 195],
-      ['Pepper Chicken Masala', 195],
-      ['Chicken Kolhapuri', 195],
-      ['Kadai Chicken Masala', 195],
-      ['Hydrabadi Chicken', 195],
-      ['Chicken Masala', 185],
-      ['Banjara Chicken', 205],
-      ['Butter Chicken Masala', 225],
-      ['Chicken Tikka Masala', 225],
-      ['Mutton Masala', 245],
-      ['Motten Pepper Fry', 265],
-      ['Egg Masala', 125],
-      ['Fish Curry', 245],
-      ['Prawn Curry', 245],
-    ],
-  },
-  {
-    category: 'Indian Masala - Veg',
-    items: [
-      ['Veg Jhalfareji', 165],
-      ['Kadai Paneer', 195],
-      ['Paneer Butter Masala', 195],
-      ['Paneer Do Piyaja', 195],
-      ['Mutter Paneer Masala', 195],
-      ['Aloo Jeera', 145],
-      ['Aloo Gobi', 145],
-      ['Aloo Mutter', 145],
-      ['Gobi Masala', 145],
-      ['Gobi Mutter', 145],
-      ['Mixed Veg Curry', 155],
-      ['Veg Kadai', 155],
-      ['Green Peas Masala', 155],
-      ['Chana Masala', 155],
-      ['Daal Fry', 135],
-      ['Daal Tadka', 155],
-      ['Double Daal Tadka', 175],
-      ['Bhindi Masala', 165],
-      ['Mushroom Masala', 165],
-      ['Green Salad', 110],
-    ],
-  },
-  {
-    category: 'Shawarma & Roll Items',
-    items: [
-      ['Regular Shawarma Roll', 130],
-      ['Special Shawarma Roll', 150],
-      ['Regular Shawarma Plate', 160],
-      ['Special Shawarma Plate', 180],
-      ['Mexican Shawarma', 140],
-      ['Chicken Roll', 140],
-      ['Mutton Roll', 170],
-      ['Egg Roll', 110],
-      ['Veg Roll', 200],
-      ['Paneer Roll', 160],
-      ['Mushroom Roll', 140],
-      ['Chicken Tikka Roll', 160],
-    ],
-  },
-  {
-    category: 'Lassi & Fresh Juice',
-    items: [
-      ['Sweet Lassi', 65],
-      ['Mango Lassi', 85],
-      ['Strawberry Lassi', 95],
-      ['Salt Lassi', 65],
-      ['Plain Lassi', 55],
-      // "Soft Drinks ........" is priced with dots on the card. Left out
-      // deliberately rather than invented — an item that bills the wrong amount
-      // is worse than one a cashier has to add.
-    ],
-  },
-  {
-    category: 'Bucket Biriyani',
-    items: [
-      ['Chicken Bucket Biriyani', 999],
-      ['Mutton Bucket Biriyani', 1699],
-    ],
-  },
-]
+// The card itself lives in menu-data.mjs: this file is the mechanism, that one
+// is the content. Re-pricing a menu should not mean reading past 200 lines of
+// transaction handling to find the number.
+import { MENU } from './menu-data.mjs'
 
 const TAX_RATE = 0
 
@@ -395,12 +116,20 @@ async function seedLocal() {
     console.log(`branch:   ${branch.name} (${branch.id})`)
     console.log(dryRun ? 'DRY RUN — nothing will be written\n' : '')
 
+    // Every upsert below clears synced_at on update, not only on insert.
+    //
+    // Without it a re-priced row kept the stamp from its first push, so
+    // selectPending skipped it for ever: the till showed the new price, the
+    // cloud kept the old one, and nothing anywhere reported a problem. A
+    // re-price is exactly what this script is for, so that was the common case
+    // rather than an edge.
     const category = db.prepare(`
       INSERT INTO categories (id, branch_id, name, sort_order, is_active, created_at, updated_at)
       VALUES (?, ?, ?, ?, 1, ?, ?)
       ON CONFLICT (id) DO UPDATE SET
         name = excluded.name, sort_order = excluded.sort_order,
-        is_active = 1, deleted_at = NULL, updated_at = excluded.updated_at
+        is_active = 1, deleted_at = NULL, updated_at = excluded.updated_at,
+        synced_at = NULL
     `)
 
     const item = db.prepare(`
@@ -411,7 +140,8 @@ async function seedLocal() {
         name = excluded.name, category_id = excluded.category_id,
         tax_rate = excluded.tax_rate, is_available = 1,
         sort_order = excluded.sort_order, deleted_at = NULL,
-        updated_at = excluded.updated_at
+        updated_at = excluded.updated_at,
+        synced_at = NULL
     `)
 
     const variant = db.prepare(`
@@ -421,7 +151,8 @@ async function seedLocal() {
       ON CONFLICT (id) DO UPDATE SET
         name = excluded.name, price = excluded.price,
         sort_order = excluded.sort_order, is_available = 1,
-        deleted_at = NULL, updated_at = excluded.updated_at
+        deleted_at = NULL, updated_at = excluded.updated_at,
+        synced_at = NULL
     `)
 
     let categories = 0
