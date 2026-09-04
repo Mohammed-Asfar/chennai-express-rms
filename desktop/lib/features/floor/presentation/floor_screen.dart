@@ -538,8 +538,6 @@ class _PartyPicker extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    final theme = Theme.of(context);
-
     return AlertDialog(
       title: Text('${table.name} · who is this for?'),
       content: SizedBox(
@@ -552,24 +550,29 @@ class _PartyPicker extends StatelessWidget {
                 contentPadding: const EdgeInsets.symmetric(horizontal: AppSpacing.sm),
                 leading: const Icon(Icons.receipt_long_outlined),
                 title: Text(party.label),
-                subtitle: Text('Order #${party.orderNo}'),
+                // Only when the label adds something. An unlabelled party's
+                // label is already "#7", and repeating it as "Order #7"
+                // underneath said the same thing twice.
+                subtitle: party.seatLabel == null ? null : Text('Order #${party.orderNo}'),
                 shape: RoundedRectangleBorder(
                   borderRadius: BorderRadius.circular(AppSpacing.radiusSm),
                 ),
                 onTap: () => Navigator.of(context).pop(_PartyChoice.existing(party.orderId)),
               ),
             const Divider(height: AppSpacing.lg),
-            ListTile(
-              contentPadding: const EdgeInsets.symmetric(horizontal: AppSpacing.sm),
-              leading: Icon(Icons.add, color: theme.colorScheme.primary),
-              title: Text(
-                'Seat another party',
-                style: theme.textTheme.bodyLarge?.copyWith(color: theme.colorScheme.primary),
+
+            // Filled, not tinted text. The accent yellow reads at 1.6:1 against
+            // this dialog's surface — well under the 4.5:1 text needs — so as a
+            // label it was nearly invisible, and the one action that seats a
+            // second party looked like disabled help text. On the fill it
+            // carries dark ink at 10:1 and reads as the button it is.
+            SizedBox(
+              width: double.infinity,
+              child: FilledButton.icon(
+                onPressed: () => Navigator.of(context).pop(const _PartyChoice.fresh()),
+                icon: const Icon(Icons.add),
+                label: const Text('Seat another party'),
               ),
-              shape: RoundedRectangleBorder(
-                borderRadius: BorderRadius.circular(AppSpacing.radiusSm),
-              ),
-              onTap: () => Navigator.of(context).pop(const _PartyChoice.fresh()),
             ),
           ],
         ),

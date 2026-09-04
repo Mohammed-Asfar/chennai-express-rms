@@ -119,11 +119,15 @@ class _CopyableUrl extends StatelessWidget {
         child: Row(
           mainAxisSize: MainAxisSize.min,
           children: [
+            // Ink, not the accent. The accent yellow reads at 1.6:1 on this
+            // surface and its dim variant at 2.1:1 — both far below the 4.5:1
+            // text needs, so the address was there but barely legible. The
+            // underline and the copy icon carry "this is a link" instead.
             Flexible(
               child: Text(
                 url,
                 style: theme.textTheme.bodyMedium?.copyWith(
-                  color: theme.colorScheme.primary,
+                  decoration: TextDecoration.underline,
                 ),
               ),
             ),
