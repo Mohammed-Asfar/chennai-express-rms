@@ -206,6 +206,41 @@ test('two parties can share a table, each with its own order', async () => {
   await close(ctx)
 })
 
+test('parties sharing a table are billed separately', async () => {
+  // The half that costs money if it is wrong. Two parties on one table must not
+  // see each other's items, and settling one must not settle the other — a
+  // shared table that produced a shared bill would hand one party the other's
+  // food to pay for.
+  const ctx = await setup()
+  const a = await newOrder(ctx, { type: 'dine_in', tableId: ctx.tableId, seatLabel: 'A' })
+  const b = await newOrder(ctx, { type: 'dine_in', tableId: ctx.tableId, seatLabel: 'B' })
+
+  await addItem(ctx, a.id, { variantId: ctx.full, qty: 2 })
+  await addItem(ctx, b.id, { variantId: ctx.full, qty: 1 })
+
+  const billOf = async (orderId: string) => {
+    const res = await ctx.app.inject({
+      method: 'POST',
+      url: '/bills',
+      headers: ctx.auth,
+      payload: { orderId },
+    })
+    if (res.statusCode !== 201) throw new Error(`bill failed: ${res.body}`)
+    return (res.json() as { bill: { id: string; total: number; orderId: string } }).bill
+  }
+
+  const billA = await billOf(a.id)
+  const billB = await billOf(b.id)
+
+  if (billA.id === billB.id) throw new Error('one bill covered both parties')
+  assertEqual(billA.orderId, a.id, 'bill A belongs to order A')
+  assertEqual(billB.orderId, b.id, 'bill B belongs to order B')
+
+  // Two of the same item against one: A must be exactly twice B.
+  assertEqual(billA.total, billB.total * 2, 'each party pays for its own items only')
+  await close(ctx)
+})
+
 // --- items and snapshots ---
 
 test('adding an item snapshots its name, price and tax rate', async () => {
