@@ -32,7 +32,7 @@ local SQLite    Neon cloud
 | **Migrations are append-only** | Once applied to real data, a migration is immutable. Fix forward with a new one. |
 | **Checksums verified at boot** | A modified applied migration is a hard startup error — this makes append-only enforceable rather than a convention. |
 
-There is no code generator. The schema is small enough (17 tables) that generation
+There is no code generator. The schema is small enough (20 tables) that generation
 tooling would cost more than it saves. Keeping this document current is a review
 responsibility — see `CLAUDE.md` §1.
 
@@ -654,6 +654,26 @@ and the worker could never tell an idle cycle from a busy one.
 
 Logo settings live on `branches` (§3.1), not here — they belong with the image data
 they control.
+
+### 3.17 `export_log` and `purge_log`
+
+Two records of what left the system.
+
+`export_log` — one row per CSV export: kind, the business dates covered, and how
+many rows were in the file. Read before a purge, so the warning can say whether
+a copy of that range exists.
+
+`purge_log` — one row per purge: the range, what was removed, whether an export
+covering it existed, and who did it.
+
+**Purging is the one place bills are hard-deleted.** Everywhere else they are
+soft-deleted and kept, because GST wants six years of them. A gap in the bill
+numbers with no explanation is indistinguishable from data loss, so the log is
+written in the same transaction as the deletion and is itself never purged.
+
+A purge never touches branches, users, settings, categories, menu items and
+variants, sections or tables. Those are configuration: a till that lost them
+would stop working rather than merely forget.
 
 **Key-value rather than fixed columns** — adding a setting needs no migration. The
 tradeoff is no type safety, so values are parsed and validated with Zod on read.

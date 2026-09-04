@@ -3,6 +3,7 @@ import { z } from 'zod'
 import { currentUser, requireRole } from '../lib/guards.js'
 import { currentBusinessDate } from '../lib/business-date.js'
 import { toCsv, rupees } from '../lib/csv.js'
+import { recordExport } from '../db/purge.js'
 
 /**
  * CSV exports of trading data.
@@ -91,6 +92,7 @@ export async function exportRoutes(app: FastifyInstance): Promise<void> {
         ]),
       )
 
+      recordExport(app.db, me.branchId, 'bills', range, rows.length, me.sub)
       return send(reply, csv, `bills-${range.from}-to-${range.to}.csv`)
     },
   )
@@ -142,6 +144,7 @@ export async function exportRoutes(app: FastifyInstance): Promise<void> {
         ]),
       )
 
+      recordExport(app.db, me.branchId, 'bill_items', range, rows.length, me.sub)
       return send(reply, csv, `bill-items-${range.from}-to-${range.to}.csv`)
     },
   )
@@ -193,6 +196,7 @@ export async function exportRoutes(app: FastifyInstance): Promise<void> {
         ]),
       )
 
+      recordExport(app.db, me.branchId, 'payments', range, rows.length, me.sub)
       return send(reply, csv, `payments-${range.from}-to-${range.to}.csv`)
     },
   )

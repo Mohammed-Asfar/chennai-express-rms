@@ -27,6 +27,7 @@ import { printerRoutes } from './routes/printers.js'
 import { settingsRoutes } from './routes/settings.js'
 import { reportRoutes } from './routes/reports.js'
 import { exportRoutes } from './routes/exports.js'
+import { purgeRoutes } from './routes/purge.js'
 import { SyncWorker } from './sync/worker.js'
 import { createPrintWorker, type PrintWorker } from './print/worker.js'
 
@@ -183,6 +184,7 @@ export async function buildServer({ db, env, sync }: BuildOptions): Promise<Fast
   await app.register(settingsRoutes)
   await app.register(reportRoutes)
   await app.register(exportRoutes)
+  await app.register(purgeRoutes)
 
   return app
 }
