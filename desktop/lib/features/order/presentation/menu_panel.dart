@@ -5,7 +5,6 @@ import '../../../core/theme/app_spacing.dart';
 import '../../../core/utils/money.dart';
 import '../../../core/widgets/app_loading.dart';
 import '../../../core/widgets/error_banner.dart';
-import '../../../core/widgets/horizontal_scroller.dart';
 import '../../../core/widgets/search_field.dart';
 import '../../menu/data/menu_models.dart';
 import '../../menu/data/menu_repository.dart';
@@ -34,6 +33,33 @@ class _MenuPanelState extends ConsumerState<MenuPanel> {
     final items = ref.watch(menuItemsProvider);
     final theme = Theme.of(context);
 
+    // Categories down the right, not across the top.
+    //
+    // Sixteen of them never fitted on one line, and a horizontal strip meant
+    // scrolling sideways to find a category and then back again for the next
+    // order. A column shows every name in full, in the order they appear on the
+    // printed card, so staff learn where things sit and stop reading.
+    //
+    // On the right because the item grid is what the eye works through, and a
+    // filter belongs beside the results rather than in front of them.
+    return Row(
+      crossAxisAlignment: CrossAxisAlignment.stretch,
+      children: [
+        Expanded(child: _items(context, items, theme)),
+        categories.when(
+          loading: () => const SizedBox.shrink(),
+          error: (_, __) => const SizedBox.shrink(),
+          data: (list) => _CategoryRail(
+            categories: list,
+            selectedId: _categoryId,
+            onSelect: (id) => setState(() => _categoryId = id),
+          ),
+        ),
+      ],
+    );
+  }
+
+  Widget _items(BuildContext context, AsyncValue<List<MenuItem>> items, ThemeData theme) {
     return Column(
       crossAxisAlignment: CrossAxisAlignment.stretch,
       children: [
@@ -49,36 +75,6 @@ class _MenuPanelState extends ConsumerState<MenuPanel> {
             onChanged: (value) => setState(() => _search = value),
           ),
         ),
-
-        categories.when(
-          loading: () => const SizedBox.shrink(),
-          error: (_, __) => const SizedBox.shrink(),
-          // Just enough over the chips for the hairline scrollbar to sit
-          // clear of them without being drawn over the labels.
-          data: (list) => SizedBox(
-            height: 46,
-            child: HorizontalScroller(
-              padding: const EdgeInsets.symmetric(horizontal: AppSpacing.lg),
-              child: Row(
-                children: [
-                  _CategoryChip(
-                    label: 'All',
-                    selected: _categoryId == null,
-                    onTap: () => setState(() => _categoryId = null),
-                  ),
-                  for (final category in list)
-                    _CategoryChip(
-                      label: category.name,
-                      selected: _categoryId == category.id,
-                      onTap: () => setState(() => _categoryId = category.id),
-                    ),
-                ],
-              ),
-            ),
-          ),
-        ),
-
-        const SizedBox(height: AppSpacing.md),
 
         Expanded(
           child: items.when(
@@ -149,21 +145,106 @@ class _MenuPanelState extends ConsumerState<MenuPanel> {
   }
 }
 
-class _CategoryChip extends StatelessWidget {
-  const _CategoryChip({required this.label, required this.selected, required this.onTap});
+/// The category list down the right-hand edge.
+class _CategoryRail extends StatelessWidget {
+  const _CategoryRail({
+    required this.categories,
+    required this.selectedId,
+    required this.onSelect,
+  });
+
+  final List<MenuCategory> categories;
+  final String? selectedId;
+  final ValueChanged<String?> onSelect;
+
+  /// Wide enough for the longest name on the card — "Fried Rice & Noodles -
+  /// Non Veg" — over two lines without cramping.
+  static const double width = 184;
+
+  @override
+  Widget build(BuildContext context) {
+    return Container(
+      width: width,
+      decoration: const BoxDecoration(
+        color: AppColors.surface,
+        border: Border(left: BorderSide(color: AppColors.border)),
+      ),
+      child: ListView(
+        padding: const EdgeInsets.symmetric(vertical: AppSpacing.md),
+        children: [
+          _CategoryRow(
+            label: 'All',
+            selected: selectedId == null,
+            onTap: () => onSelect(null),
+          ),
+          for (final category in categories)
+            _CategoryRow(
+              label: category.name,
+              selected: selectedId == category.id,
+              onTap: () => onSelect(category.id),
+            ),
+        ],
+      ),
+    );
+  }
+}
+
+class _CategoryRow extends StatefulWidget {
+  const _CategoryRow({required this.label, required this.selected, required this.onTap});
 
   final String label;
   final bool selected;
   final VoidCallback onTap;
 
   @override
+  State<_CategoryRow> createState() => _CategoryRowState();
+}
+
+class _CategoryRowState extends State<_CategoryRow> {
+  bool _hovered = false;
+
+  @override
   Widget build(BuildContext context) {
-    return Padding(
-      padding: const EdgeInsets.only(right: AppSpacing.sm),
-      child: ChoiceChip(
-        label: Text(label),
-        selected: selected,
-        onSelected: (_) => onTap(),
+    final theme = Theme.of(context);
+    final selected = widget.selected;
+
+    return MouseRegion(
+      onEnter: (_) => setState(() => _hovered = true),
+      onExit: (_) => setState(() => _hovered = false),
+      cursor: SystemMouseCursors.click,
+      child: GestureDetector(
+        onTap: widget.onTap,
+        child: Container(
+          constraints: const BoxConstraints(minHeight: AppSpacing.minTapTarget),
+          padding: const EdgeInsets.symmetric(
+            horizontal: AppSpacing.md,
+            vertical: AppSpacing.sm,
+          ),
+          decoration: BoxDecoration(
+            // A tint alone measured 1.01:1 against the surface — invisible.
+            // The solid bar down the leading edge is what actually marks the
+            // selection; the wash only supports it.
+            color: selected
+                ? AppColors.accentTint
+                : _hovered
+                    ? AppColors.surfaceHover
+                    : null,
+            border: Border(
+              left: BorderSide(
+                color: selected ? AppColors.accent : Colors.transparent,
+                width: 3,
+              ),
+            ),
+          ),
+          alignment: Alignment.centerLeft,
+          child: Text(
+            widget.label,
+            style: theme.textTheme.bodyMedium?.copyWith(
+              color: selected ? AppColors.ink : AppColors.inkMuted,
+              fontWeight: selected ? FontWeight.w600 : FontWeight.w400,
+            ),
+          ),
+        ),
       ),
     );
   }
