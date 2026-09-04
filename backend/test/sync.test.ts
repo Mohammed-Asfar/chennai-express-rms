@@ -14,6 +14,7 @@ import {
   lastSyncedAt,
 } from '../src/sync/push.js'
 import { SYNC_TABLES, NEVER_SYNCED, MAX_SYNC_ATTEMPTS, backoffMs } from '../src/sync/tables.js'
+import { setSetting } from '../src/lib/settings.js'
 import { SyncWorker } from '../src/sync/worker.js'
 import { test, serialTest, assertEqual } from './helpers.js'
 import { testCloudUrl } from './cloud-guard.js'
@@ -362,7 +363,10 @@ test('a repair re-pushes master data that the cloud is missing', async () => {
   await seedIfEmpty(db, env)
 
   const stamp = new Date().toISOString()
-  for (const table of ['branches', 'users', 'sections', 'tables', 'categories']) {
+  // settings included: it became tracked, so its seeded rows now count towards
+  // pending like any other. Leaving it out made this read "everything is
+  // synced" while nine rows waited.
+  for (const table of ['branches', 'users', 'sections', 'tables', 'categories', 'settings']) {
     db.prepare(`UPDATE ${table} SET synced_at = ?`).run(stamp)
   }
   assertEqual(syncCounts(db).pending, 0, 'everything starts stamped as synced')
@@ -856,6 +860,72 @@ test('SYNC_IN_DEV=true opts a dev server in', async () => {
     if (before === undefined) delete process.env.SYNC_IN_DEV
     else process.env.SYNC_IN_DEV = before
   }
+
+  db.close()
+})
+
+// --- settings push on change, not on every cycle ---
+
+test('a settings row is pending once, then stays quiet', () => {
+  // settings used to be untracked, which means "push the whole table every
+  // cycle": ten rows upserted to the cloud once a minute, for ever, changed or
+  // not. It also left the worker unable to tell an idle cycle from a busy one,
+  // because there was always something pending to send.
+  const db = openDatabase(':memory:')
+  migrate(db)
+
+  const now = new Date().toISOString()
+  db.prepare(
+    `INSERT INTO branches (id, name, print_logo, is_active, created_at, updated_at)
+     VALUES ('b1', 'Test', 1, 1, ?, ?)`,
+  ).run(now, now)
+  db.prepare(
+    `INSERT INTO settings (branch_id, key, value, created_at, updated_at)
+     VALUES ('b1', 'tax_mode', 'exclusive', ?, ?)`,
+  ).run(now, now)
+
+  const settings = SYNC_TABLES.find((t) => t.name === 'settings')!
+  assertEqual(settings.tracked, true, 'settings is tracked')
+
+  // Counted on settings alone: the branch row this needs as a parent is itself
+  // unsynced, and syncCounts covers every table.
+  const pendingSettings = () =>
+    (db.prepare('SELECT count(*) n FROM settings WHERE synced_at IS NULL').get() as { n: number }).n
+
+  // Unsent, so it is pending.
+  assertEqual(pendingSettings(), 1, 'a new setting is queued')
+
+  // Stamped, so it is not.
+  db.prepare('UPDATE settings SET synced_at = ?').run(now)
+  assertEqual(pendingSettings(), 0, 'a pushed setting stops being sent')
+
+  db.close()
+})
+
+test('changing a setting queues it again', () => {
+  // The other half: tracking is only useful if a real edit still gets through.
+  // setSetting clears synced_at on write, which is what puts it back in the
+  // queue — without that, tracking would mean settings never sync at all.
+  const db = openDatabase(':memory:')
+  migrate(db)
+
+  const now = new Date().toISOString()
+  db.prepare(
+    `INSERT INTO branches (id, name, print_logo, is_active, created_at, updated_at)
+     VALUES ('b1', 'Test', 1, 1, ?, ?)`,
+  ).run(now, now)
+  db.prepare(
+    `INSERT INTO settings (branch_id, key, value, created_at, updated_at, synced_at)
+     VALUES ('b1', 'tax_mode', 'exclusive', ?, ?, ?)`,
+  ).run(now, now, now)
+
+  const pendingSettings = () =>
+    (db.prepare('SELECT count(*) n FROM settings WHERE synced_at IS NULL').get() as { n: number }).n
+
+  assertEqual(pendingSettings(), 0, 'starts settled')
+
+  setSetting(db, 'b1', 'tax_mode', 'inclusive')
+  assertEqual(pendingSettings(), 1, 'an edit is queued to push')
 
   db.close()
 })

@@ -40,24 +40,34 @@ export async function activationRoutes(app: FastifyInstance): Promise<void> {
   app.post('/activation/claim', async (request, reply) => {
     const parsed = claimSchema.safeParse(request.body)
     if (!parsed.success) {
-      return reply.status(400).send({ error: 'Enter your activation key.' })
+      return reply
+        .status(400)
+        .send({ error: { code: 'KEY_REQUIRED', message: 'Enter your activation key.' } })
     }
 
     const key = normaliseKey(parsed.data.key)
     if (!key) {
-      return reply.status(400).send({ error: 'That key is not valid. Check and try again.' })
+      return reply.status(400).send({
+        error: { code: 'KEY_MALFORMED', message: 'That key is not valid. Check and try again.' },
+      })
     }
 
     if (!app.env.CLOUD_DATABASE_URL) {
       return reply.status(503).send({
-        error: 'Activation is not available on this installation.',
+        error: {
+          code: 'ACTIVATION_UNAVAILABLE',
+          message: 'Activation is not available on this installation.',
+        },
       })
     }
 
     const existing = readLicenseState(app.db)
     if (existing && existing.key !== key) {
       return reply.status(409).send({
-        error: 'This installation is already activated with a different key.',
+        error: {
+          code: 'ALREADY_ACTIVATED',
+          message: 'This installation is already activated with a different key.',
+        },
       })
     }
 
@@ -79,7 +89,10 @@ export async function activationRoutes(app: FastifyInstance): Promise<void> {
         // One message for every failure: wrong key, already on another machine,
         // revoked. Telling a caller which one lets them probe for valid keys.
         return reply.status(403).send({
-          error: 'That key could not be activated. It may be in use on another PC.',
+          error: {
+            code: 'KEY_REJECTED',
+            message: 'That key could not be activated. It may be in use on another PC.',
+          },
         })
       }
 
@@ -105,12 +118,18 @@ export async function activationRoutes(app: FastifyInstance): Promise<void> {
         // claim is idempotent for this machine's own fingerprint, so a second
         // attempt re-runs the local write against a row that already matches.
         return reply.status(500).send({
-          error: 'The licence was verified but could not be saved on this PC. Try again.',
+          error: {
+            code: 'LOCAL_WRITE_FAILED',
+            message: 'The licence was verified but could not be saved on this PC. Try again.',
+          },
         })
       }
 
       return reply.status(503).send({
-        error: 'Could not reach the licence server. Check this PC’s internet connection.',
+        error: {
+          code: 'LICENCE_SERVER_UNREACHABLE',
+          message: 'Could not reach the licence server. Check this PC’s internet connection.',
+        },
       })
     }
   })

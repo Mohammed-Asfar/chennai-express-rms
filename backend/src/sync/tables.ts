@@ -142,7 +142,11 @@ export const SYNC_TABLES: SyncTable[] = [
     name: 'settings',
     columns: ['branch_id', 'key', 'value', 'created_at', 'updated_at'],
     conflictKeys: ['branch_id', 'key'],
-    tracked: false,
+    // Tracked, unlike the link tables below it. Untracked means "push the whole
+    // table every cycle", which for settings meant ten rows upserted to the
+    // cloud once a minute for ever, and left the worker unable to tell an idle
+    // cycle from a busy one — there was always something pending to send.
+    tracked: true,
   },
 ]
 

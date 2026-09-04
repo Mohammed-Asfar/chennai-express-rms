@@ -491,7 +491,12 @@ async function seedLocal() {
     if (!dryRun) {
       write()
       console.log(`${categories} categories, ${items} items written`)
-      console.log('The sync worker will push these to the cloud on its next cycle.')
+      // Written straight to SQLite, so nothing in the running backend knows.
+      // The API's onResponse hook is what normally signals the sync worker, and
+      // this wrote underneath it — the rows wait for the next heartbeat, up to a
+      // minute away. Saying so beats leaving someone watching a count that has
+      // not moved and wondering what broke.
+      console.log('Written to this PC. The sync worker pushes them within a minute.')
     } else {
       console.log(`${MENU.length} categories, ${MENU.reduce((n, g) => n + g.items.length, 0)} items`)
       console.log('\nDry run — nothing written. Re-run without --dry-run to apply.')

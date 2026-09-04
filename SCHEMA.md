@@ -628,10 +628,16 @@ Key-value, one row per key per branch.
 | `branch_id` | `fk` | |
 | `key` | `text` | |
 | `value` | `text` | |
+| `sync_attempts` | `int` | Quarantine counter, as on every synced table (§5.2) |
+| `sync_error` | `text` | Last push failure, for the backup screen |
 
 ```sql
 PRIMARY KEY (branch_id, key)
 ```
+
+Tracked for sync since `0009`. Before that it was pushed whole on every cycle —
+ten rows upserted to the cloud once a minute whether or not anything had changed,
+and the worker could never tell an idle cycle from a busy one.
 
 | Key | Example | Meaning |
 |---|---|---|
@@ -852,9 +858,16 @@ their cloud reports are complete when they are not.
 | Trigger | Timing |
 |---|---|
 | After a write | ~2s debounce, so a burst of order edits becomes one push |
-| Idle heartbeat | Every 60s — catches rows missed by a crash mid-cycle |
+| Idle heartbeat | Every 60s |
 | On reconnect | Immediately, rather than waiting for the next tick |
 | On startup | Whatever was pending when the process last stopped |
+
+**A bill reaches the cloud on the write trigger, not the heartbeat.** Every
+successful non-GET request signals the worker, so a payment pushes about two
+seconds after it is taken. The heartbeat covers what that misses: a batch capped
+at 200 rows leaving more behind, a row written outside the API, and — the reason
+it runs on a till that is doing nothing at all — knowing the cloud is still
+reachable, which is what the backup screen reports.
 
 Backoff between retries is 30s, 1m, 2m, 4m, 8m. A restaurant offline for a day must
 not hammer a dead connection thousands of times.
