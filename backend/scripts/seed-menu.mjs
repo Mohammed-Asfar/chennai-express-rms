@@ -1,14 +1,16 @@
 /**
  * Seeds the printed menu.
  *
- *   node scripts/seed-menu.mjs --dry-run          # print what would be written
- *   node scripts/seed-menu.mjs                    # write it to the cloud
+ *   node scripts/seed-menu.mjs --local --dry-run  # print what would be written
  *   node scripts/seed-menu.mjs --local            # write it to this PC's till
  *   node scripts/seed-menu.mjs --local --db PATH  # a specific database file
  *
- * Sync only pushes upward, so a menu written to the cloud never reaches a till
- * that already has a database. --local writes to SQLite instead, and the sync
- * worker then carries it up the way menu data normally travels.
+ * Always the till, never the cloud: sync only pushes upward, so rows written
+ * straight to Postgres never reach a till that already has a database. Writing
+ * to SQLite and letting the sync worker carry it up is how menu data travels.
+ *
+ * Safe to re-run. Items the card no longer lists are retired — soft-deleted, so
+ * the order lines and printed bills that reference them are untouched.
  *
  * Prices are integer paise, exactly as the rest of the system stores money:
  * the card's ₹140.00 is 14000. Nothing here is a float at any point.
@@ -21,9 +23,8 @@
  * item name, so running this twice updates rather than duplicating — a menu
  * seeded twice would otherwise show every dish twice on the till.
  *
- * synced_at is left NULL. These rows were written straight to the cloud rather
- * than pushed from a till, and marking them as pushed would be a lie the sync
- * worker later has to reconcile.
+ * synced_at is left NULL so the sync worker treats every row as pending and
+ * pushes it on its next cycle.
  */
 
 import { createHash } from 'node:crypto'
@@ -84,10 +85,12 @@ const MENU = [
       ['Lemon Chicken', 215],
       ['Ginger Chicken', 215],
       ['Garlic Chicken', 215],
-      ['Chilly Chicken (Dry & Gravy)', 185],
+      // "(Dry & Gravy)" on the card means both are available at one price, not
+      // that a plate arrives with each. The kitchen still has to be told which.
+      ['Chilly Chicken', [['Dry', 185], ['Gravy', 185]]],
       ['Chicken Manchurian', 185],
-      ['Pepper Chicken (Dry)', 195],
-      ['Pepper Chicken (Fry)', 195],
+      // Two preparations at one price, so the kitchen ticket has to say which.
+      ['Pepper Chicken', [['Dry', 195], ['Fry', 195]]],
       ['Chicken 65', 160],
       ['Egg Chilly', 140],
       ['Egg Manchurian', 140],
@@ -105,7 +108,7 @@ const MENU = [
       ['Paneer Manchurian', 195],
       ['Mushroom Chilly', 165],
       ['Mushroom Manchurian', 165],
-      ['Gobi Chilly (Dry & Gravy)', 165],
+      ['Gobi Chilly', [['Dry', 165], ['Gravy', 165]]],
       ['Gobi Manchurian', 165],
       ['Gobi 65', 165],
     ],
@@ -144,9 +147,9 @@ const MENU = [
   {
     category: "Tandoori - Kabab's",
     items: [
-      ['Tandoori Chicken (Full)', 440],
-      ['Tandoori Chicken (Half)', 240],
-      ['Tandoori Chicken (Single)', 120],
+      // One dish at three prices. As three items, staff had to find the right
+      // "(Half)" among them; as portions they tap the dish and pick the size.
+      ['Tandoori Chicken', [['Full', 440], ['Half', 240], ['Single', 120]]],
       ['Chicken Tikka', 190],
       ['Chicken Malai Tikka', 250],
       ['Chicken Haryali Kabab', 240],
@@ -323,6 +326,18 @@ function toPaise(rupees) {
 }
 
 /**
+ * The portions an entry offers, as `[name, rupees]` pairs.
+ *
+ * A bare number means one portion, named "Regular" — most of the card. An array
+ * means the dish is sold in sizes: Tandoori Chicken is one dish at three
+ * prices, not three dishes, and listing it as three left staff scanning for
+ * "(Half)" instead of picking a portion under the name they know.
+ */
+function portionsOf(priced) {
+  return typeof priced === 'number' ? [['Regular', priced]] : priced
+}
+
+/**
  * A stable UUID for a seeded row.
  *
  * Derived from the branch and a label so a re-run addresses the same rows.
@@ -402,9 +417,10 @@ async function seedLocal() {
     const variant = db.prepare(`
       INSERT INTO menu_item_variants
         (id, menu_item_id, name, price, sort_order, is_available, created_at, updated_at)
-      VALUES (?, ?, ?, ?, 0, 1, ?, ?)
+      VALUES (?, ?, ?, ?, ?, 1, ?, ?)
       ON CONFLICT (id) DO UPDATE SET
-        price = excluded.price, is_available = 1,
+        name = excluded.name, price = excluded.price,
+        sort_order = excluded.sort_order, is_available = 1,
         deleted_at = NULL, updated_at = excluded.updated_at
     `)
 
@@ -430,11 +446,24 @@ async function seedLocal() {
         category.run(categoryId, branch.id, group.category, index, now, now)
         categories++
 
-        for (const [order, [name, rupees]] of group.items.entries()) {
+        for (const [order, [name, priced]] of group.items.entries()) {
           const itemId = stableId(branch.id, `item:${group.category}:${name}`)
-          const variantId = stableId(branch.id, `variant:${group.category}:${name}`)
           item.run(itemId, branch.id, categoryId, name, TAX_RATE, order, now, now)
-          variant.run(variantId, itemId, 'Regular', toPaise(rupees), now, now)
+
+          const portions = portionsOf(priced)
+
+          for (const [vOrder, [vName, rupees]] of portions.entries()) {
+            // A lone "Regular" keeps the key it was first seeded under.
+            // Appending the portion name unconditionally gave every existing
+            // item a second Regular row under a new id, which collides with
+            // the old one on (menu_item_id, name) and fails the whole run.
+            const variantId =
+              portions.length === 1
+                ? stableId(branch.id, `variant:${group.category}:${name}`)
+                : stableId(branch.id, `variant:${group.category}:${name}:${vName}`)
+            variant.run(variantId, itemId, vName, toPaise(rupees), vOrder, now, now)
+          }
+
           items++
           wanted.push(itemId)
         }
@@ -449,8 +478,12 @@ async function seedLocal() {
 
     for (const group of MENU) {
       console.log(`${group.category}  (${group.items.length} items)`)
-      for (const [name, rupees] of group.items) {
-        console.log(`   ${name.padEnd(26)} ₹${String(rupees).padStart(5)}  =  ${toPaise(rupees)} paise`)
+      for (const [name, priced] of group.items) {
+        const portions = portionsOf(priced)
+        const shown = portions
+          .map(([vName, rupees]) => (portions.length === 1 ? `₹${rupees}` : `${vName} ₹${rupees}`))
+          .join('   ')
+        console.log(`   ${name.padEnd(30)} ${shown}`)
       }
       console.log('')
     }
@@ -468,99 +501,20 @@ async function seedLocal() {
   }
 }
 
+/**
+ * Refuses, and says where to go instead.
+ *
+ * Writing straight to the cloud bypasses the till, which then never sees the
+ * menu — sync only pushes upward, so rows written here stay there. It also
+ * meant a second copy of the write path, and the two drifted the moment
+ * portions were added to one and not the other.
+ */
 async function seedCloud() {
-const { loadEnv } = await import('../src/lib/env.js')
-const env = loadEnv()
-if (!env.CLOUD_DATABASE_URL) {
-  console.error('CLOUD_DATABASE_URL is not set.')
+  console.error(
+    'Seeding the cloud directly is not supported.\n' +
+      '\n' +
+      '  Menu data belongs on the till first; the sync worker pushes it up.\n' +
+      '  Run:  node scripts/seed-menu.mjs --local\n',
+  )
   process.exit(1)
-}
-
-const { default: postgres } = await import('postgres')
-const sql = postgres(env.CLOUD_DATABASE_URL, { max: 1, connect_timeout: 10 })
-
-try {
-  const branches = await sql`
-    SELECT id, name FROM branches WHERE deleted_at IS NULL ORDER BY created_at LIMIT 1
-  `
-  if (branches.length === 0) {
-    console.error('No branch in the cloud. Install and activate a till first.')
-    process.exit(1)
-  }
-
-  const branch = branches[0]
-  const now = new Date()
-
-  let categories = 0
-  let items = 0
-
-  console.log(`branch: ${branch.name} (${branch.id})`)
-  console.log(dryRun ? 'DRY RUN — nothing will be written\n' : '')
-
-  for (const [index, group] of MENU.entries()) {
-    const categoryId = stableId(branch.id, `category:${group.category}`)
-    console.log(`${group.category}  (${group.items.length} items)`)
-
-    if (!dryRun) {
-      await sql`
-        INSERT INTO categories (id, branch_id, name, sort_order, is_active, created_at, updated_at)
-        VALUES (${categoryId}, ${branch.id}, ${group.category}, ${index}, true, ${now}, ${now})
-        ON CONFLICT (id) DO UPDATE SET
-          name = excluded.name,
-          sort_order = excluded.sort_order,
-          is_active = true,
-          deleted_at = NULL,
-          updated_at = excluded.updated_at
-      `
-    }
-    categories++
-
-    for (const [order, [name, rupees]] of group.items.entries()) {
-      const itemId = stableId(branch.id, `item:${group.category}:${name}`)
-      const variantId = stableId(branch.id, `variant:${group.category}:${name}`)
-      const price = toPaise(rupees)
-
-      console.log(`   ${name.padEnd(26)} ₹${String(rupees).padStart(5)}  =  ${price} paise`)
-
-      if (!dryRun) {
-        await sql`
-          INSERT INTO menu_items
-            (id, branch_id, category_id, name, tax_rate, is_available, sort_order, created_at, updated_at)
-          VALUES
-            (${itemId}, ${branch.id}, ${categoryId}, ${name}, ${TAX_RATE}, true, ${order}, ${now}, ${now})
-          ON CONFLICT (id) DO UPDATE SET
-            name = excluded.name,
-            category_id = excluded.category_id,
-            tax_rate = excluded.tax_rate,
-            is_available = true,
-            sort_order = excluded.sort_order,
-            deleted_at = NULL,
-            updated_at = excluded.updated_at
-        `
-
-        // Every item needs one variant: price lives on the variant, never on
-        // the item. A single unnamed variant is how a dish with no size options
-        // is represented.
-        await sql`
-          INSERT INTO menu_item_variants
-            (id, menu_item_id, name, price, sort_order, is_available, created_at, updated_at)
-          VALUES
-            (${variantId}, ${itemId}, ${'Regular'}, ${price}, 0, true, ${now}, ${now})
-          ON CONFLICT (id) DO UPDATE SET
-            price = excluded.price,
-            is_available = true,
-            deleted_at = NULL,
-            updated_at = excluded.updated_at
-        `
-      }
-      items++
-    }
-    console.log('')
-  }
-
-  console.log(`${categories} categories, ${items} items`)
-  if (dryRun) console.log('\nDry run — nothing written. Re-run without --dry-run to apply.')
-} finally {
-  await sql.end({ timeout: 5 })
-}
 }
