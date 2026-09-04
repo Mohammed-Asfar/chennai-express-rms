@@ -301,12 +301,29 @@ class _CategoryTileState extends State<_CategoryTile> {
             onTap: widget.onTap,
             borderRadius: BorderRadius.circular(AppSpacing.radiusSm),
             child: Padding(
-              padding: const EdgeInsets.symmetric(
-                horizontal: AppSpacing.md,
-                vertical: AppSpacing.sm + 2,
+              padding: const EdgeInsets.only(
+                right: AppSpacing.md,
+                top: AppSpacing.sm + 2,
+                bottom: AppSpacing.sm + 2,
               ),
               child: Row(
                 children: [
+                  // The selection marker.
+                  //
+                  // accentTint against the canvas is 1.01:1 — the same colour to
+                  // the eye — so which category was selected was carried by a
+                  // slightly bolder weight and nothing else. A solid accent bar
+                  // is 1.5:1 against the row and unmistakable in shape, which is
+                  // what a pale fill cannot be at any tint.
+                  Container(
+                    width: 3,
+                    height: 22,
+                    decoration: BoxDecoration(
+                      color: widget.selected ? AppColors.accent : Colors.transparent,
+                      borderRadius: BorderRadius.circular(2),
+                    ),
+                  ),
+                  const SizedBox(width: AppSpacing.md - 3),
                   Expanded(
                     child: Text(
                       category.name,
