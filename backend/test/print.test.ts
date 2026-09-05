@@ -257,6 +257,43 @@ test('a bill says which kind of order it was', () => {
   assertEqual(takeaway.includes('Delivery'), false)
 })
 
+test('a delivery bill carries the address to the door', () => {
+  // The rider takes this bill with them. An address recorded at the till and
+  // then not printed is an address nobody can use.
+  const text = readable(
+    renderBill({
+      ...billBase,
+      type: 'delivery',
+      tableName: null,
+      customerName: 'Ravi, 3rd cross, ECR Road',
+      customerPhone: '9940817315',
+    }),
+  )
+
+  assertEqual(text.includes('9940817315'), true, 'the number to call')
+  assertEqual(text.includes('Ravi, 3rd cross'), true, 'where it is going')
+})
+
+test('a bill with no customer prints no empty contact lines', () => {
+  // Most takeaways have nothing recorded, and a blank contact line on every
+  // bill would be noise on the commonest sale in the shop.
+  //
+  // The branch's own phone is set here deliberately: it prints as "Ph:" too,
+  // so counting occurrences is what distinguishes "the shop's number" from
+  // "the shop's number plus an empty customer one".
+  const text = readable(
+    renderBill({
+      ...billBase,
+      type: 'takeaway',
+      tableName: null,
+      branchPhone: '04412345678',
+    }),
+  )
+
+  const contactLines = text.split('\n').filter((l) => l.includes('Ph:')).length
+  assertEqual(contactLines, 1, 'only the branch phone, no blank customer line')
+})
+
 test('bill shows the number, the branch and the total', () => {
   const text = readable(renderBill(billBase))
   assertEqual(text.includes('0042'), true)

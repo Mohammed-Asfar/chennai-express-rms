@@ -472,6 +472,10 @@ export async function billRoutes(app: FastifyInstance): Promise<void> {
           orderNo: order?.order_no ?? 0,
           type: order?.type ?? 'dine_in',
           tableName: table?.name ?? null,
+          // From the bill, which snapshotted them: the order's copy can be
+          // edited afterwards, and a reprint must show what was printed.
+          customerName: bill.customer_name,
+          customerPhone: bill.customer_phone,
           printedAt: new Date(),
           lines: items.map((item) => ({
             name: item.item_name,

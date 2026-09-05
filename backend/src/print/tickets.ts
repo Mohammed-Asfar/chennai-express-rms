@@ -52,6 +52,9 @@ export interface BillData {
   orderNo: number
   type: OrderType
   tableName?: string | null
+  /** Printed on a delivery, where the rider carries this bill to the door. */
+  customerName?: string | null
+  customerPhone?: string | null
   printedAt: Date
   lines: TicketLine[]
   subtotal: number
@@ -177,6 +180,14 @@ export function renderBill(data: BillData, paper: PaperWidth = '80mm'): Buffer {
         ? 'Delivery'
         : (data.tableName ?? 'Dine-in')
   b.columns(`${where}  Order #${data.orderNo}`, timeOf(data.printedAt))
+
+  // On a delivery the rider carries this bill to the door, so the address has
+  // to be on it. Wrapped rather than truncated: half an address is no address.
+  // Printed whenever they are recorded, not only for deliveries — a takeaway
+  // taken over the phone has the same need.
+  if (data.customerPhone) b.line(`Ph: ${data.customerPhone}`)
+  if (data.customerName) b.wrapped(data.customerName)
+
   b.rule()
 
   // Header for the item columns.

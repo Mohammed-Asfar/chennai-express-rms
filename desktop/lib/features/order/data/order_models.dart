@@ -1,4 +1,12 @@
-enum OrderType { dineIn, takeaway }
+enum OrderType { dineIn, takeaway, delivery }
+
+extension OrderTypeLabel on OrderType {
+  String get label => switch (this) {
+    OrderType.dineIn => 'Dine-in',
+    OrderType.takeaway => 'Takeaway',
+    OrderType.delivery => 'Delivery',
+  };
+}
 
 enum OrderStatus { open, billed, cancelled }
 
@@ -61,6 +69,7 @@ class Order {
     this.tableId,
     this.seatLabel,
     this.customerName,
+    this.customerPhone,
   });
 
   final String id;
@@ -80,13 +89,21 @@ class Order {
   final String? seatLabel;
   final String? customerName;
 
+  /// The number a rider calls when they cannot find the door. Null on most
+  /// walk-in takeaways, which have nothing worth recording.
+  final String? customerPhone;
+
   bool get isOpen => status == OrderStatus.open;
   bool get isEmpty => lines.isEmpty;
 
   factory Order.fromJson(Map<String, dynamic> json) => Order(
         id: json['id'] as String,
         orderNo: json['orderNo'] as int,
-        type: json['type'] == 'dine_in' ? OrderType.dineIn : OrderType.takeaway,
+        type: switch (json['type']) {
+          'dine_in' => OrderType.dineIn,
+          'delivery' => OrderType.delivery,
+          _ => OrderType.takeaway,
+        },
         status: switch (json['status']) {
           'billed' => OrderStatus.billed,
           'cancelled' => OrderStatus.cancelled,
@@ -103,5 +120,6 @@ class Order {
         tableId: json['tableId'] as String?,
         seatLabel: json['seatLabel'] as String?,
         customerName: json['customerName'] as String?,
+        customerPhone: json['customerPhone'] as String?,
       );
 }

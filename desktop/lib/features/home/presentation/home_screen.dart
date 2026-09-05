@@ -16,6 +16,7 @@ import '../../bookings/presentation/bookings_screen.dart';
 import '../../menu/presentation/menu_admin_screen.dart';
 import '../../settings/presentation/settings_screen.dart';
 import '../../order/data/order_repository.dart';
+import '../../order/presentation/delivery_details_dialog.dart';
 import '../../order/presentation/order_screen.dart';
 import '../../reports/presentation/reports_screen.dart';
 import '../../activation/presentation/license_banner.dart';
@@ -101,12 +102,28 @@ class _HomeScreenState extends ConsumerState<HomeScreen> {
     );
   }
 
-  /// Takeaway and delivery differ only in what the order is labelled.
+  /// Starts a counter order — takeaway straight away, delivery after asking.
+  ///
+  /// Takeaway stays one tap: the customer is standing there, and most walk-ins
+  /// have nothing worth recording. A delivery is asked first, because a rider
+  /// needs a number and an address, and the end of the order is too late —
+  /// the food is being packed and whoever took the call has moved on.
   Future<void> _startCounterOrder(BuildContext context, {bool delivery = false}) async {
+    ({String name, String phone})? details;
+    if (delivery) {
+      details = await DeliveryDetailsDialog.show(context);
+      // Dismissed, not skipped: no order is started at all.
+      if (details == null || !context.mounted) return;
+    }
+
     try {
       final order = await ref
           .read(orderRepositoryProvider)
-          .startCounterOrder(delivery: delivery);
+          .startCounterOrder(
+            delivery: delivery,
+            customerName: details?.name,
+            customerPhone: details?.phone,
+          );
       if (!context.mounted) return;
       await Navigator.of(context).push(
         MaterialPageRoute<void>(builder: (_) => OrderScreen(orderId: order.id)),

@@ -49,7 +49,23 @@ class OrderScreen extends ConsumerWidget {
       },
       child: Scaffold(
         appBar: AppBar(
-          title: Text(order == null ? 'Order' : _title(order)),
+          title: order == null
+              ? const Text('Order')
+              : Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  mainAxisSize: MainAxisSize.min,
+                  children: [
+                    Text(_title(order)),
+                    // Read back to the customer while the order is taken, and
+                    // read off by whoever hands it to the rider. Recording an
+                    // address nobody can see afterwards would be pointless.
+                    if (_contact(order) != null)
+                      Text(
+                        _contact(order)!,
+                        style: Theme.of(context).textTheme.bodySmall,
+                      ),
+                  ],
+                ),
           actions: [
             if (order != null && order.isOpen)
               TextButton.icon(
@@ -131,10 +147,23 @@ class OrderScreen extends ConsumerWidget {
     if (navigator.mounted) navigator.pop();
   }
 
+  /// The customer line under the title, or null when there is nothing to show.
+  ///
+  /// Phone first: it is what someone reaches for when a rider cannot find the
+  /// address, and it is the shorter of the two.
+  static String? _contact(Order order) {
+    final parts = [
+      if (order.customerPhone != null && order.customerPhone!.isNotEmpty)
+        order.customerPhone!,
+      if (order.customerName != null && order.customerName!.isNotEmpty)
+        order.customerName!,
+    ];
+    return parts.isEmpty ? null : parts.join(' · ');
+  }
+
   static String _title(Order order) {
-    final kind = order.type == OrderType.dineIn ? 'Dine-in' : 'Takeaway';
     final seat = order.seatLabel == null ? '' : ' · ${order.seatLabel}';
-    return '$kind #${order.orderNo}$seat';
+    return '${order.type.label} #${order.orderNo}$seat';
   }
 
   /// Sends the kitchen ticket.
