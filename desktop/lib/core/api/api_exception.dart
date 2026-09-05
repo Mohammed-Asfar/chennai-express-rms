@@ -25,3 +25,17 @@ class ApiException implements Exception {
   @override
   String toString() => 'ApiException($code): $message';
 }
+
+/// What to put in front of a person when something failed.
+///
+/// `'$error'` reads an exception's `toString()`, and for an ApiException that
+/// is `ApiException(ALREADY_BILLED): This order has already been billed` — a
+/// class name and a wire constant, shown to a cashier mid-service. The message
+/// alone is the half that was written for them.
+///
+/// Anything that is not an ApiException has no user-facing text at all, so it
+/// gets a sentence that says what to do rather than a fragment of a stack trace.
+String userMessage(Object error) {
+  if (error is ApiException) return error.message;
+  return 'Something went wrong. Try again, and tell support if it keeps happening.';
+}

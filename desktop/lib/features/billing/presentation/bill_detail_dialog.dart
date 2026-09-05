@@ -51,7 +51,7 @@ class BillDetailDialog extends ConsumerWidget {
           ),
           error: (error, _) => Padding(
             padding: const EdgeInsets.all(AppSpacing.lg),
-            child: ErrorBanner(message: '$error'),
+            child: ErrorBanner(message: userMessage(error)),
           ),
           data: (bill) => _Content(bill: bill),
         ),

@@ -70,6 +70,7 @@ class Order {
     this.seatLabel,
     this.customerName,
     this.customerPhone,
+    this.billId,
   });
 
   final String id;
@@ -92,6 +93,16 @@ class Order {
   /// The number a rider calls when they cannot find the door. Null on most
   /// walk-in takeaways, which have nothing worth recording.
   final String? customerPhone;
+
+  /// The bill already raised against this order, when there is one.
+  ///
+  /// An order reopened to correct a bill is open like any other, so without
+  /// this the till offered Take payment - which tries to create a second bill
+  /// and came back ALREADY_BILLED in the cashier's face.
+  final String? billId;
+
+  /// Open only so an existing bill can be corrected, not to be billed afresh.
+  bool get isBeingCorrected => billId != null;
 
   bool get isOpen => status == OrderStatus.open;
   bool get isEmpty => lines.isEmpty;
@@ -121,5 +132,6 @@ class Order {
         seatLabel: json['seatLabel'] as String?,
         customerName: json['customerName'] as String?,
         customerPhone: json['customerPhone'] as String?,
+        billId: json['billId'] as String?,
       );
 }

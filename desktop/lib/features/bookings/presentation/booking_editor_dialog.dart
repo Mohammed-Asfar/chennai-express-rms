@@ -1,4 +1,5 @@
 import 'package:flutter/material.dart';
+import '../../../core/api/api_exception.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import '../../../core/theme/app_colors.dart';
 import '../../../core/theme/app_spacing.dart';
@@ -174,7 +175,7 @@ class _BookingEditorDialogState extends ConsumerState<BookingEditorDialog> {
                   padding: EdgeInsets.all(AppSpacing.md),
                   child: Center(child: CircularProgressIndicator()),
                 ),
-                error: (error, _) => ErrorBanner(message: '$error'),
+                error: (error, _) => ErrorBanner(message: userMessage(error)),
                 data: (sections) => _TablePicker(
                   sections: sections,
                   selected: _tableIds,
@@ -314,7 +315,7 @@ class _BookingEditorDialogState extends ConsumerState<BookingEditorDialog> {
       if (mounted) {
         setState(() {
           _busy = false;
-          _error = '$error';
+          _error = userMessage(error);
         });
       }
     }

@@ -32,7 +32,7 @@ class FloorScreen extends ConsumerWidget {
           constraints: const BoxConstraints(maxWidth: 480),
           child: Padding(
             padding: const EdgeInsets.all(AppSpacing.xl),
-            child: ErrorBanner(message: '$error'),
+            child: ErrorBanner(message: userMessage(error)),
           ),
         ),
       ),
@@ -400,7 +400,7 @@ class FloorScreen extends ConsumerWidget {
       await _openOrder(context, ref, order.id);
     } catch (error) {
       if (!context.mounted) return;
-      ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text('$error')));
+      ScaffoldMessenger.of(context).showSnackBar(SnackBar(content: Text(userMessage(error))));
     }
   }
 

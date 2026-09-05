@@ -1,4 +1,5 @@
 import 'package:flutter/material.dart';
+import '../../../core/api/api_exception.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import '../../../core/theme/app_colors.dart';
 import '../../../core/theme/app_spacing.dart';
@@ -146,7 +147,7 @@ class _BillsScreenState extends ConsumerState<BillsScreen> {
                 constraints: const BoxConstraints(maxWidth: 480),
                 child: Padding(
                   padding: const EdgeInsets.all(AppSpacing.xl),
-                  child: ErrorBanner(message: '$error'),
+                  child: ErrorBanner(message: userMessage(error)),
                 ),
               ),
             ),

@@ -166,7 +166,7 @@ class _ReportError extends StatelessWidget {
                     ),
                   ],
                 )
-              : ErrorBanner(message: '$error'),
+              : ErrorBanner(message: userMessage(error)),
         ),
       ),
     );
@@ -527,7 +527,7 @@ class _TrendSection extends ConsumerWidget {
           padding: EdgeInsets.symmetric(vertical: AppSpacing.xl),
           child: AppLoading(),
         ),
-        error: (error, _) => ErrorBanner(message: '$error'),
+        error: (error, _) => ErrorBanner(message: userMessage(error)),
         data: (report) => SalesTrendChart(days: report.days),
       ),
     );
@@ -566,7 +566,7 @@ class _TopDishesSection extends ConsumerWidget {
           padding: EdgeInsets.symmetric(vertical: AppSpacing.xl),
           child: AppLoading(),
         ),
-        error: (error, _) => ErrorBanner(message: '$error'),
+        error: (error, _) => ErrorBanner(message: userMessage(error)),
         data: (report) =>
             TopDishesChart(items: report.items.take(_topN).toList()),
       ),
@@ -599,7 +599,7 @@ class _ItemSalesSection extends ConsumerWidget {
           padding: EdgeInsets.symmetric(vertical: AppSpacing.md),
           child: AppLoading(),
         ),
-        error: (error, _) => ErrorBanner(message: '$error'),
+        error: (error, _) => ErrorBanner(message: userMessage(error)),
         data: (report) => report.items.isEmpty
             ? const ReportEmpty(message: 'Nothing was sold in this range.')
             : Column(
@@ -747,7 +747,7 @@ class _OutstandingSection extends ConsumerWidget {
           padding: EdgeInsets.symmetric(vertical: AppSpacing.md),
           child: AppLoading(),
         ),
-        error: (error, _) => ErrorBanner(message: '$error'),
+        error: (error, _) => ErrorBanner(message: userMessage(error)),
         data: (report) => report.bills.isEmpty
             ? const ReportEmpty(message: 'Nothing is owed. Every bill is settled.')
             : Column(

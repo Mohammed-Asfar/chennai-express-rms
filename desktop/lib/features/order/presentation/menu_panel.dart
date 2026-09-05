@@ -1,4 +1,5 @@
 import 'package:flutter/material.dart';
+import '../../../core/api/api_exception.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import '../../../core/theme/app_colors.dart';
 import '../../../core/theme/app_spacing.dart';
@@ -81,7 +82,7 @@ class _MenuPanelState extends ConsumerState<MenuPanel> {
             loading: () => const AppLoading(),
             error: (error, _) => Padding(
               padding: const EdgeInsets.all(AppSpacing.lg),
-              child: ErrorBanner(message: '$error'),
+              child: ErrorBanner(message: userMessage(error)),
             ),
             data: (all) {
               final visible = all.where((item) {

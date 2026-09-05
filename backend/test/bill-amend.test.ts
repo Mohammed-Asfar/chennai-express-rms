@@ -520,6 +520,39 @@ test('a recalculate that moved nothing still closes the order', async () => {
   await close(ctx)
 })
 
+test('a reopened order reports the bill it belongs to', async () => {
+  // The till reads this to know it must update the bill rather than raise a
+  // second one. Without it the order looks like any other open order, and
+  // Take payment came back ALREADY_BILLED in the cashier's face.
+  const ctx = await setup()
+  const orderId = await makeOrder(ctx, [{ variantId: ctx.full, qty: 1 }])
+
+  const before = await ctx.app.inject({
+    method: 'GET',
+    url: `/orders/${orderId}`,
+    headers: ctx.cashier,
+  })
+  assertEqual(
+    (before.json() as { order: { billId: string | null } }).order.billId,
+    null,
+    'nothing billed yet',
+  )
+
+  const bill = await makeBill(ctx, orderId)
+  await reopen(ctx, bill.id)
+
+  const after = await ctx.app.inject({
+    method: 'GET',
+    url: `/orders/${orderId}`,
+    headers: ctx.cashier,
+  })
+  const order = (after.json() as { order: { status: string; billId: string | null } }).order
+
+  assertEqual(order.status, 'open', 'open so its lines can be changed')
+  assertEqual(order.billId, bill.id, 'and it says which bill it belongs to')
+  await close(ctx)
+})
+
 test('an amendment that changes nothing is refused', async () => {
   // A no-op would write a history row saying nothing happened.
   const ctx = await setup()

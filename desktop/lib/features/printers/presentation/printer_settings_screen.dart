@@ -35,7 +35,7 @@ class PrinterSettingsScreen extends ConsumerWidget {
             constraints: const BoxConstraints(maxWidth: 480),
             child: Padding(
               padding: const EdgeInsets.all(AppSpacing.xl),
-              child: ErrorBanner(message: '$error'),
+              child: ErrorBanner(message: userMessage(error)),
             ),
           ),
         ),

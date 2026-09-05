@@ -1,5 +1,6 @@
 import 'dart:async';
 import 'package:flutter/material.dart';
+import '../../../core/api/api_exception.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import '../../../core/theme/app_colors.dart';
 import '../../../core/theme/app_spacing.dart';
@@ -78,7 +79,7 @@ class _SyncScreenState extends ConsumerState<SyncScreen> {
         loading: () => const AppLoading(message: 'Checking the backup'),
         error: (error, _) => Padding(
           padding: const EdgeInsets.all(AppSpacing.lg),
-          child: ErrorBanner(message: '$error'),
+          child: ErrorBanner(message: userMessage(error)),
         ),
         data: (value) => ListView(
           padding: const EdgeInsets.all(AppSpacing.lg),
@@ -206,7 +207,7 @@ class _SyncScreenState extends ConsumerState<SyncScreen> {
       // landed changed it and nothing pushes that.
       ref.invalidate(cloudStorageProvider);
     } catch (error) {
-      if (mounted) setState(() => _error = '$error');
+      if (mounted) setState(() => _error = userMessage(error));
     } finally {
       if (mounted) setState(() => _busy = false);
     }

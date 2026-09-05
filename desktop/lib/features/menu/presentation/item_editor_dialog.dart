@@ -379,7 +379,7 @@ class _ItemEditorDialogState extends ConsumerState<ItemEditorDialog> {
       if (!mounted) return;
       setState(() {
         _saving = false;
-        _error = '$error';
+        _error = userMessage(error);
       });
     }
   }

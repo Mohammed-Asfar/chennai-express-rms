@@ -137,7 +137,9 @@ export async function orderRoutes(app: FastifyInstance): Promise<void> {
     const me = currentUser(request)
     const order = findOrder(app, me.branchId, request.params.id)
     const items = loadItems(app.db, [order.id]).get(order.id) ?? []
-    return { order: present(order, items, getSetting(app.db, me.branchId, 'tax_mode')) }
+    return {
+      order: present(order, items, getSetting(app.db, me.branchId, 'tax_mode'), billIdOf(app.db, order.id)),
+    }
   })
 
   app.post('/orders', { preHandler: requireAuth }, async (request, reply) => {
@@ -546,7 +548,27 @@ function loadItems(db: Db, orderIds: string[]): Map<string, OrderItemRow[]> {
   return grouped
 }
 
-function present(order: OrderRow, items: OrderItemRow[], taxMode: TaxMode) {
+/**
+ * The bill already raised against an order, if there is one.
+ *
+ * An order reopened to correct a bill is `open` like any other, so nothing on
+ * the row itself says a bill exists — and the till offered "Take payment",
+ * which tries to *create* one and came back ALREADY_BILLED in the cashier's
+ * face. This is how the order screen knows to offer an update instead.
+ */
+function billIdOf(db: Db, orderId: string): string | null {
+  const row = db
+    .prepare('SELECT id FROM bills WHERE order_id = ? AND deleted_at IS NULL')
+    .get(orderId) as { id: string } | undefined
+  return row?.id ?? null
+}
+
+function present(
+  order: OrderRow,
+  items: OrderItemRow[],
+  taxMode: TaxMode,
+  billId: string | null = null,
+) {
   const amounts = items.map((i) => ({ base: i.line_base, tax: i.line_tax, total: i.line_total }))
 
   return {
@@ -557,6 +579,8 @@ function present(order: OrderRow, items: OrderItemRow[], taxMode: TaxMode) {
     tableId: order.table_id,
     seatLabel: order.seat_label,
     status: order.status,
+    /** Set when this order has already been billed and is open for correction. */
+    billId,
     customerName: order.customer_name,
     customerPhone: order.customer_phone,
     cancelReason: order.cancel_reason,
@@ -588,7 +612,9 @@ function present(order: OrderRow, items: OrderItemRow[], taxMode: TaxMode) {
 async function respond(app: FastifyInstance, branchId: string, orderId: string) {
   const order = findOrder(app, branchId, orderId)
   const items = loadItems(app.db, [orderId]).get(orderId) ?? []
-  return { order: present(order, items, getSetting(app.db, branchId, 'tax_mode')) }
+  return {
+    order: present(order, items, getSetting(app.db, branchId, 'tax_mode'), billIdOf(app.db, order.id)),
+  }
 }
 
 function findOrder(app: FastifyInstance, branchId: string, id: string): OrderRow {

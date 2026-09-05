@@ -7,6 +7,7 @@ import '../../../core/utils/money.dart';
 import '../../../core/widgets/app_loading.dart';
 import '../../../core/api/api_exception.dart';
 import '../../../core/widgets/error_banner.dart';
+import '../../billing/data/bill_repository.dart';
 import '../../billing/presentation/billing_dialog.dart';
 import '../../printers/data/printer_repository.dart';
 import '../data/order_models.dart';
@@ -203,6 +204,26 @@ class OrderScreen extends ConsumerWidget {
     WidgetRef ref,
     Order order,
   ) async {
+    // An order reopened to correct an existing bill must not be billed again.
+    // Going through the billing dialog asks the backend to create a second bill
+    // for the same order, which it refuses — and the refusal landed in front of
+    // the cashier as ApiException(ALREADY_BILLED) over a "Take cash" button.
+    if (order.isBeingCorrected) {
+      final messenger = ScaffoldMessenger.of(context);
+      final navigator = Navigator.of(context);
+      try {
+        await ref
+            .read(billRepositoryProvider)
+            .amend(order.billId!, recalculate: true);
+        if (!context.mounted) return;
+        navigator.pop();
+        messenger.showSnackBar(const SnackBar(content: Text('Bill updated')));
+      } on ApiException catch (error) {
+        messenger.showSnackBar(SnackBar(content: Text(error.message)));
+      }
+      return;
+    }
+
     final billed = await showDialog<bool>(
       context: context,
       // Billing cannot be dismissed by clicking away: a half-taken payment
@@ -441,7 +462,13 @@ class _OrderPanel extends ConsumerWidget {
                             width: 18,
                             child: CircularProgressIndicator(strokeWidth: 2),
                           )
-                        : const Text('Take payment'),
+                        // The order already has a bill; this brings it in step
+                        // rather than raising a second one.
+                        : Text(
+                            order.isBeingCorrected
+                                ? 'Update bill'
+                                : 'Take payment',
+                          ),
                   ),
                 ),
               ],

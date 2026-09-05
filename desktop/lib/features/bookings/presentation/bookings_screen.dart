@@ -1,4 +1,5 @@
 import 'package:flutter/material.dart';
+import '../../../core/api/api_exception.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import '../../../core/theme/app_colors.dart';
 import '../../../core/theme/app_spacing.dart';
@@ -86,7 +87,7 @@ class _BookingsScreenState extends ConsumerState<BookingsScreen> {
             loading: () => const AppLoading(),
             error: (error, _) => Padding(
               padding: const EdgeInsets.all(AppSpacing.lg),
-              child: ErrorBanner(message: '$error'),
+              child: ErrorBanner(message: userMessage(error)),
             ),
             data: (loaded) {
               if (loaded.bookings.isEmpty) {
@@ -158,7 +159,7 @@ class _BookingsScreenState extends ConsumerState<BookingsScreen> {
       ref.invalidate(floorProvider);
       ref.invalidate(bookingsProvider);
     } catch (error) {
-      if (context.mounted) _tell(context, '$error');
+      if (context.mounted) _tell(context, userMessage(error));
     }
   }
 
@@ -204,7 +205,7 @@ class _BookingsScreenState extends ConsumerState<BookingsScreen> {
       ref.invalidate(bookingsProvider);
       ref.invalidate(floorProvider);
     } catch (error) {
-      if (context.mounted) _tell(context, '$error');
+      if (context.mounted) _tell(context, userMessage(error));
     }
   }
 

@@ -34,7 +34,7 @@ class _MenuAdminScreenState extends ConsumerState<MenuAdminScreen> {
 
     return categories.when(
       loading: () => const AppLoading(message: 'Loading the menu'),
-      error: (error, _) => _fullWidthError('$error'),
+      error: (error, _) => _fullWidthError(userMessage(error)),
       data: (categoryList) {
         if (categoryList.isEmpty) {
           return _EmptyMenu(onCreate: () => _createCategory(context));
@@ -61,7 +61,7 @@ class _MenuAdminScreenState extends ConsumerState<MenuAdminScreen> {
             Expanded(
               child: items.when(
                 loading: () => const AppLoading(message: 'Loading dishes'),
-                error: (error, _) => _fullWidthError('$error'),
+                error: (error, _) => _fullWidthError(userMessage(error)),
                 data: (allItems) => _ItemPane(
                   categories: categoryList,
                   categoryId: selectedId,

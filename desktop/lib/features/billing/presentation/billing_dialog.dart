@@ -77,7 +77,7 @@ class _BillingDialogState extends ConsumerState<BillingDialog> {
       if (!mounted) return;
       setState(() {
         _isBusy = false;
-        _error = '$error';
+        _error = userMessage(error);
       });
     }
   }
@@ -141,7 +141,7 @@ class _BillingDialogState extends ConsumerState<BillingDialog> {
       if (!mounted) return;
       setState(() {
         _isBusy = false;
-        _error = '$error';
+        _error = userMessage(error);
       });
     }
   }
@@ -181,7 +181,7 @@ class _BillingDialogState extends ConsumerState<BillingDialog> {
       if (!mounted) return;
       setState(() {
         _isBusy = false;
-        _error = '$error';
+        _error = userMessage(error);
       });
     }
   }
@@ -257,7 +257,7 @@ class _BillingDialogState extends ConsumerState<BillingDialog> {
       if (!mounted) return;
       setState(() {
         _isBusy = false;
-        _error = '$error';
+        _error = userMessage(error);
       });
     }
   }
