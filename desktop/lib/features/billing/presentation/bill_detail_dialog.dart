@@ -20,6 +20,18 @@ final _billDetailProvider = FutureProvider.family<Bill, String>((ref, billId) {
   return ref.watch(billRepositoryProvider).fetch(billId);
 });
 
+/// Marks one bill's cached copy, and the list it appears in, as out of date.
+///
+/// Both together, always. The detail is a family provider keyed on the bill id
+/// and caches until invalidated, so refreshing only the list left a bill whose
+/// row read PART PAID ₹405 opening as PAID ₹125 — the figures from before it
+/// was amended. Exported so anything that changes a bill from elsewhere, like
+/// the order screen's "Update bill", cannot refresh half of it.
+void invalidateBill(WidgetRef ref, String billId) {
+  ref.invalidate(_billDetailProvider(billId));
+  ref.invalidate(billListProvider);
+}
+
 /// Everything on one issued bill: what was sold, the tax, and how it was paid.
 ///
 /// The figures are the ones recorded at the time, not recomputed — this is a
@@ -464,8 +476,10 @@ class _Content extends ConsumerWidget {
     final navigator = Navigator.of(context);
     try {
       await ref.read(billRepositoryProvider).voidBill(bill.id, reason);
-      // The bill is gone from the list, so there is nothing left to show.
-      ref.invalidate(billListProvider);
+      // The detail too, not only the list: the cached copy still says the bill
+      // is live, and it is keyed on an id that can be reached again from a
+      // wider date range.
+      _refresh(ref);
       navigator.pop();
       messenger.showSnackBar(
         SnackBar(content: Text('${bill.billNumber} voided')),
@@ -529,7 +543,12 @@ class _Content extends ConsumerWidget {
       // and the banner on the bill is how someone finds that out.
       messenger.showSnackBar(SnackBar(content: Text(error.message)));
     }
-    ref.invalidate(billListProvider);
+
+    // Both, not just the list. The detail is a family provider keyed on the
+    // bill id and caches until invalidated, so refreshing only the list left
+    // the next open showing the figures from before the edit — a bill whose
+    // row said PART PAID 405 opening as PAID 125.
+    _refresh(ref);
   }
 
   /// Brings the bill back in step with an order whose lines have changed.
@@ -547,10 +566,7 @@ class _Content extends ConsumerWidget {
   }
 
   /// Both the detail and the list behind it go stale together.
-  void _refresh(WidgetRef ref) {
-    ref.invalidate(_billDetailProvider(bill.id));
-    ref.invalidate(billListProvider);
-  }
+  void _refresh(WidgetRef ref) => invalidateBill(ref, bill.id);
 
   /// Takes a payment, then reloads so the status and balance follow.
   Future<void> _takePayment(BuildContext context, WidgetRef ref) async {

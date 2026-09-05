@@ -8,6 +8,7 @@ import '../../../core/widgets/app_loading.dart';
 import '../../../core/api/api_exception.dart';
 import '../../../core/widgets/error_banner.dart';
 import '../../billing/data/bill_repository.dart';
+import '../../billing/presentation/bill_detail_dialog.dart';
 import '../../billing/presentation/billing_dialog.dart';
 import '../../printers/data/printer_repository.dart';
 import '../data/order_models.dart';
@@ -215,6 +216,10 @@ class OrderScreen extends ConsumerWidget {
         await ref
             .read(billRepositoryProvider)
             .amend(order.billId!, recalculate: true);
+        // The bill's cached copy is now the one from before this edit. Left
+        // alone, opening it again shows the old total beside a list row
+        // carrying the new one.
+        invalidateBill(ref, order.billId!);
         if (!context.mounted) return;
         navigator.pop();
         messenger.showSnackBar(const SnackBar(content: Text('Bill updated')));
