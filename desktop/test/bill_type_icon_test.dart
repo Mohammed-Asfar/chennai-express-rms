@@ -87,10 +87,39 @@ void main() {
   ) async {
     // orderType is null when the order is gone. The row must still render
     // rather than leaving a ragged gap where every other row has an icon.
+    //
+    // Its own mark, not the dine-in one: with delivery added there are three
+    // real kinds, and borrowing any of their icons would state something about
+    // a bill whose order nobody can look up.
     await pumpBills(tester, [bill('BILL/001')]);
 
-    expect(find.byIcon(Icons.restaurant), findsOneWidget);
+    expect(find.byIcon(Icons.help_outline), findsOneWidget);
+    expect(find.byIcon(Icons.restaurant), findsNothing, reason: 'not claimed as dine-in');
     expect(find.text('BILL/001'), findsOneWidget);
+  });
+
+  testWidgets('delivery and takeaway do not share a mark', (tester) async {
+    // Both are counter sales with no table, so in a list of a hundred bills
+    // this icon is the only thing telling them apart.
+    await pumpBills(tester, [
+      bill('BILL/001', orderType: 'takeaway'),
+      bill('BILL/002', orderType: 'delivery'),
+    ]);
+
+    expect(find.byIcon(Icons.shopping_bag_outlined), findsOneWidget);
+    expect(find.byIcon(Icons.delivery_dining_outlined), findsOneWidget);
+  });
+
+  testWidgets('a delivery bill says so in words', (tester) async {
+    await pumpBills(tester, [bill('BILL/001', orderType: 'delivery')]);
+
+    final tooltip = tester.widget<Tooltip>(
+      find.ancestor(
+        of: find.byIcon(Icons.delivery_dining_outlined),
+        matching: find.byType(Tooltip),
+      ),
+    );
+    expect(tooltip.message, 'Delivery');
   });
 
   testWidgets('the mark says in words what it means', (tester) async {

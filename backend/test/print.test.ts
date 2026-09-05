@@ -135,6 +135,19 @@ test('KOT names the table and the order', () => {
   assertEqual(text.includes('Order #12'), true)
 })
 
+test('the kitchen can tell a delivery from a takeaway', () => {
+  // Both leave the counter with no table, so the ticket heading is the only
+  // thing distinguishing them. One waits at the counter; the other goes out
+  // with a rider, and the kitchen packs them differently.
+  const takeaway = readable(renderKot({ ...kotBase, type: 'takeaway', tableName: null }))
+  assertEqual(takeaway.includes('TAKEAWAY'), true)
+  assertEqual(takeaway.includes('DELIVERY'), false)
+
+  const delivery = readable(renderKot({ ...kotBase, type: 'delivery', tableName: null }))
+  assertEqual(delivery.includes('DELIVERY'), true)
+  assertEqual(delivery.includes('TAKEAWAY'), false)
+})
+
 test('a follow-up ticket is marked, so the kitchen does not cook twice', () => {
   const text = readable(renderKot({ ...kotBase, kind: 'additional' }))
   assertEqual(text.includes('ADDED ITEMS'), true)
@@ -232,6 +245,17 @@ const billBase = {
   payments: [{ mode: 'cash', amount: 76_000 }],
   footer: 'Thank you, come again',
 }
+
+test('a bill says which kind of order it was', () => {
+  // Delivery and takeaway are both counter sales with no table, so the label
+  // is the only thing on the printed bill telling them apart.
+  const delivery = readable(renderBill({ ...billBase, type: 'delivery', tableName: null }))
+  assertEqual(delivery.includes('Delivery'), true)
+
+  const takeaway = readable(renderBill({ ...billBase, type: 'takeaway', tableName: null }))
+  assertEqual(takeaway.includes('Takeaway'), true)
+  assertEqual(takeaway.includes('Delivery'), false)
+})
 
 test('bill shows the number, the branch and the total', () => {
   const text = readable(renderBill(billBase))

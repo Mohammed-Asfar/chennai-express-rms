@@ -16,7 +16,7 @@ import {
   settleJob,
   SETTLE_TIMEOUT_MS,
 } from '../print/queue.js'
-import { renderBill } from '../print/tickets.js'
+import { renderBill, type OrderType } from '../print/tickets.js'
 
 const createBody = z.object({
   orderId: z.string().uuid(),
@@ -229,7 +229,7 @@ export async function billRoutes(app: FastifyInstance): Promise<void> {
       .get(bill.order_id) as
       | {
           order_no: number
-          type: 'dine_in' | 'takeaway'
+          type: OrderType
           table_id: string | null
           status: string
         }
@@ -408,7 +408,7 @@ export async function billRoutes(app: FastifyInstance): Promise<void> {
       const order = app.db
         .prepare('SELECT order_no, type, table_id FROM orders WHERE id = ?')
         .get(bill.order_id) as
-        | { order_no: number; type: 'dine_in' | 'takeaway'; table_id: string | null }
+        | { order_no: number; type: OrderType; table_id: string | null }
         | undefined
 
       const table = order?.table_id

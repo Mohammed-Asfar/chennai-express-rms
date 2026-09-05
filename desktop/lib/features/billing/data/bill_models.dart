@@ -342,6 +342,7 @@ class Bill {
   /// Where the order was taken, for the detail header.
   String get placeLabel {
     if (orderType == 'takeaway') return 'Takeaway';
+    if (orderType == 'delivery') return 'Delivery';
     return tableName ?? 'Dine-in';
   }
 

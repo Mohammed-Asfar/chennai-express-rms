@@ -101,17 +101,32 @@ class Collections {
   );
 }
 
-enum OrderType { dineIn, takeaway }
+/// Where an order went.
+///
+/// Delivery behaves exactly like takeaway — no table, nothing extra required —
+/// and exists so the two can be told apart on a bill and in the sales report.
+enum OrderType { dineIn, takeaway, delivery }
 
 extension OrderTypeLabel on OrderType {
   String get label => switch (this) {
     OrderType.dineIn => 'Dine-in',
     OrderType.takeaway => 'Takeaway',
+    OrderType.delivery => 'Delivery',
+  };
+
+  /// The value the backend stores.
+  String get wire => switch (this) {
+    OrderType.dineIn => 'dine_in',
+    OrderType.takeaway => 'takeaway',
+    OrderType.delivery => 'delivery',
   };
 }
 
-OrderType _orderTypeFrom(Object? wire) =>
-    wire == 'takeaway' ? OrderType.takeaway : OrderType.dineIn;
+OrderType _orderTypeFrom(Object? wire) => switch (wire) {
+  'takeaway' => OrderType.takeaway,
+  'delivery' => OrderType.delivery,
+  _ => OrderType.dineIn,
+};
 
 class OrderTypeSales {
   const OrderTypeSales({

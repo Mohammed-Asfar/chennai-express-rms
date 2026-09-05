@@ -11,6 +11,15 @@ import { rasterCommand, type LogoRaster } from './logo.js'
  * numbers. The customer needs the money to be unambiguous.
  */
 
+/**
+ * Where an order is going.
+ *
+ * Delivery behaves exactly like takeaway — no table, nothing extra required —
+ * and exists only so the two can be told apart on a ticket, on a bill, and in
+ * the sales report.
+ */
+export type OrderType = 'dine_in' | 'takeaway' | 'delivery'
+
 export interface TicketLine {
   name: string
   variantName: string
@@ -23,7 +32,7 @@ export interface TicketLine {
 
 export interface KotData {
   orderNo: number
-  type: 'dine_in' | 'takeaway'
+  type: OrderType
   tableName?: string | null
   seatLabel?: string | null
   printedAt: Date
@@ -41,7 +50,7 @@ export interface BillData {
   branchPhone?: string | null
   gstin?: string | null
   orderNo: number
-  type: 'dine_in' | 'takeaway'
+  type: OrderType
   tableName?: string | null
   printedAt: Date
   lines: TicketLine[]
@@ -84,9 +93,15 @@ export function renderKot(data: KotData, paper: PaperWidth = '80mm'): Buffer {
   b.size(false).bold(false)
 
   b.align('center')
-  const where = data.type === 'takeaway'
-    ? 'TAKEAWAY'
-    : [data.tableName, data.seatLabel].filter(Boolean).join(' / ')
+  // The kitchen reads this to know where the food is going. Delivery has to be
+  // distinguishable from takeaway at a glance: one waits at the counter, the
+  // other leaves with a rider.
+  const where =
+    data.type === 'takeaway'
+      ? 'TAKEAWAY'
+      : data.type === 'delivery'
+        ? 'DELIVERY'
+        : [data.tableName, data.seatLabel].filter(Boolean).join(' / ')
   b.size(true, false).bold(true).line(where || 'DINE-IN').size(false).bold(false)
 
   b.align('left').rule()
@@ -155,7 +170,12 @@ export function renderBill(data: BillData, paper: PaperWidth = '80mm'): Buffer {
 
   b.align('left').rule()
   b.columns(`Bill No: ${data.billNumber}`, dateOf(data.printedAt))
-  const where = data.type === 'takeaway' ? 'Takeaway' : (data.tableName ?? 'Dine-in')
+  const where =
+    data.type === 'takeaway'
+      ? 'Takeaway'
+      : data.type === 'delivery'
+        ? 'Delivery'
+        : (data.tableName ?? 'Dine-in')
   b.columns(`${where}  Order #${data.orderNo}`, timeOf(data.printedAt))
   b.rule()
 

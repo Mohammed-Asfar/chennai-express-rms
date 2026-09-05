@@ -14,17 +14,18 @@ import {
   settleJob,
   SETTLE_TIMEOUT_MS,
 } from '../print/queue.js'
-import { renderKot } from '../print/tickets.js'
+import { renderKot, type OrderType } from '../print/tickets.js'
 
 const createBody = z
   .object({
-    type: z.enum(['dine_in', 'takeaway']),
+    type: z.enum(['dine_in', 'takeaway', 'delivery']),
     tableId: z.string().uuid().optional(),
     seatLabel: z.string().max(16).trim().optional(),
     customerName: z.string().max(64).trim().optional(),
     customerPhone: z.string().max(20).trim().optional(),
   })
-  .refine((body) => body.type === 'takeaway' || body.tableId !== undefined, {
+  // Only dine-in needs a table. Delivery joins takeaway in not having one.
+  .refine((body) => body.type === 'dine_in' ? body.tableId !== undefined : true, {
     message: 'A dine-in order needs a table',
     path: ['tableId'],
   })
@@ -69,7 +70,7 @@ interface OrderRow {
   branch_id: string
   order_no: number
   business_date: string
-  type: 'dine_in' | 'takeaway'
+  type: OrderType
   table_id: string | null
   seat_label: string | null
   status: 'open' | 'billed' | 'cancelled'

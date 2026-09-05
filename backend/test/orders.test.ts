@@ -169,6 +169,77 @@ test('a takeaway order needs no table', async () => {
   await close(ctx)
 })
 
+// --- delivery: a takeaway that is labelled differently ---
+
+test('a delivery order needs no table and no customer details', async () => {
+  // The whole point of the type: it behaves exactly like a takeaway. Requiring
+  // a name or an address would slow down the sale it exists to record.
+  const ctx = await setup()
+  const res = await ctx.app.inject({
+    method: 'POST',
+    url: '/orders',
+    headers: ctx.auth,
+    payload: { type: 'delivery' },
+  })
+
+  assertEqual(res.statusCode, 201)
+  const order = (res.json() as { order: { id: string; status: string } }).order
+  assertEqual(order.status, 'open')
+
+  const row = ctx.db
+    .prepare('SELECT type, table_id FROM orders WHERE id = ?')
+    .get(order.id) as { type: string; table_id: string | null }
+  assertEqual(row.type, 'delivery')
+  assertEqual(row.table_id, null)
+  await close(ctx)
+})
+
+test('delivery and takeaway are told apart, not merged', async () => {
+  // If they were the same value the owner could not answer "how much went out
+  // for delivery today", which is the question the type exists to answer.
+  const ctx = await setup()
+  const delivery = await newOrder(ctx, { type: 'delivery' })
+  const takeaway = await newOrder(ctx, { type: 'takeaway' })
+
+  const typeOf = (id: string) =>
+    (ctx.db.prepare('SELECT type FROM orders WHERE id = ?').get(id) as { type: string }).type
+
+  assertEqual(typeOf(delivery.id), 'delivery')
+  assertEqual(typeOf(takeaway.id), 'takeaway')
+  await close(ctx)
+})
+
+test('a delivery order takes a name and phone when there is one', async () => {
+  // Optional, not absent: a delivery usually does have a contact number, and
+  // the address goes in the same field the customer name uses.
+  const ctx = await setup()
+  const order = await newOrder(ctx, {
+    type: 'delivery',
+    customerName: 'Ravi, 3rd cross, ECR',
+    customerPhone: '9940817315',
+  })
+
+  const row = ctx.db
+    .prepare('SELECT customer_name, customer_phone FROM orders WHERE id = ?')
+    .get(order.id) as { customer_name: string; customer_phone: string }
+  assertEqual(row.customer_name, 'Ravi, 3rd cross, ECR')
+  assertEqual(row.customer_phone, '9940817315')
+  await close(ctx)
+})
+
+test('an unknown order type is still rejected', async () => {
+  // Widening the check must not have turned it into anything-goes.
+  const ctx = await setup()
+  const res = await ctx.app.inject({
+    method: 'POST',
+    url: '/orders',
+    headers: ctx.auth,
+    payload: { type: 'catering' },
+  })
+  assertEqual(res.statusCode, 400)
+  await close(ctx)
+})
+
 test('a dine-in order without a table is rejected', async () => {
   const ctx = await setup()
   const res = await ctx.app.inject({

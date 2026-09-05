@@ -386,20 +386,30 @@ single code path — `order_items` always points at a variant.
 | `branch_id` | `fk` | |
 | `order_no` | `int` | Sequential per branch per day |
 | `business_date` | `text` | `YYYY-MM-DD` — the trading day, not the calendar day |
-| `type` | `enum` | `dine_in`, `takeaway` |
-| `table_id` | `fk` | NULL for takeaway |
+| `type` | `enum` | `dine_in`, `takeaway`, `delivery` |
+| `table_id` | `fk` | NULL for takeaway and delivery |
 | `seat_label` | `text` | Nullable — "A", "Seat 1-2". Distinguishes parties sharing a table. |
 | `status` | `enum` | `open`, `billed`, `cancelled` |
-| `customer_name` | `text` | Nullable — useful for takeaway |
+| `customer_name` | `text` | Nullable — useful for takeaway, and where a delivery address goes |
 | `customer_phone` | `text` | Nullable |
-| `cancel_reason` | `text` | Required when `status = cancelled` |
+| `cancel_reason` | `text` | Nullable — an optional note when cancelling |
 | `version` | `int` | Bumped on every write — rejects stale concurrent edits |
 | `created_by` | `fk` | `users.id` |
 
 ```sql
 UNIQUE (branch_id, business_date, order_no)
-CHECK (type = 'takeaway' OR table_id IS NOT NULL)
+CHECK (type != 'dine_in' OR table_id IS NOT NULL)
 ```
+
+**On `delivery`:** it behaves exactly like a takeaway — no table, nothing extra
+required — and exists only so the two can be told apart on the kitchen ticket, on
+the bill, and in the sales report, where "how much went out for delivery today" is
+a question an owner asks. A note on the order would not do: reports cannot group on
+free text, and it would depend on everyone spelling it the same way.
+
+Deliberately *not* modelled: a rider, a delivery charge, a platform, or a
+commission. The restaurant asked for the simplest thing that distinguishes the two,
+and an address fits in `customer_name` until they say otherwise.
 
 **On `business_date`:** a restaurant open past midnight must keep 1 AM sales on the
 previous trading day. Deriving the day from `created_at` splits a single night's

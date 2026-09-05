@@ -533,21 +533,25 @@ class _BillRowState extends State<_BillRow> {
 class _TypeIcon extends StatelessWidget {
   const _TypeIcon({required this.orderType});
 
-  /// dine_in or takeaway. Null for a bill whose order was purged.
+  /// dine_in, takeaway or delivery. Null for a bill whose order was purged.
   final String? orderType;
 
   @override
   Widget build(BuildContext context) {
-    final takeaway = orderType == 'takeaway';
+    // A distinct icon per kind: delivery and takeaway are both counter sales
+    // with no table, so the badge is the only thing telling them apart in a
+    // list of a hundred bills.
+    final (icon, label) = switch (orderType) {
+      'takeaway' => (Icons.shopping_bag_outlined, 'Takeaway'),
+      'delivery' => (Icons.delivery_dining_outlined, 'Delivery'),
+      null => (Icons.help_outline, 'Order no longer on file'),
+      _ => (Icons.restaurant, 'Dine-in'),
+    };
 
     return Tooltip(
       // Named as well as drawn: an icon alone is a guess until someone is told
       // once what it means.
-      message: orderType == null
-          ? 'Order no longer on file'
-          : takeaway
-          ? 'Takeaway'
-          : 'Dine-in',
+      message: label,
       child: Container(
         height: 36,
         width: 36,
@@ -556,11 +560,7 @@ class _TypeIcon extends StatelessWidget {
           borderRadius: BorderRadius.circular(AppSpacing.radiusSm),
         ),
         alignment: Alignment.center,
-        child: Icon(
-          takeaway ? Icons.shopping_bag_outlined : Icons.restaurant,
-          size: 18,
-          color: AppColors.inkMuted,
-        ),
+        child: Icon(icon, size: 18, color: AppColors.inkMuted),
       ),
     );
   }

@@ -70,7 +70,10 @@ class _HomeScreenState extends ConsumerState<HomeScreen> {
                   // Takeaway belongs to the floor. Showing it while editing the
                   // menu would offer an action that has nothing to do with the
                   // screen in front of you.
-                  onTakeaway: _selected == 0 ? () => _startTakeaway(context) : null,
+                  onTakeaway: _selected == 0 ? () => _startCounterOrder(context) : null,
+                  onDelivery: _selected == 0
+                      ? () => _startCounterOrder(context, delivery: true)
+                      : null,
                   onRefresh: switch (_selected) {
                     0 => () => ref.invalidate(floorProvider),
                     1 => () => ref.invalidate(billListProvider),
@@ -98,9 +101,12 @@ class _HomeScreenState extends ConsumerState<HomeScreen> {
     );
   }
 
-  Future<void> _startTakeaway(BuildContext context) async {
+  /// Takeaway and delivery differ only in what the order is labelled.
+  Future<void> _startCounterOrder(BuildContext context, {bool delivery = false}) async {
     try {
-      final order = await ref.read(orderRepositoryProvider).startTakeaway();
+      final order = await ref
+          .read(orderRepositoryProvider)
+          .startCounterOrder(delivery: delivery);
       if (!context.mounted) return;
       await Navigator.of(context).push(
         MaterialPageRoute<void>(builder: (_) => OrderScreen(orderId: order.id)),
@@ -118,6 +124,7 @@ class _WorkHeader extends StatelessWidget {
   const _WorkHeader({
     required this.title,
     required this.onTakeaway,
+    required this.onDelivery,
     required this.onRefresh,
   });
 
@@ -125,6 +132,7 @@ class _WorkHeader extends StatelessWidget {
 
   /// Null on screens the action does not belong to.
   final VoidCallback? onTakeaway;
+  final VoidCallback? onDelivery;
   final VoidCallback? onRefresh;
 
   @override
@@ -154,6 +162,17 @@ class _WorkHeader extends StatelessWidget {
 
           // Takeaway is a first-class action, not a menu item: it is the second
           // most common way an order starts.
+          // Delivery is outlined, takeaway filled: both are one tap, but the
+          // shop's commonest counter sale should read as the primary action.
+          if (onDelivery != null) ...[
+            OutlinedButton.icon(
+              onPressed: onDelivery,
+              icon: const Icon(Icons.delivery_dining_outlined, size: 18),
+              label: const Text('Delivery'),
+            ),
+            const SizedBox(width: AppSpacing.sm),
+          ],
+
           if (onTakeaway != null)
             ElevatedButton.icon(
               onPressed: onTakeaway,

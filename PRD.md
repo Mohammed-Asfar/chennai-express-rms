@@ -139,7 +139,7 @@ depend on.
 | `categories` | Menu grouping |
 | `menu_items` | Dishes — holds no price |
 | `menu_item_variants` | Portions (Half / Full / Standard) — holds the price |
-| `orders` | Dine-in or takeaway order |
+| `orders` | Dine-in, takeaway or delivery order |
 | `order_items` | Lines on an order |
 | `bills` | Finalised bill |
 | `payments` | Payments against a bill — supports splits and partial payment |
@@ -169,7 +169,7 @@ for rates (5% → `500`). Never float — see `SCHEMA.md` §1.
 | `users.role` | `admin`, `cashier` |
 | `tables.status` | `free`, `occupied`, `reserved` |
 | `reservations.status` | `booked`, `seated`, `no_show`, `cancelled` |
-| `orders.type` | `dine_in`, `takeaway` |
+| `orders.type` | `dine_in`, `takeaway`, `delivery` |
 | `orders.status` | `open`, `billed`, `cancelled` |
 | `bills.payment_status` | `unpaid`, `partial`, `paid` |
 | `payments.mode` | `cash`, `card`, `upi` |
@@ -287,6 +287,7 @@ any date the day bar reaches; there is no month view.
 |---|---|
 | FR-O1 | Cashier can start a **dine-in** order attached to a table |
 | FR-O2 | Cashier can start a **takeaway** order with no table |
+| FR-O2a | Cashier can start a **delivery** order, which behaves exactly like a takeaway — no table, no required customer details. It exists so the two can be told apart on the ticket, the bill and the sales report; an address goes in the customer name field |
 | FR-O3 | A second party can be seated at a table that already has an open order, with no limit on how many |
 | FR-O4 | Each order on a shared table carries an optional `seat_label` ("A", "Seat 1-2") to tell parties apart |
 | FR-O5 | Opening a table with one open order goes straight to it; with several, staff choose by seat label |
@@ -500,7 +501,7 @@ wifi will go offline. Losing the sale because of it is unacceptable.
 | FR-R4 | Payment mode breakdown, computed from `payments` — a split bill counts in both modes |
 | FR-R5 | Cash collection report uses `payments.business_date`, not the bill's date |
 | FR-R6 | Outstanding balances report — bills unpaid or partly paid, with age |
-| FR-R7 | Dine-in vs takeaway split |
+| FR-R7 | Dine-in vs takeaway vs delivery split |
 | FR-R8 | Sales broken down by section |
 | FR-R9 | Reports are computed from `bills`, excluding cancelled orders and voided bills |
 | FR-R10 | Discounts given are reported separately, with the user who applied them |

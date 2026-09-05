@@ -22,9 +22,19 @@ class OrderRepository {
     return Order.fromJson(json['order'] as Map<String, dynamic>);
   }
 
-  Future<Order> startTakeaway({String? customerName, String? customerPhone}) async {
+  /// Starts a counter order — takeaway or delivery.
+  ///
+  /// Neither needs a table, and neither requires a name or a phone: most
+  /// takeaways are a walk-in with nothing to record, and demanding details
+  /// would slow the commonest sale in the shop. They are there for the times
+  /// somebody has them, which is more often on a delivery.
+  Future<Order> startCounterOrder({
+    bool delivery = false,
+    String? customerName,
+    String? customerPhone,
+  }) async {
     final json = await _api.post('/orders', {
-      'type': 'takeaway',
+      'type': delivery ? 'delivery' : 'takeaway',
       if (customerName != null && customerName.isNotEmpty) 'customerName': customerName,
       if (customerPhone != null && customerPhone.isNotEmpty) 'customerPhone': customerPhone,
     });
