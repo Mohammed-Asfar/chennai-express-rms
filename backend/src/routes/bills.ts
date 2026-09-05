@@ -704,6 +704,25 @@ export async function billRoutes(app: FastifyInstance): Promise<void> {
           // partly paid again; one that shrinks below what was taken is fully
           // paid with change owed, which the outstanding figure shows negative.
           recalculatePayment(app.db, bill.id, now)
+
+          // The order closes again. Recalculating is the end of an item edit:
+          // the bill now matches the lines, so leaving the order open left the
+          // till showing "this total is out of date" for ever, over a figure
+          // that had just been brought up to date.
+          if (body.recalculate === true) {
+            app.db
+              .prepare(
+                `UPDATE orders SET status = 'billed', version = version + 1,
+                                   updated_at = ?, synced_at = NULL
+                  WHERE id = ? AND status = 'open'`,
+              )
+              .run(now, bill.order_id)
+
+            const order = app.db
+              .prepare('SELECT table_id FROM orders WHERE id = ?')
+              .get(bill.order_id) as { table_id: string | null } | undefined
+            if (order?.table_id) refreshTableStatus(app.db, order.table_id)
+          }
         }
 
         if (touchesCustomer) {
@@ -722,6 +741,22 @@ export async function billRoutes(app: FastifyInstance): Promise<void> {
         }
 
         const after = findBill(app, me.branchId, bill.id)
+
+        // A recalculate that moved nothing is not an amendment.
+        //
+        // Closing an order that was reopened and then left alone is a real
+        // action and must still happen, but recording it would fill the
+        // history with "1074.00 → 1074.00" rows that say only that somebody
+        // pressed a button. The history exists to answer "this figure changed,
+        // what happened"; a row where nothing changed is noise in the one
+        // place that has to stay readable.
+        const movedNothing =
+          before.total === after.total &&
+          before.subtotal === after.subtotal &&
+          before.discount_amount === after.discount_amount &&
+          before.customer_name === after.customer_name &&
+          before.customer_phone === after.customer_phone
+        if (movedNothing) return
 
         app.db
           .prepare(

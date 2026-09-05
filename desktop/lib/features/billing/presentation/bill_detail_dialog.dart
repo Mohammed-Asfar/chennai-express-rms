@@ -10,6 +10,7 @@ import '../../printers/data/printer_repository.dart';
 import '../data/bill_models.dart';
 import '../data/bill_repository.dart';
 import '../../auth/presentation/auth_controller.dart';
+import '../../order/presentation/order_screen.dart';
 import 'bills_screen.dart';
 import 'edit_bill_dialog.dart';
 import 'reason_dialog.dart';
@@ -303,6 +304,11 @@ class _Content extends ConsumerWidget {
               // available once money has been taken — a wrong total is worth
               // correcting whether or not it has been paid, and the payment is
               // re-derived rather than rewritten.
+              //
+              // The button goes straight to the order, because "edit this
+              // bill" almost always means an item is wrong. Discount and
+              // customer are the rarer cases and sit behind the arrow rather
+              // than adding a step to the common one.
               if (ref.watch(authControllerProvider).user?.isAdmin == true) ...[
                 const SizedBox(width: AppSpacing.sm),
                 SizedBox(
@@ -310,6 +316,27 @@ class _Content extends ConsumerWidget {
                   child: OutlinedButton(
                     onPressed: () => _edit(context, ref),
                     child: const Text('Edit'),
+                  ),
+                ),
+                // Narrow on purpose: this row already holds Print, Void and
+                // Take payment, and a wider control here overflowed the dialog
+                // by twelve pixels rather than wrapping.
+                SizedBox(
+                  height: AppSpacing.minTapTarget,
+                  width: 32,
+                  child: PopupMenuButton<String>(
+                    tooltip: 'Other changes',
+                    padding: EdgeInsets.zero,
+                    onSelected: (value) {
+                      if (value == 'details') _editDetails(context, ref);
+                    },
+                    itemBuilder: (_) => const [
+                      PopupMenuItem(
+                        value: 'details',
+                        child: Text('Discount and customer…'),
+                      ),
+                    ],
+                    child: const Icon(Icons.arrow_drop_down, size: 20),
                   ),
                 ),
               ],
@@ -448,15 +475,61 @@ class _Content extends ConsumerWidget {
     }
   }
 
-  /// Corrects a bill in place, keeping its number.
-  ///
-  /// Unlike voiding this leaves one bill rather than two, which is the point:
-  /// the customer is not handed a second slip for the same meal. The backend
-  /// records what the bill said before, so the correction is reconstructible.
-  Future<void> _edit(BuildContext context, WidgetRef ref) async {
+  /// The discount and the customer, which need no trip to the order screen.
+  Future<void> _editDetails(BuildContext context, WidgetRef ref) async {
     final changed = await EditBillDialog.show(context, bill);
     if (changed != true) return;
     _refresh(ref);
+  }
+
+  /// Opens the order this bill was made from, so its items can be changed.
+  ///
+  /// Straight to the order screen, with the lines already on it — that is what
+  /// "edit this bill" means to whoever pressed it, and the order screen is
+  /// where adding and removing items already lives. Going through a dialog
+  /// first put a step between the button and the thing it does.
+  ///
+  /// The bill keeps its number: the customer is not handed a second slip for
+  /// the same meal. On the way back the total is brought in step and the order
+  /// closes again, so nobody has to know that reopening was involved.
+  ///
+  /// Discount and customer details are edited from the order screen's own
+  /// billing flow, which is where they were set in the first place.
+  Future<void> _edit(BuildContext context, WidgetRef ref) async {
+    final messenger = ScaffoldMessenger.of(context);
+    final navigator = Navigator.of(context);
+    final repository = ref.read(billRepositoryProvider);
+
+    String orderId;
+    try {
+      orderId = await repository.reopenOrder(bill.id);
+    } on ApiException catch (error) {
+      messenger.showSnackBar(SnackBar(content: Text(error.message)));
+      return;
+    }
+
+    if (!context.mounted) return;
+    // The dialog closes behind the order screen: coming back to a bill showing
+    // figures from before the edit would be worse than not showing it at all.
+    navigator.pop();
+
+    await navigator.push(
+      MaterialPageRoute<void>(builder: (_) => OrderScreen(orderId: orderId)),
+    );
+
+    // Back from the order screen. Whatever the lines say now is what the bill
+    // should say, and the order closes with it.
+    try {
+      await repository.amend(bill.id, recalculate: true);
+      messenger.showSnackBar(
+        SnackBar(content: Text('${bill.billNumber} updated')),
+      );
+    } on ApiException catch (error) {
+      // The order is left open on purpose: the bill and its lines disagree,
+      // and the banner on the bill is how someone finds that out.
+      messenger.showSnackBar(SnackBar(content: Text(error.message)));
+    }
+    ref.invalidate(billListProvider);
   }
 
   /// Brings the bill back in step with an order whose lines have changed.

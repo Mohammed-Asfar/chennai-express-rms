@@ -115,25 +115,18 @@ class _EditBillDialogState extends ConsumerState<EditBillDialog> {
                   children: [
                     const SizedBox(height: AppSpacing.sm),
 
-                    // Items first: it is the change most likely to be wanted,
-                    // and it leaves this dialog rather than happening in it.
+                    // Items are not edited here. They live on the order, and
+                    // "Edit items" on the bill goes straight there — offering
+                    // a second route through this dialog would be two paths to
+                    // one place.
                     _Section(
                       label: 'Items',
-                      child: Row(
-                        children: [
-                          Expanded(
-                            child: Text(
-                              '${bill.items.length} '
-                              '${bill.items.length == 1 ? 'line' : 'lines'} '
-                              '· ${Money.formatWithSymbol(bill.subtotal)}',
-                              style: theme.textTheme.bodyMedium,
-                            ),
-                          ),
-                          OutlinedButton(
-                            onPressed: _saving ? null : _editItems,
-                            child: const Text('Edit items'),
-                          ),
-                        ],
+                      child: Text(
+                        '${bill.items.length} '
+                        '${bill.items.length == 1 ? 'line' : 'lines'} '
+                        '· ${Money.formatWithSymbol(bill.subtotal)}'
+                        '   —   change these with Edit items',
+                        style: theme.textTheme.bodySmall,
                       ),
                     ),
 
@@ -237,31 +230,6 @@ class _EditBillDialogState extends ConsumerState<EditBillDialog> {
         ),
       ),
     );
-  }
-
-  /// Hands the operator back to the order screen, where lines are edited.
-  ///
-  /// Reopening is a real change to the order, so it is done before leaving —
-  /// arriving at a closed order with nothing editable would be worse than the
-  /// extra call.
-  Future<void> _editItems() async {
-    setState(() {
-      _saving = true;
-      _error = null;
-    });
-
-    try {
-      await ref.read(billRepositoryProvider).reopenOrder(widget.bill.id);
-      if (!mounted) return;
-      // True: the bill has changed state even though no total moved yet, and
-      // the caller has to redraw to show that its figures are now stale.
-      Navigator.of(context).pop(true);
-    } on ApiException catch (error) {
-      setState(() {
-        _saving = false;
-        _error = error.message;
-      });
-    }
   }
 
   Future<void> _save() async {

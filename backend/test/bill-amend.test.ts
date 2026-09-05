@@ -454,6 +454,72 @@ test('the bill reports how many times it has been amended', async () => {
   await close(ctx)
 })
 
+test('recalculating closes the order again', async () => {
+  // Left open, the till showed "this total is out of date" for ever — over a
+  // figure that had just been brought up to date — and held back Take payment
+  // with it.
+  const ctx = await setup()
+  const orderId = await makeOrder(ctx, [{ variantId: ctx.full, qty: 1 }])
+  const bill = await makeBill(ctx, orderId)
+
+  await reopen(ctx, bill.id)
+  await ctx.app.inject({
+    method: 'POST',
+    url: `/orders/${orderId}/items`,
+    headers: ctx.cashier,
+    payload: { variantId: ctx.tea, qty: 1 },
+  })
+  await amend(ctx, bill.id, { recalculate: true })
+
+  const res = await ctx.app.inject({
+    method: 'GET',
+    url: `/bills/${bill.id}`,
+    headers: ctx.admin,
+  })
+  assertEqual(
+    (res.json() as { bill: { orderReopened: boolean } }).bill.orderReopened,
+    false,
+    'the banner clears once the total is in step',
+  )
+
+  const row = ctx.db.prepare('SELECT status FROM orders WHERE id = ?').get(orderId) as {
+    status: string
+  }
+  assertEqual(row.status, 'billed')
+  await close(ctx)
+})
+
+test('a recalculate that moved nothing writes no history row', async () => {
+  // Reopening and then changing your mind is common. Recording it fills the
+  // history with "1074.00 -> 1074.00" rows saying only that a button was
+  // pressed, in the one place that has to stay readable.
+  const ctx = await setup()
+  const bill = await makeBill(ctx, await makeOrder(ctx, [{ variantId: ctx.full, qty: 1 }]))
+
+  await reopen(ctx, bill.id)
+  await amend(ctx, bill.id, { recalculate: true })
+
+  assertEqual((await history(ctx, bill.id)).length, 0, 'nothing changed, nothing recorded')
+  await close(ctx)
+})
+
+test('a recalculate that moved nothing still closes the order', async () => {
+  // The history row is skipped; the order still has to come back to billed or
+  // the bill is left flagged stale for ever.
+  const ctx = await setup()
+  const orderId = await makeOrder(ctx, [{ variantId: ctx.full, qty: 1 }])
+  const bill = await makeBill(ctx, orderId)
+
+  await reopen(ctx, bill.id)
+  await amend(ctx, bill.id, { recalculate: true })
+
+  const row = ctx.db.prepare('SELECT status FROM orders WHERE id = ?').get(orderId) as {
+    status: string
+  }
+  assertEqual(row.status, 'billed')
+  await close(ctx)
+})
+
 test('an amendment that changes nothing is refused', async () => {
   // A no-op would write a history row saying nothing happened.
   const ctx = await setup()
