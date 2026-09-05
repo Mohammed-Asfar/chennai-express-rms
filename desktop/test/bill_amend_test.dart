@@ -105,6 +105,31 @@ void main() {
       final bill = Bill.fromJson(billJson());
       expect(bill.isDelivery, isFalse);
     });
+
+    test('a delivery bill carries the phone and address it was taken with', () {
+      // These are snapshotted onto the bill when it is raised, so the record
+      // survives an edit to the order afterwards.
+      final bill = Bill.fromJson({
+        ...billJson(),
+        'orderType': 'delivery',
+        'customerPhone': '98949545254',
+        'customerName': 'Asfar, No. 595',
+      });
+
+      expect(bill.isDelivery, isTrue);
+      expect(bill.customerPhone, '98949545254');
+      expect(bill.customerName, 'Asfar, No. 595');
+    });
+
+    test('a delivery taken without details has nothing to show', () {
+      // Both fields are optional at the till, so the screen must cope with a
+      // delivery that has neither rather than drawing an empty block.
+      final bill = Bill.fromJson({...billJson(), 'orderType': 'delivery'});
+
+      expect(bill.isDelivery, isTrue);
+      expect(bill.customerPhone, isNull);
+      expect(bill.customerName, isNull);
+    });
   });
 
   group('an amendment record', () {

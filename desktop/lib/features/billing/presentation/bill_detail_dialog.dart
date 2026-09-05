@@ -158,6 +158,31 @@ class _Content extends ConsumerWidget {
             shrinkWrap: true,
             padding: const EdgeInsets.all(AppSpacing.lg),
             children: [
+              // Above the items on a delivery: where the food is going is read
+              // before what the food is, and this is the number someone
+              // reaches for when the rider cannot find the door. Its own block
+              // rather than the subtitle, because an address needs room to
+              // wrap and that line is already carrying four things.
+              if (bill.isDelivery && _customerLines().isNotEmpty) ...[
+                _Section(
+                  title: 'Delivering to',
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      for (final line in _customerLines())
+                        Padding(
+                          padding: const EdgeInsets.symmetric(vertical: 2),
+                          child: SelectableText(
+                            line,
+                            style: theme.textTheme.bodyMedium,
+                          ),
+                        ),
+                    ],
+                  ),
+                ),
+                const SizedBox(height: AppSpacing.md),
+              ],
+
               _Section(
                 title: 'Items',
                 child: Column(
@@ -399,6 +424,18 @@ class _Content extends ConsumerWidget {
       ],
     );
   }
+
+  /// Phone and address, each on its own line, skipping whichever is absent.
+  ///
+  /// Phone first: it is the shorter of the two and the one someone reads out
+  /// when a rider is standing in the wrong street. Empty when a delivery was
+  /// taken without either, which the dialog then does not draw a block for.
+  List<String> _customerLines() => [
+    if (bill.customerPhone != null && bill.customerPhone!.isNotEmpty)
+      bill.customerPhone!,
+    if (bill.customerName != null && bill.customerName!.isNotEmpty)
+      bill.customerName!,
+  ];
 
   String _subtitle() {
     final at = bill.createdAt;

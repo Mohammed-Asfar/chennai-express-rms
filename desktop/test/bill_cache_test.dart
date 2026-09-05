@@ -55,6 +55,31 @@ void main() {
     expect(fn, contains('billListProvider'), reason: 'and the list it sits in');
   });
 
+  test('a delivery bill shows where it is going', () {
+    // The phone and address are recorded at the till and printed on the bill,
+    // so not showing them on screen left the one person holding the bill —
+    // whoever hands it to the rider — with nowhere to read them.
+    //
+    // A widget test cannot reach this: the dialog fetches through a private
+    // provider that cannot be overridden. What can be pinned is that the block
+    // exists and is gated on the bill being a delivery.
+    final source = File(
+      'lib/features/billing/presentation/bill_detail_dialog.dart',
+    ).readAsStringSync();
+
+    expect(source, contains('Delivering to'));
+    expect(
+      source,
+      contains('bill.isDelivery'),
+      reason: 'shown on a delivery, not on every bill',
+    );
+    expect(
+      source,
+      contains('customerPhone'),
+      reason: 'the number someone calls when the rider is lost',
+    );
+  });
+
   test('the order screen refreshes the bill it just amended', () {
     // Update bill lives on the order screen, outside the dialog that owns the
     // cache, which is exactly how it came to refresh nothing at all.
