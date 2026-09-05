@@ -251,9 +251,9 @@ class _Content extends ConsumerWidget {
                     for (final payment in bill.payments)
                       _PaymentRow(
                         payment: payment,
-                        // Reversing is pointless once the bill is void — it
-                        // cannot be voided while a payment stands, so by then
-                        // they are already reversed.
+                        // A payment already reversed has nothing left to undo.
+                        // Deleting the bill reverses whatever still stands, so
+                        // by then these are all struck through anyway.
                         onReverse: payment.isReversed
                             ? null
                             : () => _reverse(context, ref, payment),
@@ -355,7 +355,7 @@ class _Content extends ConsumerWidget {
                     child: const Text('Edit'),
                   ),
                 ),
-                // Narrow on purpose: this row already holds Print, Void and
+                // Narrow on purpose: this row already holds Print, Delete and
                 // Take payment, and a wider control here overflowed the dialog
                 // by twelve pixels rather than wrapping.
                 SizedBox(
@@ -378,11 +378,11 @@ class _Content extends ConsumerWidget {
                 ),
               ],
 
-              // Voiding is admin-only and refused while money stands against
-              // the bill, so it is offered only when it can actually be done.
-              // Showing it otherwise would be a button that only ever errors.
-              if (ref.watch(authControllerProvider).user?.isAdmin == true &&
-                  bill.livePayments.isEmpty) ...[
+              // Voiding is admin-only. It is offered on a paid bill too — the
+              // confirmation reverses the payments in the same act, and names
+              // the amount — because a sale rung up in error still has to be
+              // undone once the customer has handed over the money.
+              if (ref.watch(authControllerProvider).user?.isAdmin == true) ...[
                 const SizedBox(width: AppSpacing.sm),
                 SizedBox(
                   height: AppSpacing.minTapTarget,
@@ -391,7 +391,7 @@ class _Content extends ConsumerWidget {
                     style: TextButton.styleFrom(
                       foregroundColor: theme.colorScheme.error,
                     ),
-                    child: const Text('Void'),
+                    child: const Text('Delete'),
                   ),
                 ),
               ],
@@ -497,14 +497,26 @@ class _Content extends ConsumerWidget {
   }
 
   /// Voids a bill raised in error, reopening its order to be corrected.
+  ///
+  /// A bill with money against it can still be voided, but only by reversing
+  /// the payments in the same act — so the amount is named in the question,
+  /// because taking ₹370 back out of the day's takings is the part someone
+  /// needs to have read before agreeing to it.
   Future<void> _void(BuildContext context, WidgetRef ref) async {
+    final taken = bill.livePayments.fold<int>(0, (sum, p) => sum + p.amount);
+    final hasMoney = taken > 0;
+
     final reason = await ReasonDialog.show(
       context,
-      title: 'Void ${bill.billNumber}?',
-      message:
-          'It stops counting as a sale and its order reopens so it can be '
-          'corrected and billed again. The bill number stays used.',
-      confirmLabel: 'Void it',
+      title: 'Delete ${bill.billNumber}?',
+      message: hasMoney
+          ? 'This reverses the ${Money.formatWithSymbol(taken)} already taken '
+                'and stops the bill counting as a sale. Its order reopens so it '
+                'can be corrected and billed again, and the bill number stays '
+                'used. The payments stay listed, marked reversed.'
+          : 'It stops counting as a sale and its order reopens so it can be '
+                'corrected and billed again. The bill number stays used.',
+      confirmLabel: hasMoney ? 'Reverse and delete' : 'Delete it',
       hint: 'Billed to the wrong table',
     );
     if (reason == null || !context.mounted) return;
@@ -512,14 +524,16 @@ class _Content extends ConsumerWidget {
     final messenger = ScaffoldMessenger.of(context);
     final navigator = Navigator.of(context);
     try {
-      await ref.read(billRepositoryProvider).voidBill(bill.id, reason);
+      await ref
+          .read(billRepositoryProvider)
+          .voidBill(bill.id, reason, reversePayments: hasMoney);
       // The detail too, not only the list: the cached copy still says the bill
       // is live, and it is keyed on an id that can be reached again from a
       // wider date range.
       _refresh(ref);
       navigator.pop();
       messenger.showSnackBar(
-        SnackBar(content: Text('${bill.billNumber} voided')),
+        SnackBar(content: Text('${bill.billNumber} deleted')),
       );
     } on ApiException catch (error) {
       messenger.showSnackBar(SnackBar(content: Text(error.message)));

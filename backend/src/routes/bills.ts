@@ -33,7 +33,18 @@ const paymentBody = z.object({
   reference: z.string().max(64).trim().optional(),
 })
 
-const voidBody = z.object({ reason: requiredText(200) })
+const voidBody = z.object({
+  reason: requiredText(200),
+  /**
+   * Reverse any live payments first, in the same transaction.
+   *
+   * Without it a paid bill cannot be voided at all, which is correct as a
+   * default — money must not silently stop existing. Staff who mean to undo
+   * the whole sale would otherwise have to reverse each payment by hand and
+   * then void, and a failure midway leaves a bill that is neither.
+   */
+  reversePayments: z.boolean().optional(),
+})
 const reverseBody = z.object({ reason: requiredText(200) })
 
 /**
@@ -892,8 +903,9 @@ export async function billRoutes(app: FastifyInstance): Promise<void> {
           'SELECT COUNT(*) AS n FROM payments WHERE bill_id = ? AND reversed_at IS NULL',
         )
         .get(bill.id) as { n: number }
-      if (live.n > 0) {
+      if (live.n > 0 && body.reversePayments !== true) {
         // Money must not sit recorded against a sale that no longer exists.
+        // Reversing it is a deliberate act, so it has to be asked for.
         throw new AppError(
           409,
           'BILL_HAS_PAYMENTS',
@@ -903,6 +915,21 @@ export async function billRoutes(app: FastifyInstance): Promise<void> {
 
       const now = new Date().toISOString()
       app.db.transaction(() => {
+        // Reversed inside the same transaction as the void, so a failure
+        // partway cannot leave payments undone against a bill that still
+        // stands, or a voided bill still holding money.
+        if (live.n > 0) {
+          app.db
+            .prepare(
+              `UPDATE payments SET reversed_at = ?, reversed_by = ?, reverse_reason = ?,
+                                   updated_at = ?, synced_at = NULL
+               WHERE bill_id = ? AND reversed_at IS NULL`,
+            )
+            .run(now, me.sub, body.reason, now, bill.id)
+          // amount_paid and payment_status are derived, never set directly.
+          recalculatePayment(app.db, bill.id, now)
+        }
+
         app.db
           .prepare(
             `UPDATE bills SET void_reason = ?, voided_at = ?, voided_by = ?, deleted_at = ?,

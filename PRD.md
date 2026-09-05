@@ -355,7 +355,7 @@ a picker. Every "the table's order" assumption in the UI must handle several.
 | FR-B21 | A settled bill can be reprinted |
 | FR-B22 | All money math uses integer paise; rounding is applied once, at the line level |
 | FR-B23 | `tax_mode` and the effective rates are stored on the bill for audit |
-| FR-B24 | A settled bill can be **cancelled/voided** by an admin with a reason; it is soft-deleted and excluded from reports |
+| FR-B24 | A settled bill can be **deleted** by an admin with a reason; it is soft-deleted and excluded from reports. Called "Delete" throughout the UI — staff do not use the word void — while the database keeps `voided_at` |
 | FR-B25 | A cancelled bill releases its order back to `open` so it can be corrected and re-billed |
 | FR-B26 | A discount larger than the subtotal is rejected |
 | FR-B27 | Round-off, when enabled, adjusts the total to the nearest rupee and is stored in `round_off` |
@@ -367,8 +367,12 @@ a picker. Every "the table's order" assumption in the UI must handle several.
 | FR-B33 | A part payment leaves the bill open, and the balance can be taken later in any mode |
 | FR-B34 | A payment recorded in error can be reversed from the bill's detail, with a reason |
 | FR-B35 | Reversed payments stay listed, struck through — they are the audit trail |
-| FR-B36 | Void is offered only to an admin, and only once no live payment stands |
-| FR-B37 | Both void and reversal require a reason; whitespace alone is not a reason |
+| FR-B36 | Delete (void) is offered only to an admin. It is available on a paid bill too — a sale rung up in error still has to be undone after the customer has paid |
+| FR-B36a | Deleting a paid bill reverses its live payments **in the same transaction**, so a failure partway cannot leave money standing against a deleted bill, or a bill neither paid nor deleted |
+| FR-B36b | The confirmation names the amount being reversed. Taking money back out of the day's takings is the part that must be read before agreeing |
+| FR-B36c | The API still refuses a bare void while money stands; reversing is a separate, deliberate flag on the request |
+| FR-B36d | A payment already reversed is left untouched, keeping its original reason and who reversed it |
+| FR-B37 | Both delete and reversal require a reason; whitespace alone is not a reason |
 | FR-B38 | An admin can amend a bill in place — items, discount, or customer details — keeping its number rather than issuing a second one |
 | FR-B39 | Amending items reopens the order, changes its lines, then recalculates; the same arithmetic runs as for a fresh bill |
 | FR-B40 | Every amendment writes a `bill_amendments` row holding the bill before and after, the totals either side, who changed it and why |
@@ -724,6 +728,9 @@ Scenarios that occur in a working restaurant and their required behaviour.
 | Item exemption cleared | Goes back to following its section, which is why the field distinguishes empty from zero |
 | Section renamed from the floor screen | Its surcharge is carried into the dialog and back, so a rename cannot wipe the charge |
 | Negative or fractional surcharge entered | Refused at the API and in the form — a negative would be a discount that skips the discount rules |
+| Paid bill deleted | Its payments are reversed in the same transaction; the rows stay, struck through, as the record that the money was taken |
+| Part-paid bill deleted | Only what still stands is reversed; an already-reversed payment keeps its original reason |
+| Bill deleted after the customer left with the paper | The bill number stays consumed and the order reopens, so a corrected bill can be raised against the same meal |
 | Cash recorded when it was card | Reversed with a reason, correct payment added; the bill reopens for the amount |
 | Void attempted on a paid bill | Refused — its payments must be reversed first, so the button is hidden until they are |
 | Reason field holding only spaces | Rejected. Trimming happens before the length check, not after |

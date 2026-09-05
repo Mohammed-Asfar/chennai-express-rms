@@ -100,8 +100,8 @@ class _StubAuth extends StateNotifier<AuthState> implements AuthController {
 }
 
 void main() {
-  group('voiding a bill', () {
-    testWidgets('an admin sees Void on a bill with no live payments', (
+  group('deleting a bill', () {
+    testWidgets('an admin sees Delete on a bill with no live payments', (
       tester,
     ) async {
       await pump(
@@ -109,11 +109,11 @@ void main() {
         withBill: bill(payments: const [], outstanding: 16000),
         role: UserRole.admin,
       );
-      expect(find.text('Void'), findsOneWidget);
+      expect(find.text('Delete'), findsOneWidget);
     });
 
     testWidgets('a cashier never sees it', (tester) async {
-      // Voiding erases a sale from the day's takings, so it is the owner's
+      // Deleting erases a sale from the day's takings, so it is the owner's
       // call. The backend refuses it too; this just avoids offering a button
       // that can only fail.
       await pump(
@@ -121,18 +121,77 @@ void main() {
         withBill: bill(payments: const [], outstanding: 16000),
         role: UserRole.cashier,
       );
-      expect(find.text('Void'), findsNothing);
+      expect(find.text('Delete'), findsNothing);
     });
 
-    testWidgets('it is hidden while a payment still stands', (tester) async {
-      // The backend refuses this with BILL_HAS_PAYMENTS: money must not sit
-      // recorded against a sale that no longer exists.
+    testWidgets('it is offered on a paid bill too', (tester) async {
+      // It used to be hidden here, because the backend refuses a bare delete
+      // while money stands. A sale rung up in error still has to be undone
+      // after the customer has paid, so the button now asks to reverse the
+      // payments in the same act rather than disappearing.
       await pump(
         tester,
         withBill: bill(payments: [payment(reversed: false)], outstanding: 0),
         role: UserRole.admin,
       );
-      expect(find.text('Void'), findsNothing);
+      expect(find.text('Delete'), findsOneWidget);
+    });
+
+    testWidgets('deleting a paid bill names the money being reversed', (
+      tester,
+    ) async {
+      // Taking ₹160 back out of the day's takings is the part someone has to
+      // have read before agreeing. A generic "are you sure" would not say it.
+      await pump(
+        tester,
+        withBill: bill(payments: [payment(reversed: false)], outstanding: 0),
+        role: UserRole.admin,
+      );
+
+      await tester.tap(find.text('Delete'));
+      await tester.pumpAndSettle();
+
+      // Scoped to the question being asked: the amount also appears on the
+      // bill behind it, which says nothing about what the button will do.
+      expect(
+        find.textContaining('reverses the ₹160.00'),
+        findsOneWidget,
+        reason: 'the confirmation names what comes back out of the drawer',
+      );
+      expect(find.text('Reverse and delete'), findsOneWidget);
+    });
+
+    testWidgets('an unpaid bill is not warned about money', (tester) async {
+      // Nothing was taken, so mentioning a reversal would be describing an
+      // event that is not going to happen.
+      await pump(
+        tester,
+        withBill: bill(payments: const [], outstanding: 16000),
+        role: UserRole.admin,
+      );
+
+      await tester.tap(find.text('Delete'));
+      await tester.pumpAndSettle();
+
+      expect(find.text('Delete it'), findsOneWidget);
+      expect(find.textContaining('reverses'), findsNothing);
+    });
+
+    testWidgets('a reversed payment is not counted as money to reverse', (
+      tester,
+    ) async {
+      // It is already undone. Naming it again would overstate what is coming
+      // back out of the drawer.
+      await pump(
+        tester,
+        withBill: bill(payments: [payment(reversed: true)], outstanding: 16000),
+        role: UserRole.admin,
+      );
+
+      await tester.tap(find.text('Delete'));
+      await tester.pumpAndSettle();
+
+      expect(find.text('Delete it'), findsOneWidget);
     });
 
     testWidgets('it returns once the payment is reversed', (tester) async {
@@ -141,7 +200,7 @@ void main() {
         withBill: bill(payments: [payment(reversed: true)], outstanding: 16000),
         role: UserRole.admin,
       );
-      expect(find.text('Void'), findsOneWidget);
+      expect(find.text('Delete'), findsOneWidget);
     });
   });
 
