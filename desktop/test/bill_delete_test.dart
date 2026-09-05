@@ -99,6 +99,16 @@ class _StubAuth extends StateNotifier<AuthState> implements AuthController {
       throw UnimplementedError('${invocation.memberName} is not needed here');
 }
 
+/// Opens the "other changes" menu, where Delete lives.
+///
+/// It is not a button on the action row: four full-width buttons do not fit a
+/// 520px dialog, and deleting a bill does not belong one stray click from
+/// settling one.
+Future<void> openActions(WidgetTester tester) async {
+  await tester.tap(find.byTooltip('Other changes'));
+  await tester.pumpAndSettle();
+}
+
 void main() {
   group('deleting a bill', () {
     testWidgets('an admin sees Delete on a bill with no live payments', (
@@ -109,7 +119,8 @@ void main() {
         withBill: bill(payments: const [], outstanding: 16000),
         role: UserRole.admin,
       );
-      expect(find.text('Delete'), findsOneWidget);
+      await openActions(tester);
+      expect(find.text('Delete this bill…'), findsOneWidget);
     });
 
     testWidgets('a cashier never sees it', (tester) async {
@@ -121,7 +132,7 @@ void main() {
         withBill: bill(payments: const [], outstanding: 16000),
         role: UserRole.cashier,
       );
-      expect(find.text('Delete'), findsNothing);
+      expect(find.byTooltip('Other changes'), findsNothing, reason: 'no admin menu at all');
     });
 
     testWidgets('it is offered on a paid bill too', (tester) async {
@@ -134,7 +145,8 @@ void main() {
         withBill: bill(payments: [payment(reversed: false)], outstanding: 0),
         role: UserRole.admin,
       );
-      expect(find.text('Delete'), findsOneWidget);
+      await openActions(tester);
+      expect(find.text('Delete this bill…'), findsOneWidget);
     });
 
     testWidgets('deleting a paid bill names the money being reversed', (
@@ -148,7 +160,8 @@ void main() {
         role: UserRole.admin,
       );
 
-      await tester.tap(find.text('Delete'));
+      await openActions(tester);
+      await tester.tap(find.text('Delete this bill…'));
       await tester.pumpAndSettle();
 
       // Scoped to the question being asked: the amount also appears on the
@@ -170,7 +183,8 @@ void main() {
         role: UserRole.admin,
       );
 
-      await tester.tap(find.text('Delete'));
+      await openActions(tester);
+      await tester.tap(find.text('Delete this bill…'));
       await tester.pumpAndSettle();
 
       expect(find.text('Delete it'), findsOneWidget);
@@ -188,7 +202,8 @@ void main() {
         role: UserRole.admin,
       );
 
-      await tester.tap(find.text('Delete'));
+      await openActions(tester);
+      await tester.tap(find.text('Delete this bill…'));
       await tester.pumpAndSettle();
 
       expect(find.text('Delete it'), findsOneWidget);
@@ -200,7 +215,8 @@ void main() {
         withBill: bill(payments: [payment(reversed: true)], outstanding: 16000),
         role: UserRole.admin,
       );
-      expect(find.text('Delete'), findsOneWidget);
+      await openActions(tester);
+      expect(find.text('Delete this bill…'), findsOneWidget);
     });
   });
 
@@ -234,6 +250,69 @@ void main() {
         role: UserRole.admin,
       );
       expect(find.byTooltip('Reverse this payment'), findsOneWidget);
+    });
+  });
+
+  group('the action row fits', () {
+    /// Every label rendered on one line.
+    ///
+    /// An overflow throws and is caught elsewhere, but a button squeezed
+    /// below the width of its own text does not — it silently wraps, which is
+    /// how "Print" came to read "Prin / t" on an unpaid bill.
+    void expectNoWrapping(WidgetTester tester, List<String> labels) {
+      for (final label in labels) {
+        // Measured by height, not width: a label given less room than its text
+        // needs wraps to a second line and grows taller. `getMaxIntrinsicHeight`
+        // with unbounded width is that same text on one line, so anything above
+        // it means it wrapped — and it needs no guess at the resolved style.
+        final box = tester.renderObject<RenderBox>(find.text(label));
+
+        expect(
+          box.size.height,
+          lessThanOrEqualTo(box.getMaxIntrinsicHeight(double.infinity) + 0.5),
+          reason: '"$label" is taller than one line, so it wrapped',
+        );
+      }
+    }
+
+    testWidgets('an unpaid bill with a wide total does not squeeze Print', (
+      tester,
+    ) async {
+      // The case that broke: "Take payment ₹1239.00" took the width, leaving
+      // Print less room than the word needs. Every admin control is on screen
+      // here, which is the tightest the row ever gets.
+      await pump(
+        tester,
+        withBill: bill(payments: const [], outstanding: 16000),
+        role: UserRole.admin,
+      );
+
+      expect(tester.takeException(), isNull);
+      expectNoWrapping(tester, ['Print', 'Edit']);
+    });
+
+    testWidgets('a paid bill keeps its buttons whole', (tester) async {
+      // No settle button, so there is room to spare — but the row must not
+      // have come to depend on that.
+      await pump(
+        tester,
+        withBill: bill(payments: [payment(reversed: false)], outstanding: 0),
+        role: UserRole.admin,
+      );
+
+      expect(tester.takeException(), isNull);
+      expectNoWrapping(tester, ['Print', 'Edit']);
+    });
+
+    testWidgets('a cashier sees a shorter row, still whole', (tester) async {
+      await pump(
+        tester,
+        withBill: bill(payments: const [], outstanding: 16000),
+        role: UserRole.cashier,
+      );
+
+      expect(tester.takeException(), isNull);
+      expectNoWrapping(tester, ['Print']);
     });
   });
 }

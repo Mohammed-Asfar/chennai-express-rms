@@ -323,19 +323,24 @@ class _Content extends ConsumerWidget {
           padding: const EdgeInsets.all(AppSpacing.lg),
           child: Row(
             children: [
-              Expanded(
-                child: SizedBox(
-                  height: AppSpacing.minTapTarget,
-                  child: OutlinedButton.icon(
-                    onPressed: () => _print(context, ref),
-                    icon: const Icon(Icons.print_outlined, size: 18),
-                    // A bill printed here has printed before, so the paper
-                    // says duplicate. One never printed is still an original,
-                    // which the backend decides from the print history.
-                    label: const Text('Print'),
-                  ),
+              // Its natural width, never flexed. As an Expanded it took only
+              // what was left after Take payment, which on an unpaid bill was
+              // narrower than the word itself and wrapped it to "Prin / t".
+              // Take payment carries the flex instead — its label is the one
+              // that can afford to be tight.
+              SizedBox(
+                height: AppSpacing.minTapTarget,
+                child: OutlinedButton.icon(
+                  onPressed: () => _print(context, ref),
+                  icon: const Icon(Icons.print_outlined, size: 18),
+                  // A bill printed here has printed before, so the paper
+                  // says duplicate. One never printed is still an original,
+                  // which the backend decides from the print history.
+                  label: const Text('Print'),
                 ),
               ),
+
+              const Spacer(),
 
               // Amending is admin-only, like voiding. Unlike voiding it stays
               // available once money has been taken — a wrong total is worth
@@ -355,9 +360,14 @@ class _Content extends ConsumerWidget {
                     child: const Text('Edit'),
                   ),
                 ),
-                // Narrow on purpose: this row already holds Print, Delete and
-                // Take payment, and a wider control here overflowed the dialog
-                // by twelve pixels rather than wrapping.
+                // Narrow on purpose: four full-width buttons plus their gaps
+                // need more room than a 520px dialog has, and the one that
+                // gave way was Print — squeezed until it read "Prin / t".
+                //
+                // Delete lives in here rather than beside Take payment. It is
+                // the destructive one, so a stray click away from settling a
+                // bill is the wrong place for it, and moving it is what buys
+                // the row its width back.
                 SizedBox(
                   height: AppSpacing.minTapTarget,
                   width: 32,
@@ -366,32 +376,24 @@ class _Content extends ConsumerWidget {
                     padding: EdgeInsets.zero,
                     onSelected: (value) {
                       if (value == 'details') _editDetails(context, ref);
+                      if (value == 'delete') _void(context, ref);
                     },
-                    itemBuilder: (_) => const [
-                      PopupMenuItem(
+                    itemBuilder: (_) => [
+                      const PopupMenuItem(
                         value: 'details',
                         child: Text('Discount and customer…'),
                       ),
+                      PopupMenuItem(
+                        value: 'delete',
+                        child: Text(
+                          'Delete this bill…',
+                          style: theme.textTheme.bodyMedium?.copyWith(
+                            color: theme.colorScheme.error,
+                          ),
+                        ),
+                      ),
                     ],
                     child: const Icon(Icons.arrow_drop_down, size: 20),
-                  ),
-                ),
-              ],
-
-              // Voiding is admin-only. It is offered on a paid bill too — the
-              // confirmation reverses the payments in the same act, and names
-              // the amount — because a sale rung up in error still has to be
-              // undone once the customer has handed over the money.
-              if (ref.watch(authControllerProvider).user?.isAdmin == true) ...[
-                const SizedBox(width: AppSpacing.sm),
-                SizedBox(
-                  height: AppSpacing.minTapTarget,
-                  child: TextButton(
-                    onPressed: () => _void(context, ref),
-                    style: TextButton.styleFrom(
-                      foregroundColor: theme.colorScheme.error,
-                    ),
-                    child: const Text('Delete'),
                   ),
                 ),
               ],
@@ -403,17 +405,17 @@ class _Content extends ConsumerWidget {
               // amount.
               if (bill.outstanding > 0 && !bill.orderReopened) ...[
                 const SizedBox(width: AppSpacing.sm),
-                Expanded(
+                Flexible(
                   flex: 2,
                   child: SizedBox(
                     height: AppSpacing.minTapTarget,
                     child: ElevatedButton.icon(
                       onPressed: () => _takePayment(context, ref),
                       icon: const Icon(Icons.payments_outlined, size: 18),
-                      label: Text(
-                        'Take payment '
-                        '${Money.formatWithSymbol(bill.outstanding)}',
-                      ),
+                      // Without the amount: "Still due ₹1239.00" sits directly
+                      // above this button, so repeating it here bought nothing
+                      // and cost the row more width than it has.
+                      label: const Text('Take payment'),
                     ),
                   ),
                 ),

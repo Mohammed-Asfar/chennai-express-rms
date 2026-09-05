@@ -362,6 +362,8 @@ a picker. Every "the table's order" assumption in the UI must handle several.
 | FR-B28 | A reprint is the same document as the original; the repeat is recorded in `reprint_count`, not written on the paper |
 | FR-B29 | An order with no items cannot be billed |
 | FR-B30 | A bill can be generated and printed **without taking payment**, so a table can be shown what it owes |
+| FR-B30a | A bill can also be generated **without printing and without payment** — a phoned-in takeaway needs the sale recorded and the order closed long before anyone arrives to pay, and printing it now only to reprint it later wastes a roll and puts a stale total in someone's hand |
+| FR-B30b | Both unpaid routes raise the same bill; it appears in the bills list as UNPAID and can be printed or settled from there |
 | FR-B31 | Nothing on a printed bill distinguishes a reprint — the customer receives the same document either time |
 | FR-B32 | Payment can be taken against an existing bill from the bills list, not only at billing time |
 | FR-B33 | A part payment leaves the bill open, and the balance can be taken later in any mode |
