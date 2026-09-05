@@ -145,6 +145,8 @@ const BOOLEAN_COLUMNS = new Set([
   'is_active',
   'is_available',
   'must_change_password',
+  'was_printed',
+  'was_paid',
 ])
 
 async function upsertBatch(sql: Sql, table: SyncTable, rows: Row[]): Promise<void> {

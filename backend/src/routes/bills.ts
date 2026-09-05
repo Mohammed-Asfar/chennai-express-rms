@@ -36,6 +36,30 @@ const paymentBody = z.object({
 const voidBody = z.object({ reason: requiredText(200) })
 const reverseBody = z.object({ reason: requiredText(200) })
 
+/**
+ * An amendment to a bill that already exists.
+ *
+ * Every field is optional because the three kinds of edit arrive on the same
+ * route: change the discount, change the customer, or change nothing here and
+ * edit the order's items first and then recalculate.
+ */
+const amendBody = z.object({
+  discountType: z.enum(['none', 'fixed', 'percent']).optional(),
+  /** Paise when fixed, basis points when percent. */
+  discountValue: z.number().int().min(0).optional(),
+  customerName: z.string().max(64).trim().nullable().optional(),
+  customerPhone: z.string().max(20).trim().nullable().optional(),
+  /**
+   * Recalculate from the order's current lines.
+   *
+   * Set after adding or removing items on the reopened order. Without it a
+   * discount-only edit leaves the line totals alone, which is cheaper and
+   * cannot be affected by an item edit made in another window.
+   */
+  recalculate: z.boolean().optional(),
+  reason: z.string().max(200).trim().optional(),
+})
+
 interface BillRow {
   id: string
   branch_id: string
@@ -561,6 +585,236 @@ export async function billRoutes(app: FastifyInstance): Promise<void> {
       })()
 
       return respond(app, me.branchId, bill.id)
+    },
+  )
+
+  // --- amend ---
+
+  /**
+   * Changes a bill that already exists, in place.
+   *
+   * The bill number does not change and no second bill is created: staff
+   * correct a mistake without handing the customer a different number for the
+   * same meal.
+   *
+   * **What this costs.** `bills` holds only the latest state, so the original
+   * figures are gone from it the moment this succeeds. If the bill was already
+   * printed, the customer's paper and the record now disagree, and if it was
+   * paid, `amount_paid` can exceed the new total. Neither is blocked — that is
+   * the behaviour asked for — but both are recorded: every amendment writes a
+   * `bill_amendments` row holding the whole bill before and after, who changed
+   * it, and whether it had been printed or paid at the time. That row is the
+   * only place the original total survives.
+   *
+   * Admin only, for the same reason voiding is.
+   */
+  app.patch<{ Params: { id: string } }>(
+    '/bills/:id',
+    { preHandler: requireRole('admin') },
+    async (request) => {
+      const me = currentUser(request)
+      const body = amendBody.parse(request.body)
+      const bill = findBill(app, me.branchId, request.params.id)
+
+      if (bill.voided_at !== null) {
+        throw new AppError(
+          409,
+          'BILL_VOIDED',
+          'This bill has been voided. Bill the order again instead of amending it.',
+        )
+      }
+
+      const touchesMoney =
+        body.recalculate === true ||
+        body.discountType !== undefined ||
+        body.discountValue !== undefined
+
+      // Nothing to do beats a no-op amendment row that makes the history noisy.
+      const touchesCustomer =
+        body.customerName !== undefined || body.customerPhone !== undefined
+      if (!touchesMoney && !touchesCustomer) {
+        throw new AppError(400, 'NOTHING_TO_AMEND', 'No change was requested')
+      }
+
+      const discountType = body.discountType ?? bill.discount_type
+      const discountValue = body.discountValue ?? bill.discount_value
+
+      // Recomputed through the same function that produced the bill in the
+      // first place, reading the order's current lines. Duplicating the
+      // arithmetic here is how an amended bill would come to disagree with a
+      // fresh one over the same items.
+      const computed = touchesMoney
+        ? calculate(app, me.branchId, bill.order_id, {
+            orderId: bill.order_id,
+            discountType: discountType as 'none' | 'fixed' | 'percent',
+            discountValue,
+          })
+        : null
+
+      const before = { ...bill }
+      const now = new Date().toISOString()
+      const businessDate = currentBusinessDate(app.db, me.branchId)
+
+      app.db.transaction(() => {
+        if (computed) {
+          app.db
+            .prepare(
+              `UPDATE bills
+                  SET subtotal = ?, discount_type = ?, discount_value = ?,
+                      discount_amount = ?, cgst = ?, sgst = ?, round_off = ?,
+                      total = ?, tax_breakdown = ?, updated_at = ?, synced_at = NULL
+                WHERE id = ?`,
+            )
+            .run(
+              computed.subtotal,
+              discountType,
+              discountValue,
+              computed.discountAmount,
+              computed.cgst,
+              computed.sgst,
+              computed.roundOff,
+              computed.total,
+              JSON.stringify(computed.taxBreakdown),
+              now,
+              bill.id,
+            )
+
+          // payment_status is derived, never set directly, and the total it is
+          // derived from has just moved. A bill paid in full that grows is
+          // partly paid again; one that shrinks below what was taken is fully
+          // paid with change owed, which the outstanding figure shows negative.
+          recalculatePayment(app.db, bill.id, now)
+        }
+
+        if (touchesCustomer) {
+          app.db
+            .prepare(
+              `UPDATE bills SET customer_name = ?, customer_phone = ?,
+                                updated_at = ?, synced_at = NULL
+                WHERE id = ?`,
+            )
+            .run(
+              body.customerName === undefined ? bill.customer_name : body.customerName,
+              body.customerPhone === undefined ? bill.customer_phone : body.customerPhone,
+              now,
+              bill.id,
+            )
+        }
+
+        const after = findBill(app, me.branchId, bill.id)
+
+        app.db
+          .prepare(
+            `INSERT INTO bill_amendments
+               (id, branch_id, bill_id, business_date, kind, before_json, after_json,
+                total_before, total_after, was_printed, was_paid, reason,
+                amended_by, created_at, updated_at)
+             VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+          )
+          .run(
+            randomUUID(),
+            me.branchId,
+            bill.id,
+            businessDate,
+            // What the operator changed, for a reader scanning the history. An
+            // items edit and a discount edit both recalculate, so the flag the
+            // client sent is what distinguishes them.
+            body.recalculate === true ? 'items' : touchesMoney ? 'discount' : 'customer',
+            JSON.stringify(before),
+            JSON.stringify(after),
+            computed ? before.total : null,
+            computed ? after.total : null,
+            before.reprint_count > 0 ? 1 : 0,
+            before.amount_paid > 0 ? 1 : 0,
+            body.reason ?? null,
+            me.sub,
+            now,
+            now,
+          )
+      })()
+
+      return respond(app, me.branchId, bill.id)
+    },
+  )
+
+  /** The amendment history of one bill, newest first. */
+  app.get<{ Params: { id: string } }>(
+    '/bills/:id/amendments',
+    { preHandler: requireAuth },
+    async (request) => {
+      const me = currentUser(request)
+      const bill = findBill(app, me.branchId, request.params.id)
+
+      const rows = app.db
+        .prepare(
+          `SELECT a.*, u.username AS amended_by_name
+             FROM bill_amendments a
+             LEFT JOIN users u ON u.id = a.amended_by
+            WHERE a.bill_id = ?
+            ORDER BY a.created_at DESC`,
+        )
+        .all(bill.id) as {
+        id: string
+        kind: string
+        total_before: number | null
+        total_after: number | null
+        was_printed: number
+        was_paid: number
+        reason: string | null
+        amended_by_name: string | null
+        created_at: string
+      }[]
+
+      return {
+        amendments: rows.map((r) => ({
+          id: r.id,
+          kind: r.kind,
+          totalBefore: r.total_before,
+          totalAfter: r.total_after,
+          wasPrinted: r.was_printed === 1,
+          wasPaid: r.was_paid === 1,
+          reason: r.reason,
+          amendedBy: r.amended_by_name,
+          createdAt: r.created_at,
+        })),
+      }
+    },
+  )
+
+  /**
+   * Reopens a billed order so its items can be changed.
+   *
+   * Editing items means editing the order, not the bill: `order_items` is what
+   * the totals are computed from, and the routes that add and remove them
+   * already exist and are tested. This unlocks the order without voiding the
+   * bill, so the number survives; PATCH /bills/:id with `recalculate` then
+   * brings the bill back in step with the lines.
+   *
+   * The bill stays payable meanwhile. A half-edited order with a stale total is
+   * the window this opens, which is why the amendment history records what the
+   * total was before.
+   */
+  app.post<{ Params: { id: string } }>(
+    '/bills/:id/reopen',
+    { preHandler: requireRole('admin') },
+    async (request) => {
+      const me = currentUser(request)
+      const bill = findBill(app, me.branchId, request.params.id)
+
+      if (bill.voided_at !== null) {
+        throw new AppError(409, 'BILL_VOIDED', 'This bill has been voided')
+      }
+
+      const now = new Date().toISOString()
+      app.db
+        .prepare(
+          `UPDATE orders SET status = 'open', version = version + 1,
+                             updated_at = ?, synced_at = NULL
+            WHERE id = ?`,
+        )
+        .run(now, bill.order_id)
+
+      return { ok: true, orderId: bill.order_id }
     },
   )
 

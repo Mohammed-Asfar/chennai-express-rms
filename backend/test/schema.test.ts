@@ -45,7 +45,8 @@ test('the real schema migrates cleanly', () => {
     .sort()
 
   const expected = [
-    '_migrations', 'bills', 'branches', 'categories', 'export_log', 'license_state',
+    '_migrations', 'bill_amendments', 'bills', 'branches', 'categories', 'export_log',
+    'license_state',
     'menu_item_variants', 'menu_items',
     'order_items', 'orders', 'payments', 'print_jobs', 'printers', 'purge_log',
     'reservation_tables',

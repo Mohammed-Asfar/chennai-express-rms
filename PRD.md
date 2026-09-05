@@ -357,6 +357,12 @@ a picker. Every "the table's order" assumption in the UI must handle several.
 | FR-B35 | Reversed payments stay listed, struck through — they are the audit trail |
 | FR-B36 | Void is offered only to an admin, and only once no live payment stands |
 | FR-B37 | Both void and reversal require a reason; whitespace alone is not a reason |
+| FR-B38 | An admin can amend a bill in place — items, discount, or customer details — keeping its number rather than issuing a second one |
+| FR-B39 | Amending items reopens the order, changes its lines, then recalculates; the same arithmetic runs as for a fresh bill |
+| FR-B40 | Every amendment writes a `bill_amendments` row holding the bill before and after, the totals either side, who changed it and why |
+| FR-B41 | An amendment records whether the bill had already been printed or paid — the case that matters when a figure does not reconcile |
+| FR-B42 | Amending re-derives `payment_status`: a paid bill that grows becomes partly paid, one reduced below what was taken shows change owed |
+| FR-B43 | A voided bill cannot be amended, and an amendment that changes nothing is refused |
 | FR-O21 | Leaving an order with nothing on it discards it, so the table does not stay seated |
 | FR-O22 | A table held only by empty orders can be freed from its card on the floor |
 
@@ -684,6 +690,9 @@ Scenarios that occur in a working restaurant and their required behaviour.
 | Items at different GST rates on one bill | Tax grouped and printed per rate |
 | Round-off enabled | Applied once at the total, stored signed in `round_off` |
 | Price changed mid-order | The line keeps its snapshot price; a re-add at the new price becomes a separate line |
+| Bill amended after being printed | Allowed, and recorded. The customer's copy now disagrees with the record — `bill_amendments` holds the original total, and `was_printed` marks that a document existed when it changed |
+| Bill amended after being paid | Allowed. `amount_paid` is never rewritten; the status re-derives to `partial` if the total grew, and outstanding goes negative if it shrank below what was collected |
+| Amended bill reduced below what was collected | Outstanding shows negative — that is how staff learn change is owed rather than the figure being silently clamped to zero |
 | Zero-priced item (complimentary) | Allowed; contributes zero tax |
 | Bill paid ₹500 cash + ₹300 card | Two payment rows; reports count each mode separately |
 | Payment exceeding the bill total | Rejected — change is handled at the drawer, not recorded |

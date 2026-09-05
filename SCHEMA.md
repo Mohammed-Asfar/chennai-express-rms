@@ -32,7 +32,7 @@ local SQLite    Neon cloud
 | **Migrations are append-only** | Once applied to real data, a migration is immutable. Fix forward with a new one. |
 | **Checksums verified at boot** | A modified applied migration is a hard startup error — this makes append-only enforceable rather than a convention. |
 
-There is no code generator. The schema is small enough (20 tables) that generation
+There is no code generator. The schema is small enough (21 tables) that generation
 tooling would cost more than it saves. Keeping this document current is a review
 responsibility — see `CLAUDE.md` §1.
 
@@ -680,7 +680,44 @@ tradeoff is no type safety, so values are parsed and validated with Zod on read.
 
 ---
 
-### 3.17 `app_releases`
+### 3.18 `bill_amendments`
+
+Every change made to a bill after it was created.
+
+Bills are **edited in place**: `PATCH /bills/:id` recalculates the totals and
+overwrites the row. The bill number does not change and no second bill is
+created, so staff correct a mistake without handing the customer a different
+number for the same meal.
+
+What that costs is the original figures. `bills` holds only the latest state, so
+once an amendment succeeds the previous total is gone from it — and if the bill
+had already been printed, the customer's paper and the record no longer agree.
+
+This table is the trace. One row per amendment, holding the whole bill before and
+after as JSON, the totals either side, who changed it, why, and whether the bill
+had been printed or paid at the time. **It is the only place the original total
+survives**, which makes it the thing to read when a figure does not reconcile.
+
+Append-only: no `updated_at` semantics, no `deleted_at`, never purged. A history
+that can be rewritten is not a history.
+
+`kind` is one of `items` (a line added, removed or requantified), `discount`, or
+`customer`. The first two recalculate; the third moves no money and records null
+totals.
+
+**Editing items means editing the order.** `order_items` is what totals are
+computed from, so the flow is `POST /bills/:id/reopen` → change the lines →
+`PATCH /bills/:id` with `recalculate: true`. The same `computeBill` runs as for a
+fresh bill, so an amended bill and a new one over the same items agree.
+
+`payment_status` and `amount_paid` are re-derived whenever a total moves. A paid
+bill that grows becomes `partial`; one reduced below what was collected keeps
+`paid` and shows negative outstanding, which is how staff see that change is
+owed.
+
+---
+
+### 3.19 `app_releases`
 
 **Cloud-only.** Lives in Neon, never in branch SQLite — a branch cannot tell itself
 about a version it does not have.
@@ -816,7 +853,9 @@ minutes — is in `SYNC.md`.**
 | `branches`, `users`, `sections`, `tables`, `categories`, `menu_items`, `menu_item_variants` | Yes |
 | `reservations`, `reservation_tables` | Yes |
 | `orders`, `order_items`, `bills`, `payments` | Yes |
+| `bill_amendments` | Yes — pushed after `bills`, which it references |
 | `settings` | Yes |
+| `export_log`, `purge_log` | **No — branch-local** records of what left this PC |
 | `print_jobs` | **No — branch-local** |
 | `app_releases` | **No — cloud-only**, read by the branch, never written by it |
 | `licenses` | **No — cloud-only**, claimed by the branch, never pushed up |

@@ -130,6 +130,21 @@ export const SYNC_TABLES: SyncTable[] = [
     tracked: true,
   },
   {
+    // After bills, which it references. A history row arriving before the bill
+    // it amends fails the foreign key and quarantines itself.
+    name: 'bill_amendments',
+    // No deleted_at: an amendment is append-only. A history you can rewrite is
+    // not a history. updated_at is carried because the sync worker orders and
+    // backs off on it, not because the row ever changes.
+    columns: [
+      'id', 'branch_id', 'created_at', 'updated_at', 'bill_id', 'business_date',
+      'kind', 'before_json', 'after_json', 'total_before', 'total_after',
+      'was_printed', 'was_paid', 'reason', 'amended_by',
+    ],
+    conflictKeys: ['id'],
+    tracked: true,
+  },
+  {
     name: 'reservation_tables',
     // A link table: no id, no sync columns. Pushed whole with its reservation.
     columns: ['reservation_id', 'table_id'],
