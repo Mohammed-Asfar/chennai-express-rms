@@ -223,6 +223,39 @@ class BillSummary {
     outstanding: 0,
   );
 
+  /// Totals over a subset the client has narrowed, such as one order type.
+  ///
+  /// The backend's figures cover the whole range, so they cannot answer "what
+  /// did deliveries take today" once rows are filtered out. Summed in integer
+  /// paise, like every other total.
+  ///
+  /// [collected] counts live payments only — a reversed one is on the record
+  /// for audit but was never money in the drawer. [outstanding] clamps at zero
+  /// per bill, so one bill overpaid by ₹50 cannot cancel out another still
+  /// owing ₹50 and report the day as settled.
+  factory BillSummary.of(Iterable<Bill> bills) {
+    var total = 0;
+    var collected = 0;
+    var outstanding = 0;
+    var count = 0;
+
+    for (final bill in bills) {
+      count++;
+      total += bill.total;
+      for (final payment in bill.livePayments) {
+        collected += payment.amount;
+      }
+      if (bill.outstanding > 0) outstanding += bill.outstanding;
+    }
+
+    return BillSummary(
+      count: count,
+      total: total,
+      collected: collected,
+      outstanding: outstanding,
+    );
+  }
+
   factory BillSummary.fromJson(Map<String, dynamic> json) => BillSummary(
     count: json['count'] as int? ?? 0,
     total: json['total'] as int? ?? 0,

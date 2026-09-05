@@ -364,6 +364,8 @@ a picker. Every "the table's order" assumption in the UI must handle several.
 | FR-B41 | An amendment records whether the bill had already been printed or paid — the case that matters when a figure does not reconcile |
 | FR-B42 | Amending re-derives `payment_status`: a paid bill that grows becomes partly paid, one reduced below what was taken shows change owed |
 | FR-B43 | A voided bill cannot be amended, and an amendment that changes nothing is refused |
+| FR-B44 | The bills list can be filtered to dine-in, takeaway or delivery, and the summary totals follow the filter so a filtered list never sits under the whole day's takings |
+| FR-B45 | The type filter resets to all orders each time the bills screen is opened — a filter left set would show a partial day that reads as the whole of it |
 | FR-O21 | Leaving an order with nothing on it discards it, so the table does not stay seated |
 | FR-O22 | A table held only by empty orders can be freed from its card on the floor |
 
