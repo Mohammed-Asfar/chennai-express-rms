@@ -340,6 +340,88 @@ test('adds either side of a change stay separate lines', async () => {
   await ctx.app.close()
 })
 
+// --- what the till is told ---
+
+test('an order says what its section charges', async () => {
+  // Sent so the menu can show the price this table pays before an item is
+  // tapped. Computed backend-side, so Flutter displays rather than prices.
+  const ctx = await setup()
+  const created = await ctx.app.inject({
+    method: 'POST',
+    url: '/orders',
+    headers: ctx.auth,
+    payload: { type: 'dine_in', tableId: ctx.acTable },
+  })
+
+  assertEqual((created.json() as { order: { surcharge: number } }).order.surcharge, 1_000)
+  await ctx.app.close()
+})
+
+test('an order in a plain section charges nothing', async () => {
+  const ctx = await setup()
+  const created = await ctx.app.inject({
+    method: 'POST',
+    url: '/orders',
+    headers: ctx.auth,
+    payload: { type: 'dine_in', tableId: ctx.plainTable },
+  })
+
+  assertEqual((created.json() as { order: { surcharge: number } }).order.surcharge, 0)
+  await ctx.app.close()
+})
+
+test('a takeaway charges nothing', async () => {
+  const ctx = await setup()
+  const created = await ctx.app.inject({
+    method: 'POST',
+    url: '/orders',
+    headers: ctx.auth,
+    payload: { type: 'takeaway' },
+  })
+
+  assertEqual((created.json() as { order: { surcharge: number } }).order.surcharge, 0)
+  await ctx.app.close()
+})
+
+test('the figure shown matches the price charged', async () => {
+  // The two are computed separately — one for display, one for the line — so
+  // this pins that they agree. A gap between them is a price quoted to a
+  // customer and then not charged.
+  const ctx = await setup()
+  const order = await orderAt(ctx, ctx.acTable, [{ variantId: ctx.soup }])
+
+  const fetched = await ctx.app.inject({
+    method: 'GET',
+    url: `/orders/${order.id}`,
+    headers: ctx.auth,
+  })
+  const body = (fetched.json() as {
+    order: { surcharge: number; items: { unitPrice: number }[] }
+  }).order
+
+  assertEqual(body.items[0]!.unitPrice, 7_500 + body.surcharge)
+  await ctx.app.close()
+})
+
+test('the menu tells the till which items are exempt', async () => {
+  // The till applies the section's amount unless the item says otherwise, so
+  // it needs the override on every row of the menu.
+  const ctx = await setup()
+  await ctx.app.inject({
+    method: 'PATCH',
+    url: `/menu-items/${ctx.teaItemId}`,
+    headers: ctx.auth,
+    payload: { acSurcharge: 0 },
+  })
+
+  const menu = await ctx.app.inject({ method: 'GET', url: '/menu-items', headers: ctx.auth })
+  const items = (menu.json() as { items: { id: string; acSurcharge: number | null }[] }).items
+
+  assertEqual(items.find((i) => i.id === ctx.teaItemId)!.acSurcharge, 0)
+  assertEqual(items.find((i) => i.id === ctx.soupItemId)!.acSurcharge, null)
+  await ctx.app.close()
+})
+
 // --- the section API ---
 
 test('a section defaults to charging nothing extra', async () => {

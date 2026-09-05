@@ -3,6 +3,8 @@ import 'package:chennai_express_pos/features/tables/data/table_admin_models.dart
 import 'package:chennai_express_pos/features/menu/data/menu_admin_models.dart';
 import 'package:chennai_express_pos/features/menu/data/menu_admin_repository.dart';
 import 'package:chennai_express_pos/features/floor/data/floor_models.dart';
+import 'package:chennai_express_pos/features/menu/data/menu_models.dart';
+import 'package:chennai_express_pos/features/order/data/order_models.dart';
 
 Map<String, dynamic> sectionJson({int? surcharge}) => {
   'id': 's1',
@@ -111,6 +113,108 @@ void main() {
       final item = AdminMenuItem.fromJson(itemJson());
       expect(item.acSurcharge, isNull);
       expect(item.followsSection, isTrue);
+    });
+  });
+
+  group('the price shown on the menu', () {
+    MenuItem menuItem({int price = 7500, int? acSurcharge, int portions = 1}) =>
+        MenuItem.fromJson({
+          'id': 'i1',
+          'categoryId': 'c1',
+          'name': 'Chicken Soup',
+          'isAvailable': true,
+          if (acSurcharge != null) 'acSurcharge': acSurcharge,
+          'variants': [
+            for (var i = 0; i < portions; i++)
+              {
+                'id': 'v$i',
+                'name': portions == 1 ? 'Standard' : 'Size $i',
+                'price': price + (i * 5000),
+                'isAvailable': true,
+              },
+          ],
+        });
+
+    test('includes the section charge', () {
+      // A cashier reading ₹75 here and seeing ₹85 on the bill has no way to
+      // tell a surcharge from a mistake.
+      expect(menuItem().singlePriceIn(1000), 8500);
+    });
+
+    test('is the menu price where nothing is charged', () {
+      expect(menuItem().singlePriceIn(0), 7500);
+    });
+
+    test('an exempt item ignores the section', () {
+      expect(menuItem(acSurcharge: 0).singlePriceIn(1000), 7500);
+    });
+
+    test("an item's own amount replaces the section's", () {
+      expect(menuItem(acSurcharge: 2500).singlePriceIn(1000), 10000);
+    });
+
+    test('a multi-portion item still shows no single price', () {
+      // The tile reads "2 sizes" instead, and adding a surcharge must not
+      // conjure a figure that would be wrong for one of them.
+      expect(menuItem(portions: 2).singlePriceIn(1000), isNull);
+    });
+
+    test('each portion is priced separately in the picker', () {
+      // Per item, so both portions take the charge — not the order as a whole.
+      final item = menuItem(portions: 2);
+      expect(item.priceIn(item.variants[0], 1000), 8500);
+      expect(item.priceIn(item.variants[1], 1000), 13500);
+    });
+
+    test('agrees with the backend on every combination', () {
+      // The rule is implemented twice — here for display, and in the backend
+      // for what is charged. They must not drift, because the gap between them
+      // is a price a customer was quoted and then not charged.
+      //
+      // Mirrors backend/src/lib/surcharge.ts: the item wins when set, null
+      // follows the section.
+      for (final section in [0, 1000, 5000]) {
+        for (final item in [null, 0, 1000, 2500]) {
+          final expected = 7500 + (item ?? section);
+          expect(
+            menuItem(acSurcharge: item).singlePriceIn(section),
+            expected,
+            reason: 'section $section, item $item',
+          );
+        }
+      }
+    });
+  });
+
+  group('the order carries its section charge', () {
+    Order order({int? surcharge}) => Order.fromJson({
+      'id': 'o1',
+      'orderNo': 21,
+      'type': 'dine_in',
+      'status': 'open',
+      'version': 1,
+      'items': const [],
+      'subtotal': 0,
+      'tax': 0,
+      'total': 0,
+      'itemCount': 0,
+      if (surcharge != null) 'surcharge': surcharge,
+    });
+
+    test('so the menu can show what this table pays', () {
+      expect(order(surcharge: 1000).surcharge, 1000);
+      expect(order(surcharge: 1000).hasSurcharge, isTrue);
+    });
+
+    test('a table charging nothing says so', () {
+      expect(order(surcharge: 0).hasSurcharge, isFalse);
+    });
+
+    test('a backend that omits it charges nothing', () {
+      // A till may briefly run against an older backend. Inventing a charge
+      // would be worse than showing the menu price.
+      expect(order().surcharge, 0);
+      expect(order().hasSurcharge, isFalse);
     });
   });
 

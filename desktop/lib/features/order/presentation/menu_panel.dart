@@ -13,12 +13,24 @@ import '../../menu/data/menu_repository.dart';
 /// The menu side of the order screen: search, category filters, and a grid of
 /// items sized for fast tapping.
 class MenuPanel extends ConsumerStatefulWidget {
-  const MenuPanel({super.key, required this.onPick, required this.enabled});
+  const MenuPanel({
+    super.key,
+    required this.onPick,
+    required this.enabled,
+    this.surcharge = 0,
+  });
 
   /// Called with the chosen variant. Portion selection happens here, so the
   /// order screen only ever receives a concrete variant.
   final void Function(MenuVariant variant) onPick;
   final bool enabled;
+
+  /// Paise this table's section adds to each item.
+  ///
+  /// The prices shown include it, because a cashier reading ₹75 off the screen
+  /// and then seeing ₹85 on the bill has no way to tell a surcharge from a
+  /// mistake. An item may exempt itself, which [MenuItem.priceIn] handles.
+  final int surcharge;
 
   @override
   ConsumerState<MenuPanel> createState() => _MenuPanelState();
@@ -119,6 +131,7 @@ class _MenuPanelState extends ConsumerState<MenuPanel> {
                 itemBuilder: (context, index) => _ItemTile(
                   item: visible[index],
                   enabled: widget.enabled,
+                  surcharge: widget.surcharge,
                   onTap: () => _pick(visible[index]),
                 ),
               );
@@ -140,7 +153,7 @@ class _MenuPanelState extends ConsumerState<MenuPanel> {
 
     final chosen = await showDialog<MenuVariant>(
       context: context,
-      builder: (_) => _VariantPicker(item: item),
+      builder: (_) => _VariantPicker(item: item, surcharge: widget.surcharge),
     );
     if (chosen != null) widget.onPick(chosen);
   }
@@ -252,11 +265,19 @@ class _CategoryRowState extends State<_CategoryRow> {
 }
 
 class _ItemTile extends StatefulWidget {
-  const _ItemTile({required this.item, required this.enabled, required this.onTap});
+  const _ItemTile({
+    required this.item,
+    required this.enabled,
+    required this.onTap,
+    this.surcharge = 0,
+  });
 
   final MenuItem item;
   final bool enabled;
   final VoidCallback onTap;
+
+  /// Paise this table's section adds. Already in the price shown.
+  final int surcharge;
 
   @override
   State<_ItemTile> createState() => _ItemTileState();
@@ -305,9 +326,14 @@ class _ItemTileState extends State<_ItemTile> {
                     crossAxisAlignment: CrossAxisAlignment.end,
                     children: [
                       Expanded(
-                        child: item.singlePrice != null
+                        // The price this table will actually be charged, not
+                        // the menu price. Reading ₹75 here and seeing ₹85 on
+                        // the bill is indistinguishable from a mistake.
+                        child: item.singlePriceIn(widget.surcharge) != null
                             ? Text(
-                                Money.formatWithSymbol(item.singlePrice!),
+                                Money.formatWithSymbol(
+                                  item.singlePriceIn(widget.surcharge)!,
+                                ),
                                 style: theme.textTheme.bodyMedium?.copyWith(
                                   color: AppColors.accent,
                                   fontFamily: null,
@@ -337,9 +363,12 @@ class _ItemTileState extends State<_ItemTile> {
 }
 
 class _VariantPicker extends StatelessWidget {
-  const _VariantPicker({required this.item});
+  const _VariantPicker({required this.item, this.surcharge = 0});
 
   final MenuItem item;
+
+  /// Paise this table's section adds. Already in the prices shown.
+  final int surcharge;
 
   @override
   Widget build(BuildContext context) {
@@ -357,7 +386,7 @@ class _VariantPicker extends StatelessWidget {
                 contentPadding: const EdgeInsets.symmetric(horizontal: AppSpacing.md),
                 title: Text(variant.name),
                 trailing: Text(
-                  Money.formatWithSymbol(variant.price),
+                  Money.formatWithSymbol(item.priceIn(variant, surcharge)),
                   style: theme.textTheme.titleMedium?.copyWith(color: AppColors.accent),
                 ),
                 // A sold-out portion stays visible but cannot be picked, so

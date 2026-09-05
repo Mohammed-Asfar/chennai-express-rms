@@ -221,6 +221,9 @@ sales on the previous trading day, with the cutoff configured in settings.
 | FR-M19 | Tax is computed on the surcharged price, because that is what the customer pays |
 | FR-M20 | Changing a section's surcharge never reprices an order already placed; it applies to items added from then on |
 | FR-M21 | A takeaway or delivery carries no surcharge — there is no table, and no room to charge for |
+| FR-M22 | The order screen shows menu prices **with the surcharge already in them**, so the figure a cashier reads is the one the customer is charged |
+| FR-M23 | An order taken in a surcharged section says so in its header, so the raised prices read as intended rather than as a fault |
+| FR-M24 | The till is told the section's amount by the backend; it never derives a price rule of its own |
 
 ### 6.2 Sections & Tables
 

@@ -130,6 +130,10 @@ export async function orderRoutes(app: FastifyInstance): Promise<void> {
       const items = loadItems(app.db, rows.map((r) => r.id))
       const taxMode = getSetting(app.db, me.branchId, 'tax_mode')
 
+      // The list reports zero surcharge throughout: it shows no menu, so
+      // nothing here needs a price that has not been charged yet, and looking
+      // one up per row would be 200 queries for a figure nobody reads. Opening
+      // an order fetches it properly.
       return { orders: rows.map((row) => present(row, items.get(row.id) ?? [], taxMode)) }
     },
   )
@@ -139,7 +143,13 @@ export async function orderRoutes(app: FastifyInstance): Promise<void> {
     const order = findOrder(app, me.branchId, request.params.id)
     const items = loadItems(app.db, [order.id]).get(order.id) ?? []
     return {
-      order: present(order, items, getSetting(app.db, me.branchId, 'tax_mode'), billIdOf(app.db, order.id)),
+      order: present(
+        order,
+        items,
+        getSetting(app.db, me.branchId, 'tax_mode'),
+        billIdOf(app.db, order.id),
+        sectionSurcharge(app.db, order.table_id) ?? 0,
+      ),
     }
   })
 
@@ -185,7 +195,13 @@ export async function orderRoutes(app: FastifyInstance): Promise<void> {
     const created = findOrder(app, me.branchId, id)
     reply.status(201)
     return {
-      order: present(created, [], getSetting(app.db, me.branchId, 'tax_mode')),
+      order: present(
+        created,
+        [],
+        getSetting(app.db, me.branchId, 'tax_mode'),
+        null,
+        sectionSurcharge(app.db, created.table_id) ?? 0,
+      ),
       // FR-V7: reported after the order is created, never instead of creating it.
       warnings: body.tableId ? bookingWarnings(app, me.branchId, body.tableId) : [],
     }
@@ -577,6 +593,14 @@ function present(
   items: OrderItemRow[],
   taxMode: TaxMode,
   billId: string | null = null,
+  /**
+   * What this order's section adds to each item, in paise.
+   *
+   * Sent so the till can show what a dish will actually cost here before it is
+   * tapped. The figure is computed backend-side — the same call the add uses —
+   * rather than having Flutter apply a pricing rule of its own.
+   */
+  surcharge = 0,
 ) {
   const amounts = items.map((i) => ({ base: i.line_base, tax: i.line_tax, total: i.line_total }))
 
@@ -587,6 +611,8 @@ function present(
     type: order.type,
     tableId: order.table_id,
     seatLabel: order.seat_label,
+    /** Paise added to each item ordered here. Zero for most sections. */
+    surcharge,
     status: order.status,
     /** Set when this order has already been billed and is open for correction. */
     billId,
@@ -622,7 +648,13 @@ async function respond(app: FastifyInstance, branchId: string, orderId: string) 
   const order = findOrder(app, branchId, orderId)
   const items = loadItems(app.db, [orderId]).get(orderId) ?? []
   return {
-    order: present(order, items, getSetting(app.db, branchId, 'tax_mode'), billIdOf(app.db, order.id)),
+    order: present(
+      order,
+      items,
+      getSetting(app.db, branchId, 'tax_mode'),
+      billIdOf(app.db, order.id),
+      sectionSurcharge(app.db, order.table_id) ?? 0,
+    ),
   }
 }
 

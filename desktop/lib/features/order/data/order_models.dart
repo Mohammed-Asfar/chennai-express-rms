@@ -68,6 +68,7 @@ class Order {
     required this.itemCount,
     this.tableId,
     this.seatLabel,
+    this.surcharge = 0,
     this.customerName,
     this.customerPhone,
     this.billId,
@@ -88,6 +89,15 @@ class Order {
   final int itemCount;
   final String? tableId;
   final String? seatLabel;
+
+  /// Paise this order's section adds to each item — the AC charge.
+  ///
+  /// Computed backend-side and sent here so the menu can show what a dish will
+  /// cost at this table before it is tapped. Zero for a takeaway, a delivery,
+  /// or a section that charges nothing.
+  final int surcharge;
+
+  bool get hasSurcharge => surcharge > 0;
   final String? customerName;
 
   /// The number a rider calls when they cannot find the door. Null on most
@@ -130,6 +140,7 @@ class Order {
         itemCount: json['itemCount'] as int? ?? 0,
         tableId: json['tableId'] as String?,
         seatLabel: json['seatLabel'] as String?,
+        surcharge: json['surcharge'] as int? ?? 0,
         customerName: json['customerName'] as String?,
         customerPhone: json['customerPhone'] as String?,
         billId: json['billId'] as String?,
