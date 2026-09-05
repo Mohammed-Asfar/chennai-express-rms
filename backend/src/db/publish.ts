@@ -22,6 +22,13 @@ import { basename } from 'node:path'
 import type { Sql } from 'postgres'
 import { loadEnv } from '../lib/env.js'
 import { APP_BUILD_NUMBER, APP_VERSION } from '../lib/version.js'
+import {
+  checkDownload,
+  checkStoredAsset,
+  type Downloaded,
+  type LocalFile,
+  type PublishedAsset,
+} from './publish-checks.js'
 
 interface Options {
   file?: string
@@ -127,20 +134,57 @@ async function main(): Promise<void> {
       process.exit(1)
     }
 
-    // Read the published file back and re-hash it. An upload that silently
-    // truncated, or a URL pointing at an older build, both produce a mismatch
-    // here rather than on a restaurant's PC.
-    console.log('  Verifying the published file...')
-    const published = verifyPublished(url)
-    if (published !== sha256) {
+    // Verified twice, because 1.0.5 passed a hash check and still shipped an
+    // installer GitHub was serving 11 MB short.
+    //
+    // First: what GitHub says it stored. That number disagreed immediately, and
+    // it costs one API call rather than a 50 MB download. A truncated upload is
+    // worth simply doing again, so it is — once.
+    //
+    // Then: the bytes that actually come down the public URL, which is the same
+    // request a till makes. Only after both agree is a release row written.
+    const local: LocalFile = { size: statSync(options.file!).size, sha256 }
+    const tag = `v${APP_VERSION}`
+
+    if (!options.skipUpload) {
+      console.log('  Checking what GitHub stored...')
+      let asset = storedAsset(tag, name)
+      let stored = asset
+        ? checkStoredAsset(asset, local)
+        : ({ ok: false, retryable: true, reason: 'no such asset on the release' } as const)
+
+      if (!stored.ok && stored.retryable) {
+        console.log(`    ${stored.reason}`)
+        console.log('    Re-uploading once...')
+        execFileSync('gh', ['release', 'upload', tag, options.file!, '--clobber'], {
+          stdio: 'inherit',
+        })
+        asset = storedAsset(tag, name)
+        stored = asset
+          ? checkStoredAsset(asset, local)
+          : ({ ok: false, retryable: false, reason: 'no such asset after re-uploading' } as const)
+      }
+
+      if (!stored.ok) {
+        console.error('')
+        console.error('  The upload did not survive: ' + stored.reason)
+        console.error('  No release row was written.')
+        process.exit(1)
+      }
+      console.log(`    ${local.size} bytes, as built.`)
+    }
+
+    console.log('  Downloading it back...')
+    const got = downloadPublished(url)
+    const download = checkDownload(got, local)
+    if (!download.ok) {
       console.error('')
-      console.error('  The uploaded file does not match what was hashed locally.')
-      console.error(`    local:     ${sha256}`)
-      console.error(`    published: ${published}`)
+      console.error('  What the URL serves is not the installer: ' + download.reason)
       console.error('  No release row was written.')
+      console.error(`  Withdraw nothing — nothing was published. Fix the asset at ${url}`)
       process.exit(1)
     }
-    console.log('  Matches.')
+    console.log('  Matches, byte for byte.')
 
     if (options.dryRun) {
       console.log('')
@@ -257,14 +301,43 @@ function uploadToGitHub(file: string, name: string): string {
   return `https://github.com/${repo}/releases/download/${tag}/${name}`
 }
 
-/** Downloads the published file and returns its SHA-256. */
-function verifyPublished(url: string): string {
-  const body = execFileSync('curl', ['-sL', '--max-time', '600', url], {
+/**
+ * What GitHub says it stored for the release asset.
+ *
+ * One API call, and it is the check that would have caught 1.0.5 instantly:
+ * GitHub reported 43,542,605 bytes for a 54,964,421-byte installer and still
+ * marked it `uploaded`. Asking costs nothing next to downloading 50 MB.
+ */
+function storedAsset(tag: string, name: string): PublishedAsset | null {
+  const json = execFileSync(
+    'gh',
+    ['release', 'view', tag, '--json', 'assets'],
+    { encoding: 'utf8' },
+  )
+
+  const assets = (JSON.parse(json) as { assets: { name: string; size: number; state: string }[] })
+    .assets
+  const found = assets.find((a) => a.name === name)
+  return found ? { size: found.size, state: found.state } : null
+}
+
+/**
+ * Downloads the published file and returns its size and SHA-256.
+ *
+ * `--fail` so an HTTP error is an error: without it curl follows a 404 into an
+ * HTML body, exits zero, and hands back a few hundred bytes to be hashed as
+ * though they were the installer.
+ */
+function downloadPublished(url: string): Downloaded {
+  const body = execFileSync('curl', ['-sL', '--fail', '--max-time', '600', url], {
     encoding: 'buffer',
     maxBuffer: 512 * 1024 * 1024,
   })
 
-  return createHash('sha256').update(body).digest('hex')
+  return {
+    size: body.byteLength,
+    sha256: createHash('sha256').update(body).digest('hex'),
+  }
 }
 
 await main()
