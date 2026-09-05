@@ -17,12 +17,18 @@ class TableAdminRepository {
         .toList();
   }
 
-  Future<void> createSection(String name) async {
-    await _api.post('/sections', {'name': name});
+  /// [surcharge] is paise added to every item ordered here — the AC charge.
+  Future<void> createSection(String name, {int surcharge = 0}) async {
+    await _api.post('/sections', {'name': name, 'surcharge': surcharge});
   }
 
-  Future<void> renameSection(String id, String name) async {
-    await _api.patch('/sections/$id', {'name': name});
+  /// Changing [surcharge] affects items added from now on. Food already
+  /// ordered keeps the price it was snapshotted at.
+  Future<void> renameSection(String id, String name, {int? surcharge}) async {
+    await _api.patch('/sections/$id', {
+      'name': name,
+      if (surcharge != null) 'surcharge': surcharge,
+    });
   }
 
   /// Fails with SECTION_NOT_EMPTY, or LAST_SECTION when it is the only one.

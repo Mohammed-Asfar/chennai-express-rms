@@ -7,6 +7,7 @@ import { currentUser, requireAuth } from '../lib/guards.js'
 import { currentBusinessDate, nextOrderNumber } from '../lib/business-date.js'
 import { getSetting } from '../lib/settings.js'
 import { lineAmounts, orderSubtotal, orderTax, orderTotal, type TaxMode } from '../lib/order-math.js'
+import { pricedAt } from '../lib/surcharge.js'
 import { refreshTableStatus } from './tables.js'
 import {
   enqueueAndSend,
@@ -232,6 +233,14 @@ export async function orderRoutes(app: FastifyInstance): Promise<void> {
       const variant = loadOrderableVariant(app, me.branchId, body.variantId)
       const taxMode = getSetting(app.db, me.branchId, 'tax_mode')
 
+      // The AC surcharge goes into the snapshot price, not onto the bill later.
+      // Everything downstream — tax, reprints, amendments, reports — then reads
+      // the price actually charged without knowing a surcharge exists.
+      const unitPrice = pricedAt(variant.price, {
+        section: sectionSurcharge(app.db, order.table_id),
+        item: variant.ac_surcharge,
+      })
+
       app.db.transaction(() => {
         // Merge into an existing line only when the snapshot price matches. If the
         // item was repriced between the two adds, each keeps its own price.
@@ -242,7 +251,7 @@ export async function orderRoutes(app: FastifyInstance): Promise<void> {
                AND IFNULL(notes, '') = IFNULL(?, '') AND deleted_at IS NULL
              LIMIT 1`,
           )
-          .get(order.id, variant.id, variant.price, variant.tax_rate, body.notes ?? null) as
+          .get(order.id, variant.id, unitPrice, variant.tax_rate, body.notes ?? null) as
           | OrderItemRow
           | undefined
 
@@ -255,7 +264,7 @@ export async function orderRoutes(app: FastifyInstance): Promise<void> {
           })
         } else {
           const amounts = lineAmounts(
-            { unitPrice: variant.price, taxRate: variant.tax_rate, qty: body.qty },
+            { unitPrice, taxRate: variant.tax_rate, qty: body.qty },
             taxMode,
           )
           const now = new Date().toISOString()
@@ -273,7 +282,7 @@ export async function orderRoutes(app: FastifyInstance): Promise<void> {
               // Snapshots: renaming or repricing the dish must never alter this line.
               variant.item_name,
               variant.name,
-              variant.price,
+              unitPrice,
               variant.tax_rate,
               body.qty,
               amounts.base,
@@ -710,13 +719,39 @@ interface VariantJoin {
   item_name: string
   tax_rate: number
   item_available: number
+  /** Null means this item follows whatever its section charges. */
+  ac_surcharge: number | null
+}
+
+/**
+ * What the room this order is sitting in adds to each item, in paise.
+ *
+ * Null when there is no table — a takeaway or a delivery has no air-conditioned
+ * room to charge for, and `surchargeFor` reads that null as charging nothing.
+ * Read at add time only: the amount is snapshotted into `unit_price`, so
+ * changing a section's surcharge never touches food already ordered.
+ */
+function sectionSurcharge(db: Db, tableId: string | null): number | null {
+  if (tableId === null) return null
+
+  const row = db
+    .prepare(
+      `SELECT s.surcharge
+       FROM tables t
+       JOIN sections s ON s.id = t.section_id
+       WHERE t.id = ?`,
+    )
+    .get(tableId) as { surcharge: number } | undefined
+
+  return row?.surcharge ?? 0
 }
 
 function loadOrderableVariant(app: FastifyInstance, branchId: string, variantId: string): VariantJoin {
   const row = app.db
     .prepare(
       `SELECT v.id, v.name, v.price, v.is_available,
-              m.name AS item_name, m.tax_rate, m.is_available AS item_available
+              m.name AS item_name, m.tax_rate, m.is_available AS item_available,
+              m.ac_surcharge
        FROM menu_item_variants v
        JOIN menu_items m ON m.id = v.menu_item_id
        WHERE v.id = ? AND m.branch_id = ? AND v.deleted_at IS NULL AND m.deleted_at IS NULL`,

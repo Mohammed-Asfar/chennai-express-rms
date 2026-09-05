@@ -23,6 +23,12 @@ const createBody = z.object({
   /** Basis points. Omitted means inherit the branch default. */
   taxRate: z.number().int().min(0).max(10_000).optional(),
   isAvailable: z.boolean().optional(),
+  /**
+   * What this item adds in a surcharged section, overriding the section's own
+   * amount. Null follows the section — the ordinary case. Zero exempts it, so
+   * tea stays ₹20 in the AC room.
+   */
+  acSurcharge: z.number().int().min(0).max(100_000).nullable().optional(),
   /** Omitted or empty creates a single `Standard` variant (FR-M5). */
   variants: z.array(variantInput).optional(),
   price: z.number().int().min(0).optional(),
@@ -35,6 +41,7 @@ const updateBody = z.object({
   taxRate: z.number().int().min(0).max(10_000).optional(),
   isAvailable: z.boolean().optional(),
   sortOrder: z.number().int().min(0).optional(),
+  acSurcharge: z.number().int().min(0).max(100_000).nullable().optional(),
 })
 
 const updateVariantBody = z.object({
@@ -52,6 +59,8 @@ interface ItemRow {
   tax_rate: number
   is_available: number
   sort_order: number
+  /** Null means this item follows whatever its section charges. */
+  ac_surcharge: number | null
 }
 
 interface VariantRow {
@@ -79,6 +88,7 @@ const toPublicItem = (row: ItemRow, variants: VariantRow[]) => ({
   taxRate: row.tax_rate,
   isAvailable: row.is_available === 1,
   sortOrder: row.sort_order,
+  acSurcharge: row.ac_surcharge,
   variants: variants.map(toPublicVariant),
 })
 
@@ -144,8 +154,8 @@ export async function menuRoutes(app: FastifyInstance): Promise<void> {
       app.db
         .prepare(
           `INSERT INTO menu_items (id, branch_id, category_id, name, description, tax_rate,
-                                   is_available, sort_order, created_at, updated_at)
-           VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+                                   is_available, sort_order, ac_surcharge, created_at, updated_at)
+           VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
         )
         .run(
           id,
@@ -156,6 +166,7 @@ export async function menuRoutes(app: FastifyInstance): Promise<void> {
           taxRate,
           body.isAvailable === false ? 0 : 1,
           sortOrder,
+          body.acSurcharge ?? null,
           now,
           now,
         )
@@ -210,6 +221,10 @@ export async function menuRoutes(app: FastifyInstance): Promise<void> {
       if (body.taxRate !== undefined) push('tax_rate', body.taxRate)
       if (body.isAvailable !== undefined) push('is_available', body.isAvailable ? 1 : 0)
       if (body.sortOrder !== undefined) push('sort_order', body.sortOrder)
+      // Null is a value here, not an absence: it puts the item back on its
+      // section's amount, which is why this tests undefined rather than
+      // truthiness. Zero means exempt, and both must survive the round trip.
+      if (body.acSurcharge !== undefined) push('ac_surcharge', body.acSurcharge)
 
       if (sets.length > 0) {
         sets.push('updated_at = ?', 'synced_at = NULL')

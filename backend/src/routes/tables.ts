@@ -6,15 +6,22 @@ import type { Db } from '../db/client.js'
 import { AppError } from '../lib/errors.js'
 import { currentUser, requireAuth, requireRole } from '../lib/guards.js'
 
+// Paise, never negative: a negative surcharge would be a discount that skips
+// the discount rules entirely. Capped at ₹1000 so a stray extra zero is caught
+// here rather than on a customer's bill.
+const surchargeAmount = z.number().int().min(0).max(100_000)
+
 const createSectionBody = z.object({
   name: requiredText(48),
   sortOrder: z.number().int().min(0).optional(),
+  surcharge: surchargeAmount.optional(),
 })
 
 const updateSectionBody = z.object({
   name: requiredText(48).optional(),
   sortOrder: z.number().int().min(0).optional(),
   isActive: z.boolean().optional(),
+  surcharge: surchargeAmount.optional(),
 })
 
 const createTableBody = z.object({
@@ -39,6 +46,8 @@ interface SectionRow {
   name: string
   sort_order: number
   is_active: number
+  /** Paise added to each item ordered at a table in this section. */
+  surcharge: number
 }
 
 interface TableRow {
@@ -71,6 +80,7 @@ const toPublicSection = (row: SectionRow, tableCount?: number) => ({
   name: row.name,
   sortOrder: row.sort_order,
   isActive: row.is_active === 1,
+  surcharge: row.surcharge,
   ...(tableCount !== undefined ? { tableCount } : {}),
 })
 
@@ -115,10 +125,19 @@ export async function tableRoutes(app: FastifyInstance): Promise<void> {
     const now = new Date().toISOString()
     app.db
       .prepare(
-        `INSERT INTO sections (id, branch_id, name, sort_order, is_active, created_at, updated_at)
-         VALUES (?, ?, ?, ?, 1, ?, ?)`,
+        `INSERT INTO sections (id, branch_id, name, sort_order, is_active, surcharge,
+                               created_at, updated_at)
+         VALUES (?, ?, ?, ?, 1, ?, ?, ?)`,
       )
-      .run(id, me.branchId, body.name, body.sortOrder ?? nextSectionOrder(app, me.branchId), now, now)
+      .run(
+        id,
+        me.branchId,
+        body.name,
+        body.sortOrder ?? nextSectionOrder(app, me.branchId),
+        body.surcharge ?? 0,
+        now,
+        now,
+      )
 
     reply.status(201)
     return { section: toPublicSection(findSection(app, me.branchId, id)) }
@@ -140,6 +159,9 @@ export async function tableRoutes(app: FastifyInstance): Promise<void> {
         ['name', body.name],
         ['sort_order', body.sortOrder],
         ['is_active', body.isActive === undefined ? undefined : body.isActive ? 1 : 0],
+        // Takes effect on items added from now on. Food already ordered keeps
+        // the price it was snapshotted at, so a party mid-meal is not repriced.
+        ['surcharge', body.surcharge],
       ])
 
       return { section: toPublicSection(findSection(app, me.branchId, request.params.id)) }

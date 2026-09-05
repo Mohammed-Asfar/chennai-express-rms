@@ -213,6 +213,14 @@ sales on the previous trading day, with the cutoff configured in settings.
 | FR-M11 | A menu item or variant referenced by any order is soft-deleted, never hard-deleted |
 | FR-M12 | Marking an item unavailable does not affect orders already containing it |
 | FR-M13 | Prices and rates are entered as rupees and percentages in the UI, converted to paise and basis points at the boundary |
+| FR-M14 | A section can carry a **surcharge** — a flat amount added to every item ordered at a table in it, for AC seating |
+| FR-M15 | The surcharge is set per section, so an AC room and a terrace can differ, and defaults to zero |
+| FR-M16 | An item can override its section's surcharge, including setting it to zero so a ₹20 tea stays ₹20 in the AC room |
+| FR-M17 | An item with no override follows its section, so raising a section's amount carries every ordinary item with it |
+| FR-M18 | The surcharge is added to the item's price when it is ordered — it is not a separate line on the bill |
+| FR-M19 | Tax is computed on the surcharged price, because that is what the customer pays |
+| FR-M20 | Changing a section's surcharge never reprices an order already placed; it applies to items added from then on |
+| FR-M21 | A takeaway or delivery carries no surcharge — there is no table, and no room to charge for |
 
 ### 6.2 Sections & Tables
 
@@ -707,6 +715,12 @@ Scenarios that occur in a working restaurant and their required behaviour.
 | Bill settled after the billing dialog closed | Taken from the bill's detail in the bills list; status and takings both follow |
 | Bill taken while another screen was open | The bills list and reports refetch when opened, so neither shows a stale figure |
 | Amount edited above what is due | Refused by the backend with the outstanding figure, not silently clamped |
+| AC surcharge changed while a party is eating | Their placed lines keep the prices they were taken at; only items added afterwards use the new amount |
+| Same dish ordered either side of that change | Stays two lines, each at its own price — merging them would reprice one |
+| Item exempted from the surcharge | Costs the menu price in every section, and the item editor says so rather than leaving a blank-looking field |
+| Item exemption cleared | Goes back to following its section, which is why the field distinguishes empty from zero |
+| Section renamed from the floor screen | Its surcharge is carried into the dialog and back, so a rename cannot wipe the charge |
+| Negative or fractional surcharge entered | Refused at the API and in the form — a negative would be a discount that skips the discount rules |
 | Cash recorded when it was card | Reversed with a reason, correct payment added; the bill reopens for the amount |
 | Void attempted on a paid bill | Refused — its payments must be reversed first, so the button is hidden until they are |
 | Reason field holding only spaces | Rejected. Trimming happens before the length check, not after |

@@ -67,6 +67,7 @@ class AdminMenuItem {
     required this.isAvailable,
     required this.sortOrder,
     required this.variants,
+    this.acSurcharge,
   });
 
   final String id;
@@ -79,6 +80,17 @@ class AdminMenuItem {
   final bool isAvailable;
   final int sortOrder;
   final List<AdminVariant> variants;
+
+  /// What this item adds in a section that charges extra, overriding the
+  /// section's own amount. Paise.
+  ///
+  /// Null follows the section — the ordinary case. Zero exempts the item, so
+  /// tea stays ₹20 in the AC room. The two are different states, and collapsing
+  /// them would silently put an exempt item back on the section's amount.
+  final int? acSurcharge;
+
+  bool get followsSection => acSurcharge == null;
+  bool get isExempt => acSurcharge == 0;
 
   /// The range shown in the list. An item with one portion shows one price.
   int get lowestPrice =>
@@ -97,6 +109,7 @@ class AdminMenuItem {
         taxRate: json['taxRate'] as int? ?? 0,
         isAvailable: json['isAvailable'] as bool? ?? true,
         sortOrder: json['sortOrder'] as int? ?? 0,
+        acSurcharge: json['acSurcharge'] as int?,
         variants: ((json['variants'] as List<dynamic>?) ?? const [])
             .map((v) => AdminVariant.fromJson(v as Map<String, dynamic>))
             .toList(),

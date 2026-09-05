@@ -3,6 +3,18 @@ import '../../../core/api/api_client.dart';
 import '../../../core/api/providers.dart';
 import 'menu_admin_models.dart';
 
+/// A field being set, where null is one of the values it can be set to.
+///
+/// `null` as an argument means "leave this alone"; `Patch(null)` means "store
+/// null". Needed wherever clearing a value and not touching it are different
+/// outcomes — an item's AC surcharge being the case in point, since null there
+/// puts it back on its section's amount.
+class Patch<T> {
+  const Patch(this.value);
+
+  final T? value;
+}
+
 /// Menu management calls.
 ///
 /// Separate from [MenuRepository], which serves the till: this one asks for
@@ -59,6 +71,7 @@ class MenuAdminRepository {
     required String name,
     String? description,
     int? taxRate,
+    int? acSurcharge,
     required List<VariantDraft> variants,
   }) async {
     await _api.post('/menu-items', {
@@ -66,6 +79,7 @@ class MenuAdminRepository {
       'name': name,
       if (description != null && description.isNotEmpty) 'description': description,
       if (taxRate != null) 'taxRate': taxRate,
+      if (acSurcharge != null) 'acSurcharge': acSurcharge,
       'variants': [
         for (final v in variants)
           {
@@ -77,6 +91,10 @@ class MenuAdminRepository {
     });
   }
 
+  /// [acSurcharge] is wrapped because null is a value here, not an absence:
+  /// `Clear()` puts the item back on its section's amount, `Set(0)` exempts it,
+  /// and omitting it leaves whatever is stored alone. A bare `int?` could only
+  /// express two of those three.
   Future<void> updateItem(
     String id, {
     String? categoryId,
@@ -84,6 +102,7 @@ class MenuAdminRepository {
     String? description,
     int? taxRate,
     bool? isAvailable,
+    Patch<int>? acSurcharge,
   }) async {
     await _api.patch('/menu-items/$id', {
       if (categoryId != null) 'categoryId': categoryId,
@@ -91,6 +110,7 @@ class MenuAdminRepository {
       if (description != null) 'description': description,
       if (taxRate != null) 'taxRate': taxRate,
       if (isAvailable != null) 'isAvailable': isAvailable,
+      if (acSurcharge != null) 'acSurcharge': acSurcharge.value,
     });
   }
 

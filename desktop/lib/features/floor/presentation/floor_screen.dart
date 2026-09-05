@@ -3,6 +3,7 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import '../../../core/api/api_exception.dart';
 import '../../../core/theme/app_colors.dart';
 import '../../../core/theme/app_spacing.dart';
+import '../../../core/utils/money.dart';
 import '../../../core/widgets/app_loading.dart';
 import '../../../core/widgets/error_banner.dart';
 import '../../order/data/order_repository.dart';
@@ -221,6 +222,9 @@ class FloorScreen extends ConsumerWidget {
       sortOrder: 0,
       isActive: true,
       tableCount: section.tables.length,
+      // Carried through, or the dialog opens showing no charge and saves that
+      // back — wiping an AC charge on what looked like a rename.
+      surcharge: section.surcharge,
     );
     if (await SectionDialog.show(context, section: existing) == true) {
       _refresh(ref);
@@ -444,6 +448,32 @@ class _SectionHeader extends StatelessWidget {
       crossAxisAlignment: CrossAxisAlignment.center,
       children: [
         Text(section.name.toUpperCase(), style: theme.textTheme.labelSmall),
+
+        // Named on the floor because it is the room where a cashier is
+        // standing when a customer asks why the soup cost more.
+        if (section.chargesExtra) ...[
+          const SizedBox(width: AppSpacing.sm),
+          Tooltip(
+            message: 'Every item ordered here costs '
+                '${Money.formatWithSymbol(section.surcharge)} more',
+            child: Container(
+              padding: const EdgeInsets.symmetric(
+                horizontal: AppSpacing.sm,
+                vertical: 2,
+              ),
+              decoration: BoxDecoration(
+                color: AppColors.surfaceSunken,
+                borderRadius: BorderRadius.circular(AppSpacing.radiusSm),
+                border: Border.all(color: AppColors.border),
+              ),
+              child: Text(
+                '+${Money.formatWithSymbol(section.surcharge)}',
+                style: theme.textTheme.labelSmall,
+              ),
+            ),
+          ),
+        ],
+
         const SizedBox(width: AppSpacing.md),
         Expanded(child: Container(height: 1, color: AppColors.border)),
         const SizedBox(width: AppSpacing.md),
@@ -468,7 +498,8 @@ class _SectionHeader extends StatelessWidget {
               const PopupMenuItem(value: 'up', child: Text('Move up')),
             if (canMoveDown)
               const PopupMenuItem(value: 'down', child: Text('Move down')),
-            const PopupMenuItem(value: 'rename', child: Text('Rename section')),
+            // Not "Rename": the same dialog sets what the room charges.
+            const PopupMenuItem(value: 'rename', child: Text('Edit section')),
             const PopupMenuItem(value: 'delete', child: Text('Delete section')),
           ],
         ),
