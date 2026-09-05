@@ -346,6 +346,13 @@ class Bill {
     return tableName ?? 'Dine-in';
   }
 
+  /// A delivery, where a name and a phone number are worth having.
+  ///
+  /// On a takeaway or a dine-in they are almost always empty — the customer
+  /// was standing at the counter — so offering the fields on every bill put
+  /// two blank boxes in front of staff on most of them.
+  bool get isDelivery => orderType == 'delivery';
+
   bool get isPaid => paymentStatus == PaymentStatus.paid;
 
   /// Reversed payments stay on the record for audit but do not count.

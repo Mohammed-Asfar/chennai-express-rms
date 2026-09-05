@@ -164,24 +164,29 @@ class _EditBillDialogState extends ConsumerState<EditBillDialog> {
                       ),
                     ),
 
-                    _Section(
-                      label: 'Customer',
-                      child: Column(
-                        children: [
-                          AppTextField(
-                            controller: _name,
-                            label: 'Name',
-                            enabled: !_saving,
-                          ),
-                          const SizedBox(height: AppSpacing.sm),
-                          AppTextField(
-                            controller: _phone,
-                            label: 'Phone',
-                            enabled: !_saving,
-                          ),
-                        ],
+                    // Only on a delivery. A takeaway or dine-in customer was
+                    // standing at the counter, so these were two blank boxes
+                    // on most bills — and on a delivery they are the number a
+                    // rider calls, which is worth being able to correct.
+                    if (bill.isDelivery)
+                      _Section(
+                        label: 'Customer',
+                        child: Column(
+                          children: [
+                            AppTextField(
+                              controller: _phone,
+                              label: 'Phone',
+                              enabled: !_saving,
+                            ),
+                            const SizedBox(height: AppSpacing.sm),
+                            AppTextField(
+                              controller: _name,
+                              label: 'Name and address',
+                              enabled: !_saving,
+                            ),
+                          ],
+                        ),
                       ),
-                    ),
 
                     _Section(
                       label: 'Reason',
@@ -244,9 +249,6 @@ class _EditBillDialogState extends ConsumerState<EditBillDialog> {
             ? (double.tryParse(_discount.text.trim()) ?? 0) * 100
             : (Money.parse(_discount.text.trim()) ?? 0).toDouble();
 
-    final name = _name.text.trim();
-    final phone = _phone.text.trim();
-
     setState(() {
       _saving = true;
       _error = null;
@@ -257,8 +259,12 @@ class _EditBillDialogState extends ConsumerState<EditBillDialog> {
             bill.id,
             discountType: _discountType,
             discountValue: entered.round(),
-            customerName: name,
-            customerPhone: phone,
+            // Only sent when the fields were shown. A takeaway has no customer
+            // section, so sending the controllers' contents would write empty
+            // strings over whatever the order recorded — and a bill amended
+            // for a discount would quietly lose a phone number taken with it.
+            customerName: bill.isDelivery ? _name.text.trim() : null,
+            customerPhone: bill.isDelivery ? _phone.text.trim() : null,
             reason: _reason.text.trim(),
           );
       if (!mounted) return;

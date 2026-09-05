@@ -83,6 +83,30 @@ void main() {
     });
   });
 
+  group('the customer fields', () {
+    test('belong to a delivery', () {
+      // The number a rider calls, and the address they are going to. Worth
+      // being able to correct without reopening the order.
+      final bill = Bill.fromJson({...billJson(), 'orderType': 'delivery'});
+      expect(bill.isDelivery, isTrue);
+    });
+
+    test('are not shown on a takeaway or a dine-in', () {
+      // That customer was standing at the counter. Offering the fields put two
+      // blank boxes in front of staff on most bills.
+      for (final type in ['takeaway', 'dine_in']) {
+        final bill = Bill.fromJson({...billJson(), 'orderType': type});
+        expect(bill.isDelivery, isFalse, reason: type);
+      }
+    });
+
+    test('a bill whose order was purged is not treated as a delivery', () {
+      // orderType is null once the order is gone, and null is not delivery.
+      final bill = Bill.fromJson(billJson());
+      expect(bill.isDelivery, isFalse);
+    });
+  });
+
   group('an amendment record', () {
     test('carries the totals either side', () {
       // The reason the record exists: bills holds only the latest figures.
