@@ -251,9 +251,9 @@ class _Content extends ConsumerWidget {
                     for (final payment in bill.payments)
                       _PaymentRow(
                         payment: payment,
-                        // Reversing is pointless once the bill is void — it
-                        // cannot be voided while a payment stands, so by then
-                        // they are already reversed.
+                        // A payment already reversed has nothing left to undo.
+                        // Deleting the bill reverses whatever still stands, so
+                        // by then these are all struck through anyway.
                         onReverse: payment.isReversed
                             ? null
                             : () => _reverse(context, ref, payment),
@@ -323,19 +323,24 @@ class _Content extends ConsumerWidget {
           padding: const EdgeInsets.all(AppSpacing.lg),
           child: Row(
             children: [
-              Expanded(
-                child: SizedBox(
-                  height: AppSpacing.minTapTarget,
-                  child: OutlinedButton.icon(
-                    onPressed: () => _print(context, ref),
-                    icon: const Icon(Icons.print_outlined, size: 18),
-                    // A bill printed here has printed before, so the paper
-                    // says duplicate. One never printed is still an original,
-                    // which the backend decides from the print history.
-                    label: const Text('Print'),
-                  ),
+              // Its natural width, never flexed. As an Expanded it took only
+              // what was left after Take payment, which on an unpaid bill was
+              // narrower than the word itself and wrapped it to "Prin / t".
+              // Take payment carries the flex instead — its label is the one
+              // that can afford to be tight.
+              SizedBox(
+                height: AppSpacing.minTapTarget,
+                child: OutlinedButton.icon(
+                  onPressed: () => _print(context, ref),
+                  icon: const Icon(Icons.print_outlined, size: 18),
+                  // A bill printed here has printed before, so the paper
+                  // says duplicate. One never printed is still an original,
+                  // which the backend decides from the print history.
+                  label: const Text('Print'),
                 ),
               ),
+
+              const Spacer(),
 
               // Amending is admin-only, like voiding. Unlike voiding it stays
               // available once money has been taken — a wrong total is worth
@@ -355,9 +360,14 @@ class _Content extends ConsumerWidget {
                     child: const Text('Edit'),
                   ),
                 ),
-                // Narrow on purpose: this row already holds Print, Void and
-                // Take payment, and a wider control here overflowed the dialog
-                // by twelve pixels rather than wrapping.
+                // Narrow on purpose: four full-width buttons plus their gaps
+                // need more room than a 520px dialog has, and the one that
+                // gave way was Print — squeezed until it read "Prin / t".
+                //
+                // Delete lives in here rather than beside Take payment. It is
+                // the destructive one, so a stray click away from settling a
+                // bill is the wrong place for it, and moving it is what buys
+                // the row its width back.
                 SizedBox(
                   height: AppSpacing.minTapTarget,
                   width: 32,
@@ -366,32 +376,24 @@ class _Content extends ConsumerWidget {
                     padding: EdgeInsets.zero,
                     onSelected: (value) {
                       if (value == 'details') _editDetails(context, ref);
+                      if (value == 'delete') _void(context, ref);
                     },
-                    itemBuilder: (_) => const [
-                      PopupMenuItem(
+                    itemBuilder: (_) => [
+                      const PopupMenuItem(
                         value: 'details',
                         child: Text('Discount and customer…'),
                       ),
+                      PopupMenuItem(
+                        value: 'delete',
+                        child: Text(
+                          'Delete this bill…',
+                          style: theme.textTheme.bodyMedium?.copyWith(
+                            color: theme.colorScheme.error,
+                          ),
+                        ),
+                      ),
                     ],
                     child: const Icon(Icons.arrow_drop_down, size: 20),
-                  ),
-                ),
-              ],
-
-              // Voiding is admin-only and refused while money stands against
-              // the bill, so it is offered only when it can actually be done.
-              // Showing it otherwise would be a button that only ever errors.
-              if (ref.watch(authControllerProvider).user?.isAdmin == true &&
-                  bill.livePayments.isEmpty) ...[
-                const SizedBox(width: AppSpacing.sm),
-                SizedBox(
-                  height: AppSpacing.minTapTarget,
-                  child: TextButton(
-                    onPressed: () => _void(context, ref),
-                    style: TextButton.styleFrom(
-                      foregroundColor: theme.colorScheme.error,
-                    ),
-                    child: const Text('Void'),
                   ),
                 ),
               ],
@@ -403,17 +405,17 @@ class _Content extends ConsumerWidget {
               // amount.
               if (bill.outstanding > 0 && !bill.orderReopened) ...[
                 const SizedBox(width: AppSpacing.sm),
-                Expanded(
+                Flexible(
                   flex: 2,
                   child: SizedBox(
                     height: AppSpacing.minTapTarget,
                     child: ElevatedButton.icon(
                       onPressed: () => _takePayment(context, ref),
                       icon: const Icon(Icons.payments_outlined, size: 18),
-                      label: Text(
-                        'Take payment '
-                        '${Money.formatWithSymbol(bill.outstanding)}',
-                      ),
+                      // Without the amount: "Still due ₹1239.00" sits directly
+                      // above this button, so repeating it here bought nothing
+                      // and cost the row more width than it has.
+                      label: const Text('Take payment'),
                     ),
                   ),
                 ),
@@ -497,14 +499,26 @@ class _Content extends ConsumerWidget {
   }
 
   /// Voids a bill raised in error, reopening its order to be corrected.
+  ///
+  /// A bill with money against it can still be voided, but only by reversing
+  /// the payments in the same act — so the amount is named in the question,
+  /// because taking ₹370 back out of the day's takings is the part someone
+  /// needs to have read before agreeing to it.
   Future<void> _void(BuildContext context, WidgetRef ref) async {
+    final taken = bill.livePayments.fold<int>(0, (sum, p) => sum + p.amount);
+    final hasMoney = taken > 0;
+
     final reason = await ReasonDialog.show(
       context,
-      title: 'Void ${bill.billNumber}?',
-      message:
-          'It stops counting as a sale and its order reopens so it can be '
-          'corrected and billed again. The bill number stays used.',
-      confirmLabel: 'Void it',
+      title: 'Delete ${bill.billNumber}?',
+      message: hasMoney
+          ? 'This reverses the ${Money.formatWithSymbol(taken)} already taken '
+                'and stops the bill counting as a sale. Its order reopens so it '
+                'can be corrected and billed again, and the bill number stays '
+                'used. The payments stay listed, marked reversed.'
+          : 'It stops counting as a sale and its order reopens so it can be '
+                'corrected and billed again. The bill number stays used.',
+      confirmLabel: hasMoney ? 'Reverse and delete' : 'Delete it',
       hint: 'Billed to the wrong table',
     );
     if (reason == null || !context.mounted) return;
@@ -512,14 +526,16 @@ class _Content extends ConsumerWidget {
     final messenger = ScaffoldMessenger.of(context);
     final navigator = Navigator.of(context);
     try {
-      await ref.read(billRepositoryProvider).voidBill(bill.id, reason);
+      await ref
+          .read(billRepositoryProvider)
+          .voidBill(bill.id, reason, reversePayments: hasMoney);
       // The detail too, not only the list: the cached copy still says the bill
       // is live, and it is keyed on an id that can be reached again from a
       // wider date range.
       _refresh(ref);
       navigator.pop();
       messenger.showSnackBar(
-        SnackBar(content: Text('${bill.billNumber} voided')),
+        SnackBar(content: Text('${bill.billNumber} deleted')),
       );
     } on ApiException catch (error) {
       messenger.showSnackBar(SnackBar(content: Text(error.message)));

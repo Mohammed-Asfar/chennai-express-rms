@@ -1,4 +1,5 @@
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import '../../../core/api/api_exception.dart';
 import '../../../core/theme/app_spacing.dart';
@@ -53,6 +54,7 @@ class _ItemEditorDialogState extends ConsumerState<ItemEditorDialog> {
   final _nameController = TextEditingController();
   final _descriptionController = TextEditingController();
   final _taxController = TextEditingController();
+  final _surchargeController = TextEditingController();
 
   late String _categoryId;
   final List<_PortionRow> _portions = [];
@@ -75,6 +77,10 @@ class _ItemEditorDialogState extends ConsumerState<ItemEditorDialog> {
       _nameController.text = item.name;
       _descriptionController.text = item.description ?? '';
       _taxController.text = Money.formatRate(item.taxRate);
+      // Blank means "follow the section". An explicit 0 is an exemption, and
+      // shows as 0.00 so it reads as a decision rather than an empty field.
+      _surchargeController.text =
+          item.acSurcharge == null ? '' : Money.format(item.acSurcharge!);
       for (final v in item.variants) {
         _portions.add(_PortionRow.fromVariant(v));
       }
@@ -90,6 +96,7 @@ class _ItemEditorDialogState extends ConsumerState<ItemEditorDialog> {
     _nameController.dispose();
     _descriptionController.dispose();
     _taxController.dispose();
+    _surchargeController.dispose();
     for (final p in _portions) {
       p.dispose();
     }
@@ -192,6 +199,45 @@ class _ItemEditorDialogState extends ConsumerState<ItemEditorDialog> {
                     ],
                   ),
                 ],
+                ],
+
+                const SizedBox(height: AppSpacing.md),
+
+                // Only matters in a section that charges extra — AC seating.
+                // Blank is the ordinary case and costs nobody any setup, so
+                // the field can sit here quietly for the items that need it.
+                AppTextField(
+                  controller: _surchargeController,
+                  label: 'AC charge for this item',
+                  hintText: 'Blank follows the section, 0 charges nothing',
+                  enabled: !_saving,
+                  inputFormatters: [
+                    FilteringTextInputFormatter.allow(RegExp(r'[0-9.]')),
+                  ],
+                  validator: _validateSurcharge,
+                  onChanged: (_) => setState(() {}),
+                ),
+
+                // Zero is the exemption — tea staying ₹20 in the AC room — and
+                // saying so distinguishes it from a field someone left blank.
+                if (_surchargeOverride() == 0) ...[
+                  const SizedBox(height: AppSpacing.xs),
+                  Row(
+                    children: [
+                      Icon(
+                        Icons.info_outline,
+                        size: 14,
+                        color: theme.colorScheme.onSurfaceVariant,
+                      ),
+                      const SizedBox(width: AppSpacing.xs),
+                      Expanded(
+                        child: Text(
+                          'This item costs the same in every section.',
+                          style: theme.textTheme.bodySmall,
+                        ),
+                      ),
+                    ],
+                  ),
                 ],
 
                 const SizedBox(height: AppSpacing.lg),
@@ -308,6 +354,26 @@ class _ItemEditorDialogState extends ConsumerState<ItemEditorDialog> {
     return null;
   }
 
+  /// What the item charges instead of its section, in paise.
+  ///
+  /// Null means the field is blank — follow the section. Zero is an exemption,
+  /// and the two must stay distinguishable all the way to the API.
+  int? _surchargeOverride() {
+    final text = _surchargeController.text.trim();
+    if (text.isEmpty) return null;
+    return Money.parse(text);
+  }
+
+  String? _validateSurcharge(String? value) {
+    final text = value?.trim() ?? '';
+    if (text.isEmpty) return null;
+    final paise = Money.parse(text);
+    if (paise == null) return 'Not an amount';
+    if (paise < 0) return 'Cannot be negative';
+    if (paise > 100000) return 'More than ₹1000 an item';
+    return null;
+  }
+
   void _addPortion() {
     setState(() {
       // A second portion means the first is no longer "Standard" — but renaming
@@ -356,6 +422,7 @@ class _ItemEditorDialogState extends ConsumerState<ItemEditorDialog> {
           name: _nameController.text.trim(),
           description: _descriptionController.text.trim(),
           taxRate: _taxRateBasisPoints(),
+          acSurcharge: _surchargeOverride(),
           variants: [
             for (final p in _portions)
               VariantDraft(
@@ -396,6 +463,10 @@ class _ItemEditorDialogState extends ConsumerState<ItemEditorDialog> {
       name: _nameController.text.trim(),
       description: _descriptionController.text.trim(),
       taxRate: _taxRateBasisPoints(),
+      // Always sent, so clearing the field reaches the backend as an explicit
+      // null and puts the item back on its section. Omitting it when blank
+      // would make the override impossible to remove.
+      acSurcharge: Patch(_surchargeOverride()),
     );
 
     final keptIds = <String>{};

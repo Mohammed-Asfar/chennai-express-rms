@@ -215,6 +215,7 @@ Floor areas — AC, Non-AC, Terrace, Family Room.
 | `name` | `text` | "AC", "Non-AC", "Terrace" |
 | `sort_order` | `int` | Tab order on the floor screen |
 | `is_active` | `bool` | |
+| `surcharge` | `money` | Paise added to each item ordered here — the AC charge. `0` for most sections |
 
 ```sql
 UNIQUE (branch_id, name) WHERE deleted_at IS NULL
@@ -224,10 +225,21 @@ Sections group tables on the floor screen and let reports break sales down by ar
 A branch always has at least one; tables created before any section exists go to a
 seeded `Main` section.
 
-**No pricing or tax rules attached.** Historically Indian restaurants charged
-different GST for AC and non-AC seating, but that distinction was removed in 2017 —
-all restaurant service is now one rate. If a future rule reintroduces it, the
-per-item `tax_rate` already exists and a section-level override could be added then.
+**No tax rules attached.** Historically Indian restaurants charged different GST for
+AC and non-AC seating, but that distinction was removed in 2017 — all restaurant
+service is now one rate. If a future rule reintroduces it, the per-item `tax_rate`
+already exists and a section-level override could be added then.
+
+**`surcharge` is a price rule, not a tax rule.** A restaurant charging more for AC
+seating adds a flat amount per item — ₹10 on a ₹75 soup makes it ₹85. It lives here
+rather than in `settings` because a branch may surcharge an AC room and not a
+terrace, and one branch-wide figure could not say so.
+
+**It is applied when the line is created, never at billing.** The surcharged figure
+goes into `order_items.unit_price`, so every downstream rule reads the price actually
+charged without knowing a surcharge exists: GST computes on it, a reprint shows it,
+and changing a section's amount cannot reprice food a party has already ordered.
+`menu_items.ac_surcharge` overrides it per item — see §3.8.
 
 ### 3.4 `tables`
 
@@ -356,8 +368,13 @@ to `free` — unless a table has an open order, in which case it stays `occupied
 | `tax_rate` | `rate` | Basis points. Defaults from `settings.default_tax_rate` |
 | `is_available` | `bool` | Unavailable items stay on the menu but cannot be ordered |
 | `sort_order` | `int` | |
+| `ac_surcharge` | `money` | Paise this item adds in a surcharged section, overriding §3.3. **Nullable** |
 
-### 3.9 `menu_item_variants`
+**`ac_surcharge` distinguishes three states, which is why it is nullable.** `NULL`
+means the item follows its section — the ordinary case, and what every existing row
+holds. `0` is an exemption: tea stays ₹20 in the AC room. A value overrides the
+section entirely. Collapsing `NULL` and `0` into a non-null default would make
+raising a section from ₹10 to ₹15 silently skip every item.
 
 Portions. **Every item has at least one.**
 
@@ -438,6 +455,12 @@ Every priced field is a **snapshot** — copied at add time, never read live fro
 **Why snapshots:** renaming a dish, repricing it, or changing its tax rate must never
 alter an order already placed or a bill already printed. Reading `variant.price` at
 billing time silently rewrites history. This is the most important rule in the schema.
+
+**`unit_price` is the price charged, not the menu price.** Where the section carries a
+surcharge (§3.3) it is already added here. That is deliberate: it means tax, totals,
+reprints and amendments all read one number, and none of them need to know a surcharge
+exists. It also means two adds of the same variant merge only when both were priced
+the same — a section's amount changing mid-meal leaves two lines, each correct.
 
 **`kot_printed_at` drives incremental KOTs.** A table orders drinks, then food twenty
 minutes later. Only lines with `kot_printed_at IS NULL` go on the next ticket —

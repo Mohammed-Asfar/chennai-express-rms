@@ -62,8 +62,19 @@ class BillRepository {
   /// against a sale that no longer exists. The order reopens so it can be
   /// corrected and billed again, and the bill number stays consumed — a gap in
   /// the sequence looks worse to an auditor than a number marked void.
-  Future<void> voidBill(String billId, String reason) async {
-    await _api.post('/bills/$billId/void', {'reason': reason});
+  ///
+  /// [reversePayments] undoes the payments first, in the same transaction, for
+  /// a sale being cancelled outright. The payment rows stay, marked reversed —
+  /// they are the record that the money was ever taken.
+  Future<void> voidBill(
+    String billId,
+    String reason, {
+    bool reversePayments = false,
+  }) async {
+    await _api.post('/bills/$billId/void', {
+      'reason': reason,
+      if (reversePayments) 'reversePayments': true,
+    });
   }
 
   /// Changes a bill that already exists, keeping its number. Admin only.

@@ -799,15 +799,15 @@ class _VoidedSection extends StatelessWidget {
     final theme = Theme.of(context);
 
     return ReportSection(
-      title: 'Voided and cancelled',
+      title: 'Deleted and cancelled',
       subtitle: 'Excluded from every figure above.',
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.stretch,
         children: [
-          Text('Voided bills', style: theme.textTheme.titleMedium),
+          Text('Deleted bills', style: theme.textTheme.titleMedium),
           const SizedBox(height: AppSpacing.xs),
           if (voided.bills.isEmpty)
-            const ReportEmpty(message: 'No bills were voided in this range.')
+            const ReportEmpty(message: 'No bills were deleted in this range.')
           else ...[
             for (final bill in voided.bills) ...[
               ReportRow(
@@ -819,7 +819,7 @@ class _VoidedSection extends StatelessWidget {
             ],
             const ReportDivider(),
             ReportRow(
-              label: '${voided.billCount} voided',
+              label: '${voided.billCount} deleted',
               amount: Money.formatWithSymbol(voided.total),
             ),
           ],

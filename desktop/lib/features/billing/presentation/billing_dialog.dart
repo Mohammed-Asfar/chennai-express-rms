@@ -155,6 +155,40 @@ class _BillingDialogState extends ConsumerState<BillingDialog> {
   /// in the bills list as unpaid. The dialog moves on to the payment step
   /// rather than closing, because the table is still sitting there.
   Future<void> _printUnpaid() async {
+    final bill = await _raiseUnpaid();
+    if (bill == null) return;
+
+    // Not silent: this print is the whole point of the button, so a failure
+    // and a success are both worth confirming.
+    await _printBill();
+  }
+
+  /// Raises the bill and leaves it, without printing and without payment.
+  ///
+  /// A phoned-in takeaway or a table billed early needs the sale recorded and
+  /// the order closed, but no paper yet — printing it now only to reprint it
+  /// later wastes a roll and puts a stale total in someone's hand.
+  ///
+  /// The bill appears in the bills list as UNPAID and can be settled or
+  /// printed from there whenever the customer arrives.
+  Future<void> _saveUnpaid() async {
+    final bill = await _raiseUnpaid();
+    if (bill == null || !mounted) return;
+
+    Navigator.of(context).pop();
+    ScaffoldMessenger.of(context).showSnackBar(
+      SnackBar(
+        content: Text('${bill.billNumber} saved unpaid'),
+      ),
+    );
+  }
+
+  /// Creates the bill, or shows why it could not be created.
+  ///
+  /// Shared by the two unpaid paths so they cannot drift on what a bill is:
+  /// the discount, the order and the error handling are identical, and only
+  /// what happens afterwards differs.
+  Future<Bill?> _raiseUnpaid() async {
     setState(() {
       _isBusy = true;
       _error = null;
@@ -168,21 +202,19 @@ class _BillingDialogState extends ConsumerState<BillingDialog> {
             discountType: _discountType,
             discountValue: _discountValue(),
           );
-      if (!mounted) return;
+      if (!mounted) return null;
       setState(() {
         _bill = bill;
         _isBusy = false;
       });
-
-      // Not silent: this print is the whole point of the button, so a failure
-      // and a success are both worth confirming.
-      await _printBill();
+      return bill;
     } catch (error) {
-      if (!mounted) return;
+      if (!mounted) return null;
       setState(() {
         _isBusy = false;
         _error = userMessage(error);
       });
+      return null;
     }
   }
 
@@ -483,6 +515,23 @@ class _BillingDialogState extends ConsumerState<BillingDialog> {
               child: bill == null
                   ? Row(
                       children: [
+                        // Raises the bill and stops there: no paper, no
+                        // payment. A phoned-in takeaway needs the sale
+                        // recorded and the table freed long before anyone
+                        // arrives to pay for it.
+                        //
+                        // Text, not outlined, so the row still reads as one
+                        // print button and one settle button rather than three
+                        // competing choices.
+                        SizedBox(
+                          height: AppSpacing.primaryActionHeight,
+                          child: TextButton(
+                            onPressed: _isBusy ? null : _saveUnpaid,
+                            child: const Text('Save unpaid'),
+                          ),
+                        ),
+                        const SizedBox(width: AppSpacing.xs),
+
                         // The table wants to see what they owe before they pay.
                         // Generates the bill and prints it unpaid, leaving it
                         // open for payment when they are ready.
@@ -491,7 +540,11 @@ class _BillingDialogState extends ConsumerState<BillingDialog> {
                           child: OutlinedButton.icon(
                             onPressed: _isBusy ? null : _printUnpaid,
                             icon: const Icon(Icons.print_outlined, size: 18),
-                            label: const Text('Print unpaid'),
+                            // "Print", not "Print unpaid": it sits beside
+                            // Save unpaid, so the pair reads as save-or-print
+                            // and the word would be doing the same work twice
+                            // — at the cost of the width the row does not have.
+                            label: const Text('Print'),
                           ),
                         ),
                         const SizedBox(width: AppSpacing.sm),

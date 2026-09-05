@@ -78,7 +78,26 @@ class BillRange {
       '${d.year}-${d.month.toString().padLeft(2, '0')}-${d.day.toString().padLeft(2, '0')}';
 }
 
+/// Which kinds of order to list. Null is all of them.
+///
+/// Kept beside the range rather than sent to the backend: the day is already
+/// fetched, and the summary has to stay the range's real takings, so filtering
+/// here means a type can be picked and dropped without a round trip.
+enum BillType {
+  dineIn('dine_in', 'Dine-in'),
+  takeaway('takeaway', 'Takeaway'),
+  delivery('delivery', 'Delivery');
+
+  const BillType(this.wire, this.label);
+
+  /// The value `orders.type` holds.
+  final String wire;
+  final String label;
+}
+
 final billRangeProvider = StateProvider<BillRange>((ref) => BillRange.today());
+
+final billTypeProvider = StateProvider<BillType?>((ref) => null);
 
 final billListProvider = FutureProvider<BillList>((ref) {
   final range = ref.watch(billRangeProvider);
@@ -108,13 +127,19 @@ class _BillsScreenState extends ConsumerState<BillsScreen> {
     // After the first frame, because invalidating a provider during a build
     // that is already reading it is not allowed.
     WidgetsBinding.instance.addPostFrameCallback((_) {
-      if (mounted) ref.invalidate(billListProvider);
+      if (!mounted) return;
+      ref.invalidate(billListProvider);
+      // The filter is cleared with it. It outlives the screen, so returning to
+      // Bills tomorrow would otherwise open on the kind someone picked once,
+      // showing a partial day that looks like the whole of it.
+      ref.read(billTypeProvider.notifier).state = null;
     });
   }
 
   @override
   Widget build(BuildContext context) {
     final range = ref.watch(billRangeProvider);
+    final type = ref.watch(billTypeProvider);
     final result = ref.watch(billListProvider);
 
     return Column(
@@ -124,6 +149,11 @@ class _BillsScreenState extends ConsumerState<BillsScreen> {
           range: range,
           onPick: (next) => ref.read(billRangeProvider.notifier).state = next,
           onCustom: () => _pickCustom(context, ref),
+        ),
+
+        _TypeBar(
+          selected: type,
+          onPick: (next) => ref.read(billTypeProvider.notifier).state = next,
         ),
 
         Padding(
@@ -154,18 +184,30 @@ class _BillsScreenState extends ConsumerState<BillsScreen> {
             data: (list) {
               if (list.bills.isEmpty) return _NoBills(range: range);
 
-              final shown = list.bills
+              // Two filters that mean different things to the summary. Picking
+              // a type narrows what is being counted, so the totals must follow
+              // it — "Delivery" over the whole day's ₹5577 would be read as
+              // deliveries having taken it. Searching is a way to find one
+              // bill, so it leaves the takings alone.
+              final ofType = type == null
+                  ? list.bills
+                  : list.bills.where((b) => b.orderType == type.wire).toList();
+
+              final shown = ofType
                   .where((bill) => bill.matches(_search))
                   .toList();
 
               return Column(
                 children: [
-                  // The summary stays the range's own totals, not the
-                  // filtered ones: searching is a way to find a bill, not a
-                  // way to restate the day's takings.
-                  _SummaryBar(summary: list.summary),
+                  _SummaryBar(
+                    summary: type == null
+                        ? list.summary
+                        : BillSummary.of(ofType),
+                  ),
                   Expanded(
-                    child: shown.isEmpty
+                    child: ofType.isEmpty
+                        ? _NoBillsOfType(type: type!, range: range)
+                        : shown.isEmpty
                         ? NoSearchResults(query: _search, noun: 'bills')
                         : ListView.builder(
                             padding: const EdgeInsets.fromLTRB(
@@ -265,6 +307,62 @@ class _RangeBar extends StatelessWidget {
     );
   }
 }
+
+/// Dine-in, takeaway or delivery — or all of them.
+///
+/// Sits under the dates because it narrows what they returned, and reads in the
+/// same chips so the two rows are plainly one filter, not two ideas. Each kind
+/// carries the icon the rows use, which is where that icon gets named.
+class _TypeBar extends StatelessWidget {
+  const _TypeBar({required this.selected, required this.onPick});
+
+  final BillType? selected;
+  final ValueChanged<BillType?> onPick;
+
+  @override
+  Widget build(BuildContext context) {
+    return Container(
+      decoration: const BoxDecoration(
+        color: AppColors.surface,
+        border: Border(bottom: BorderSide(color: AppColors.border)),
+      ),
+      padding: const EdgeInsets.symmetric(
+        horizontal: AppSpacing.lg,
+        vertical: AppSpacing.md,
+      ),
+      child: Row(
+        children: [
+          _RangeChip(
+            label: 'All orders',
+            selected: selected == null,
+            onTap: () => onPick(null),
+          ),
+          const SizedBox(width: AppSpacing.sm),
+
+          for (final type in BillType.values) ...[
+            _RangeChip(
+              label: type.label,
+              icon: iconFor(type.wire),
+              selected: selected == type,
+              // Tapping the kind already showing goes back to all of them,
+              // so clearing the filter is the same button that set it.
+              onTap: () => onPick(selected == type ? null : type),
+            ),
+            const SizedBox(width: AppSpacing.sm),
+          ],
+        ],
+      ),
+    );
+  }
+}
+
+/// The mark for an order type, used on the filter and on every row.
+IconData iconFor(String? orderType) => switch (orderType) {
+  'takeaway' => Icons.shopping_bag_outlined,
+  'delivery' => Icons.delivery_dining_outlined,
+  null => Icons.help_outline,
+  _ => Icons.restaurant,
+};
 
 class _RangeChip extends StatelessWidget {
   const _RangeChip({
@@ -541,12 +639,14 @@ class _TypeIcon extends StatelessWidget {
   Widget build(BuildContext context) {
     // A distinct icon per kind: delivery and takeaway are both counter sales
     // with no table, so the badge is the only thing telling them apart in a
-    // list of a hundred bills.
-    final (icon, label) = switch (orderType) {
-      'takeaway' => (Icons.shopping_bag_outlined, 'Takeaway'),
-      'delivery' => (Icons.delivery_dining_outlined, 'Delivery'),
-      null => (Icons.help_outline, 'Order no longer on file'),
-      _ => (Icons.restaurant, 'Dine-in'),
+    // list of a hundred bills. Shared with the filter chips, so the mark
+    // someone tapped is the mark they then scan for.
+    final icon = iconFor(orderType);
+    final label = switch (orderType) {
+      'takeaway' => 'Takeaway',
+      'delivery' => 'Delivery',
+      null => 'Order no longer on file',
+      _ => 'Dine-in',
     };
 
     return Tooltip(
@@ -626,6 +726,51 @@ class _Chip extends StatelessWidget {
         border: Border.all(color: AppColors.border),
       ),
       child: Text(label, style: theme.textTheme.bodySmall),
+    );
+  }
+}
+
+/// The day had bills, just none of this kind.
+///
+/// Distinct from [_NoBills] because the two mean different things: nothing
+/// billed at all is a quiet day, whereas no deliveries on a busy day is the
+/// filter, and saying so stops it reading as lost data.
+class _NoBillsOfType extends StatelessWidget {
+  const _NoBillsOfType({required this.type, required this.range});
+
+  final BillType type;
+  final BillRange range;
+
+  @override
+  Widget build(BuildContext context) {
+    final theme = Theme.of(context);
+    return Center(
+      child: ConstrainedBox(
+        constraints: const BoxConstraints(maxWidth: 340),
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            Icon(
+              iconFor(type.wire),
+              size: AppSpacing.xxl,
+              color: theme.colorScheme.onSurfaceVariant,
+            ),
+            const SizedBox(height: AppSpacing.md),
+            Text(
+              'No ${type.label.toLowerCase()} bills',
+              style: theme.textTheme.titleLarge,
+            ),
+            const SizedBox(height: AppSpacing.xs),
+            Text(
+              range.label == 'Today'
+                  ? 'Other kinds of order were billed today.'
+                  : 'Other kinds of order were billed in this range.',
+              style: theme.textTheme.bodySmall,
+              textAlign: TextAlign.center,
+            ),
+          ],
+        ),
+      ),
     );
   }
 }

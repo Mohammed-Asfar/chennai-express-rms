@@ -213,6 +213,17 @@ sales on the previous trading day, with the cutoff configured in settings.
 | FR-M11 | A menu item or variant referenced by any order is soft-deleted, never hard-deleted |
 | FR-M12 | Marking an item unavailable does not affect orders already containing it |
 | FR-M13 | Prices and rates are entered as rupees and percentages in the UI, converted to paise and basis points at the boundary |
+| FR-M14 | A section can carry a **surcharge** — a flat amount added to every item ordered at a table in it, for AC seating |
+| FR-M15 | The surcharge is set per section, so an AC room and a terrace can differ, and defaults to zero |
+| FR-M16 | An item can override its section's surcharge, including setting it to zero so a ₹20 tea stays ₹20 in the AC room |
+| FR-M17 | An item with no override follows its section, so raising a section's amount carries every ordinary item with it |
+| FR-M18 | The surcharge is added to the item's price when it is ordered — it is not a separate line on the bill |
+| FR-M19 | Tax is computed on the surcharged price, because that is what the customer pays |
+| FR-M20 | Changing a section's surcharge never reprices an order already placed; it applies to items added from then on |
+| FR-M21 | A takeaway or delivery carries no surcharge — there is no table, and no room to charge for |
+| FR-M22 | The order screen shows menu prices **with the surcharge already in them**, so the figure a cashier reads is the one the customer is charged |
+| FR-M23 | An order taken in a surcharged section says so in its header, so the raised prices read as intended rather than as a fault |
+| FR-M24 | The till is told the section's amount by the backend; it never derives a price rule of its own |
 
 ### 6.2 Sections & Tables
 
@@ -344,26 +355,34 @@ a picker. Every "the table's order" assumption in the UI must handle several.
 | FR-B21 | A settled bill can be reprinted |
 | FR-B22 | All money math uses integer paise; rounding is applied once, at the line level |
 | FR-B23 | `tax_mode` and the effective rates are stored on the bill for audit |
-| FR-B24 | A settled bill can be **cancelled/voided** by an admin with a reason; it is soft-deleted and excluded from reports |
+| FR-B24 | A settled bill can be **deleted** by an admin with a reason; it is soft-deleted and excluded from reports. Called "Delete" throughout the UI — staff do not use the word void — while the database keeps `voided_at` |
 | FR-B25 | A cancelled bill releases its order back to `open` so it can be corrected and re-billed |
 | FR-B26 | A discount larger than the subtotal is rejected |
 | FR-B27 | Round-off, when enabled, adjusts the total to the nearest rupee and is stored in `round_off` |
 | FR-B28 | A reprint is the same document as the original; the repeat is recorded in `reprint_count`, not written on the paper |
 | FR-B29 | An order with no items cannot be billed |
 | FR-B30 | A bill can be generated and printed **without taking payment**, so a table can be shown what it owes |
+| FR-B30a | A bill can also be generated **without printing and without payment** — a phoned-in takeaway needs the sale recorded and the order closed long before anyone arrives to pay, and printing it now only to reprint it later wastes a roll and puts a stale total in someone's hand |
+| FR-B30b | Both unpaid routes raise the same bill; it appears in the bills list as UNPAID and can be printed or settled from there |
 | FR-B31 | Nothing on a printed bill distinguishes a reprint — the customer receives the same document either time |
 | FR-B32 | Payment can be taken against an existing bill from the bills list, not only at billing time |
 | FR-B33 | A part payment leaves the bill open, and the balance can be taken later in any mode |
 | FR-B34 | A payment recorded in error can be reversed from the bill's detail, with a reason |
 | FR-B35 | Reversed payments stay listed, struck through — they are the audit trail |
-| FR-B36 | Void is offered only to an admin, and only once no live payment stands |
-| FR-B37 | Both void and reversal require a reason; whitespace alone is not a reason |
+| FR-B36 | Delete (void) is offered only to an admin. It is available on a paid bill too — a sale rung up in error still has to be undone after the customer has paid |
+| FR-B36a | Deleting a paid bill reverses its live payments **in the same transaction**, so a failure partway cannot leave money standing against a deleted bill, or a bill neither paid nor deleted |
+| FR-B36b | The confirmation names the amount being reversed. Taking money back out of the day's takings is the part that must be read before agreeing |
+| FR-B36c | The API still refuses a bare void while money stands; reversing is a separate, deliberate flag on the request |
+| FR-B36d | A payment already reversed is left untouched, keeping its original reason and who reversed it |
+| FR-B37 | Both delete and reversal require a reason; whitespace alone is not a reason |
 | FR-B38 | An admin can amend a bill in place — items, discount, or customer details — keeping its number rather than issuing a second one |
 | FR-B39 | Amending items reopens the order, changes its lines, then recalculates; the same arithmetic runs as for a fresh bill |
 | FR-B40 | Every amendment writes a `bill_amendments` row holding the bill before and after, the totals either side, who changed it and why |
 | FR-B41 | An amendment records whether the bill had already been printed or paid — the case that matters when a figure does not reconcile |
 | FR-B42 | Amending re-derives `payment_status`: a paid bill that grows becomes partly paid, one reduced below what was taken shows change owed |
 | FR-B43 | A voided bill cannot be amended, and an amendment that changes nothing is refused |
+| FR-B44 | The bills list can be filtered to dine-in, takeaway or delivery, and the summary totals follow the filter so a filtered list never sits under the whole day's takings |
+| FR-B45 | The type filter resets to all orders each time the bills screen is opened — a filter left set would show a partial day that reads as the whole of it |
 | FR-O21 | Leaving an order with nothing on it discards it, so the table does not stay seated |
 | FR-O22 | A table held only by empty orders can be freed from its card on the floor |
 
@@ -705,6 +724,15 @@ Scenarios that occur in a working restaurant and their required behaviour.
 | Bill settled after the billing dialog closed | Taken from the bill's detail in the bills list; status and takings both follow |
 | Bill taken while another screen was open | The bills list and reports refetch when opened, so neither shows a stale figure |
 | Amount edited above what is due | Refused by the backend with the outstanding figure, not silently clamped |
+| AC surcharge changed while a party is eating | Their placed lines keep the prices they were taken at; only items added afterwards use the new amount |
+| Same dish ordered either side of that change | Stays two lines, each at its own price — merging them would reprice one |
+| Item exempted from the surcharge | Costs the menu price in every section, and the item editor says so rather than leaving a blank-looking field |
+| Item exemption cleared | Goes back to following its section, which is why the field distinguishes empty from zero |
+| Section renamed from the floor screen | Its surcharge is carried into the dialog and back, so a rename cannot wipe the charge |
+| Negative or fractional surcharge entered | Refused at the API and in the form — a negative would be a discount that skips the discount rules |
+| Paid bill deleted | Its payments are reversed in the same transaction; the rows stay, struck through, as the record that the money was taken |
+| Part-paid bill deleted | Only what still stands is reversed; an already-reversed payment keeps its original reason |
+| Bill deleted after the customer left with the paper | The bill number stays consumed and the order reopens, so a corrected bill can be raised against the same meal |
 | Cash recorded when it was card | Reversed with a reason, correct payment added; the bill reopens for the amount |
 | Void attempted on a paid bill | Refused — its payments must be reversed first, so the button is hidden until they are |
 | Reason field holding only spaces | Rejected. Trimming happens before the length check, not after |

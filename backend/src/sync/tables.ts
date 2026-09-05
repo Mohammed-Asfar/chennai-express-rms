@@ -44,7 +44,7 @@ export const SYNC_TABLES: SyncTable[] = [
   },
   {
     name: 'sections',
-    columns: [...BASE, 'name', 'sort_order', 'is_active'],
+    columns: [...BASE, 'name', 'sort_order', 'is_active', 'surcharge'],
     conflictKeys: ['id'],
     tracked: true,
   },
@@ -64,7 +64,7 @@ export const SYNC_TABLES: SyncTable[] = [
     name: 'menu_items',
     columns: [
       ...BASE, 'category_id', 'name', 'description', 'tax_rate',
-      'is_available', 'sort_order',
+      'is_available', 'sort_order', 'ac_surcharge',
     ],
     conflictKeys: ['id'],
     tracked: true,

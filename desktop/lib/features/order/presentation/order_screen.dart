@@ -69,6 +69,29 @@ class OrderScreen extends ConsumerWidget {
                   ],
                 ),
           actions: [
+            // Says why the prices read higher than the menu card on the wall.
+            // Without it the raised figures look like a fault, and the first
+            // person to notice is a customer.
+            if (order != null && order.hasSurcharge) ...[
+              Container(
+                padding: const EdgeInsets.symmetric(
+                  horizontal: AppSpacing.md,
+                  vertical: AppSpacing.xs,
+                ),
+                decoration: BoxDecoration(
+                  color: AppColors.surfaceSunken,
+                  borderRadius: BorderRadius.circular(AppSpacing.radiusSm),
+                  border: Border.all(color: AppColors.border),
+                ),
+                child: Text(
+                  'Prices include '
+                  '${Money.formatWithSymbol(order.surcharge)} AC charge',
+                  style: Theme.of(context).textTheme.bodySmall,
+                ),
+              ),
+              const SizedBox(width: AppSpacing.md),
+            ],
+
             if (order != null && order.isOpen)
               TextButton.icon(
                 onPressed: () => _cancelOrder(
@@ -109,6 +132,9 @@ class OrderScreen extends ConsumerWidget {
                       Expanded(
                         child: MenuPanel(
                           enabled: order.isOpen && !state.isBusy,
+                          // Prices shown are what this table pays, so a
+                          // cashier reads the same figure the customer will.
+                          surcharge: order.surcharge,
                           onPick: (variant) => controller.addItem(variant.id),
                         ),
                       ),

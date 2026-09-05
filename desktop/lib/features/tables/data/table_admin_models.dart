@@ -13,6 +13,7 @@ class AdminSection {
     required this.sortOrder,
     required this.isActive,
     required this.tableCount,
+    this.surcharge = 0,
   });
 
   final String id;
@@ -21,12 +22,22 @@ class AdminSection {
   final bool isActive;
   final int tableCount;
 
+  /// Paise added to each item ordered at a table here — the AC charge.
+  ///
+  /// Zero for a section that charges nothing extra, which is most of them.
+  /// Applied when an item is added, not at billing, so it is snapshotted onto
+  /// the line like every other price.
+  final int surcharge;
+
+  bool get chargesExtra => surcharge > 0;
+
   factory AdminSection.fromJson(Map<String, dynamic> json) => AdminSection(
         id: json['id'] as String,
         name: json['name'] as String,
         sortOrder: json['sortOrder'] as int? ?? 0,
         isActive: json['isActive'] as bool? ?? true,
         tableCount: json['tableCount'] as int? ?? 0,
+        surcharge: json['surcharge'] as int? ?? 0,
       );
 }
 

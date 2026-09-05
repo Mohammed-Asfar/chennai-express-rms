@@ -82,15 +82,26 @@ class FloorSection {
     required this.id,
     required this.name,
     required this.tables,
+    this.surcharge = 0,
   });
 
   final String id;
   final String name;
   final List<DiningTable> tables;
 
+  /// Paise added to each item ordered here — the AC charge.
+  ///
+  /// Carried on the floor model because editing a section starts from this
+  /// screen. Without it the edit dialog would open showing no charge and save
+  /// that back, silently wiping it.
+  final int surcharge;
+
+  bool get chargesExtra => surcharge > 0;
+
   factory FloorSection.fromJson(Map<String, dynamic> json) => FloorSection(
         id: json['id'] as String,
         name: json['name'] as String,
+        surcharge: json['surcharge'] as int? ?? 0,
         tables: ((json['tables'] as List<dynamic>?) ?? const [])
             .map((t) => DiningTable.fromJson(t as Map<String, dynamic>))
             .toList(),
