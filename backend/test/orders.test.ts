@@ -620,6 +620,125 @@ test('removing a printed line reports that the kitchen is already cooking it', a
   await close(ctx)
 })
 
+// --- KOT: a second ticket carries only what the kitchen has not seen ---
+
+/** A kitchen printer, so the KOT route has somewhere to send to. */
+async function addKotPrinter(ctx: Ctx): Promise<void> {
+  await ctx.app.inject({
+    method: 'POST',
+    url: '/printers',
+    headers: ctx.auth,
+    payload: {
+      name: 'Kitchen',
+      connection: 'network',
+      address: '127.0.0.1:9100',
+      role: 'kot',
+      paperWidth: '80mm',
+    },
+  })
+}
+
+/**
+ * The words on the most recent print job, as the kitchen would read them.
+ *
+ * The payload column holds base64 — decoded first, then the ESC/POS control
+ * bytes are stripped, so searching for a dish name is not defeated by a
+ * formatting command sitting in the middle of it.
+ */
+function lastJobText(ctx: Ctx): string {
+  const row = ctx.db
+    .prepare('SELECT payload FROM print_jobs ORDER BY created_at DESC, rowid DESC LIMIT 1')
+    .get() as { payload: string } | undefined
+  if (!row) return ''
+  return Buffer.from(row.payload, 'base64')
+    .toString('utf8')
+    .replace(/[\x00-\x1f]/g, ' ')
+}
+
+test('a second KOT prints only the items added since the first', async () => {
+  // The question this answers: reprinting the whole order would have the
+  // kitchen cook the first dishes twice, and a restaurant discovers that at
+  // the pass, mid-service.
+  const ctx = await setup()
+  await addKotPrinter(ctx)
+
+  const order = await newOrder(ctx, { type: 'takeaway' })
+  await addItem(ctx, order.id, { variantId: ctx.full, qty: 1 })
+
+  const first = await ctx.app.inject({
+    method: 'POST',
+    url: `/orders/${order.id}/kot`,
+    headers: ctx.auth,
+  })
+  assertEqual(first.statusCode, 200)
+
+  // A second dish, ordered after the first ticket went to the kitchen.
+  await addItem(ctx, order.id, { variantId: ctx.half, qty: 1 })
+
+  const second = await ctx.app.inject({
+    method: 'POST',
+    url: `/orders/${order.id}/kot`,
+    headers: ctx.auth,
+  })
+  assertEqual(second.statusCode, 200)
+
+  const text = lastJobText(ctx)
+
+  assertEqual(text.includes('ADDED ITEMS'), true, 'headed as an addition, not a fresh order')
+  assertEqual(
+    text.includes('Half'),
+    true,
+    'the newly added portion is on the ticket',
+  )
+  assertEqual(
+    text.includes('Full'),
+    false,
+    'the portion already cooking is NOT repeated',
+  )
+
+  await close(ctx)
+})
+
+test('a KOT with nothing new is refused', async () => {
+  // Pressing the button twice must not send a blank ticket the kitchen has to
+  // interpret.
+  const ctx = await setup()
+  await addKotPrinter(ctx)
+
+  const order = await newOrder(ctx, { type: 'takeaway' })
+  await addItem(ctx, order.id, { variantId: ctx.full, qty: 1 })
+
+  await ctx.app.inject({ method: 'POST', url: `/orders/${order.id}/kot`, headers: ctx.auth })
+  const again = await ctx.app.inject({
+    method: 'POST',
+    url: `/orders/${order.id}/kot`,
+    headers: ctx.auth,
+  })
+
+  assertEqual(again.statusCode, 409)
+  assertEqual((again.json() as { error: { code: string } }).error.code, 'NOTHING_TO_SEND')
+  await close(ctx)
+})
+
+test('the first KOT is headed as a new order, not an addition', async () => {
+  const ctx = await setup()
+  await addKotPrinter(ctx)
+
+  const order = await newOrder(ctx, { type: 'takeaway' })
+  await addItem(ctx, order.id, { variantId: ctx.full, qty: 1 })
+
+  const res = await ctx.app.inject({
+    method: 'POST',
+    url: `/orders/${order.id}/kot`,
+    headers: ctx.auth,
+  })
+  const text = lastJobText(ctx)
+
+  assertEqual(text.includes('ADDED ITEMS'), false, 'not an addition')
+  assertEqual(text.includes('KOT'), true, 'a fresh ticket')
+  await close(ctx)
+})
+
 // --- concurrency ---
 
 test('a stale version is rejected rather than overwriting', async () => {
