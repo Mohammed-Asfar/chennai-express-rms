@@ -11,6 +11,7 @@ import '../data/bill_models.dart';
 import '../data/bill_repository.dart';
 import '../../auth/presentation/auth_controller.dart';
 import 'bills_screen.dart';
+import 'edit_bill_dialog.dart';
 import 'reason_dialog.dart';
 import 'take_payment_dialog.dart';
 
@@ -101,6 +102,43 @@ class _Content extends ConsumerWidget {
             ],
           ),
         ),
+
+        // The order is open for editing, so the lines below and the total have
+        // drifted apart. Saying so is the whole point — a figure that looks
+        // settled is one somebody will collect against.
+        if (bill.orderReopened)
+          Container(
+            width: double.infinity,
+            color: AppColors.warningTint,
+            padding: const EdgeInsets.symmetric(
+              horizontal: AppSpacing.lg,
+              vertical: AppSpacing.md,
+            ),
+            child: Row(
+              children: [
+                const Icon(
+                  Icons.edit_note_outlined,
+                  size: 18,
+                  color: AppColors.warning,
+                ),
+                const SizedBox(width: AppSpacing.sm),
+                Expanded(
+                  child: Text(
+                    'The order is open for editing. This total is out of date '
+                    'until you update it.',
+                    style: theme.textTheme.bodySmall?.copyWith(
+                      color: AppColors.warning,
+                    ),
+                  ),
+                ),
+                const SizedBox(width: AppSpacing.sm),
+                FilledButton(
+                  onPressed: () => _recalculate(context, ref),
+                  child: const Text('Update total'),
+                ),
+              ],
+            ),
+          ),
 
         Flexible(
           child: ListView(
@@ -207,9 +245,34 @@ class _Content extends ConsumerWidget {
                         ],
                       ),
                     ],
+
+                    // Negative outstanding means more was collected than the
+                    // bill now asks for — an amendment that reduced the total
+                    // below what was already taken. Staff owe the difference
+                    // back, so it is stated rather than clamped to zero.
+                    if (bill.outstanding < 0) ...[
+                      const Divider(height: AppSpacing.lg),
+                      Row(
+                        mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                        children: [
+                          Text('Change owed', style: theme.textTheme.titleMedium),
+                          Text(
+                            Money.formatWithSymbol(-bill.outstanding),
+                            style: theme.textTheme.titleMedium,
+                          ),
+                        ],
+                      ),
+                    ],
                   ],
                 ),
               ),
+
+              // Only for a bill that has been changed, which is the minority.
+              // A history section on every bill would be noise on all of them.
+              if (bill.wasAmended) ...[
+                const SizedBox(height: AppSpacing.md),
+                _AmendmentHistory(billId: bill.id, count: bill.amendmentCount),
+              ],
             ],
           ),
         ),
@@ -236,6 +299,21 @@ class _Content extends ConsumerWidget {
                 ),
               ),
 
+              // Amending is admin-only, like voiding. Unlike voiding it stays
+              // available once money has been taken — a wrong total is worth
+              // correcting whether or not it has been paid, and the payment is
+              // re-derived rather than rewritten.
+              if (ref.watch(authControllerProvider).user?.isAdmin == true) ...[
+                const SizedBox(width: AppSpacing.sm),
+                SizedBox(
+                  height: AppSpacing.minTapTarget,
+                  child: OutlinedButton(
+                    onPressed: () => _edit(context, ref),
+                    child: const Text('Edit'),
+                  ),
+                ),
+              ],
+
               // Voiding is admin-only and refused while money stands against
               // the bill, so it is offered only when it can actually be done.
               // Showing it otherwise would be a button that only ever errors.
@@ -256,7 +334,10 @@ class _Content extends ConsumerWidget {
 
               // Settling later is the point of being able to print a bill
               // before it is paid: by then the billing dialog is long closed.
-              if (bill.outstanding > 0) ...[
+              // Held back while the order is reopened: the total on screen is
+              // stale, and taking payment against it would collect the wrong
+              // amount.
+              if (bill.outstanding > 0 && !bill.orderReopened) ...[
                 const SizedBox(width: AppSpacing.sm),
                 Expanded(
                   flex: 2,
@@ -361,6 +442,31 @@ class _Content extends ConsumerWidget {
       navigator.pop();
       messenger.showSnackBar(
         SnackBar(content: Text('${bill.billNumber} voided')),
+      );
+    } on ApiException catch (error) {
+      messenger.showSnackBar(SnackBar(content: Text(error.message)));
+    }
+  }
+
+  /// Corrects a bill in place, keeping its number.
+  ///
+  /// Unlike voiding this leaves one bill rather than two, which is the point:
+  /// the customer is not handed a second slip for the same meal. The backend
+  /// records what the bill said before, so the correction is reconstructible.
+  Future<void> _edit(BuildContext context, WidgetRef ref) async {
+    final changed = await EditBillDialog.show(context, bill);
+    if (changed != true) return;
+    _refresh(ref);
+  }
+
+  /// Brings the bill back in step with an order whose lines have changed.
+  Future<void> _recalculate(BuildContext context, WidgetRef ref) async {
+    final messenger = ScaffoldMessenger.of(context);
+    try {
+      await ref.read(billRepositoryProvider).amend(bill.id, recalculate: true);
+      _refresh(ref);
+      messenger.showSnackBar(
+        SnackBar(content: Text('${bill.billNumber} updated')),
       );
     } on ApiException catch (error) {
       messenger.showSnackBar(SnackBar(content: Text(error.message)));
@@ -563,6 +669,107 @@ class _StatusPill extends StatelessWidget {
       child: Text(
         label,
         style: theme.textTheme.labelSmall?.copyWith(color: colour),
+      ),
+    );
+  }
+}
+
+/// What this bill said before it was changed.
+///
+/// A bill is overwritten in place, so it carries only its latest figures. This
+/// is where the earlier ones live, and it is what someone reads when a total
+/// does not reconcile against a printed copy or a day's takings.
+///
+/// Loaded on demand rather than with the bill: most bills are never amended,
+/// and a second query on every open would be paid by all of them.
+class _AmendmentHistory extends ConsumerWidget {
+  const _AmendmentHistory({required this.billId, required this.count});
+
+  final String billId;
+  final int count;
+
+  @override
+  Widget build(BuildContext context, WidgetRef ref) {
+    final theme = Theme.of(context);
+
+    return _Section(
+      title: 'Changed $count ${count == 1 ? 'time' : 'times'}',
+      child: ref
+          .watch(_amendmentsProvider(billId))
+          .when(
+            loading: () => Text(
+              'Loading history…',
+              style: theme.textTheme.bodySmall,
+            ),
+            error: (error, _) => Text(
+              'The history could not be loaded.',
+              style: theme.textTheme.bodySmall,
+            ),
+            data: (amendments) => Column(
+              children: [
+                for (final a in amendments) _AmendmentRow(amendment: a),
+              ],
+            ),
+          ),
+    );
+  }
+}
+
+final _amendmentsProvider =
+    FutureProvider.family<List<BillAmendment>, String>((ref, billId) {
+  return ref.watch(billRepositoryProvider).amendments(billId);
+});
+
+class _AmendmentRow extends StatelessWidget {
+  const _AmendmentRow({required this.amendment});
+
+  final BillAmendment amendment;
+
+  @override
+  Widget build(BuildContext context) {
+    final theme = Theme.of(context);
+    final at = amendment.createdAt;
+
+    return Padding(
+      padding: const EdgeInsets.only(bottom: AppSpacing.sm),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Row(
+            children: [
+              Expanded(
+                child: Text(amendment.label, style: theme.textTheme.bodyMedium),
+              ),
+              // The figures either side, which is the reason this record
+              // exists. Absent for a customer-detail edit, which moved nothing.
+              if (amendment.movedMoney)
+                Text(
+                  '${Money.formatWithSymbol(amendment.totalBefore!)}'
+                  '  →  '
+                  '${Money.formatWithSymbol(amendment.totalAfter!)}',
+                  style: theme.textTheme.bodyMedium,
+                ),
+            ],
+          ),
+          const SizedBox(height: 2),
+          Text(
+            [
+              if (amendment.amendedBy != null) amendment.amendedBy!,
+              if (at != null)
+                '${at.day}/${at.month} '
+                    '${at.hour > 12 ? at.hour - 12 : (at.hour == 0 ? 12 : at.hour)}'
+                    ':${at.minute.toString().padLeft(2, '0')} '
+                    '${at.hour >= 12 ? 'pm' : 'am'}',
+              // The detail that matters at reconciliation: whether a document
+              // already existed when the figures moved.
+              if (amendment.wasPrinted) 'after printing',
+              if (amendment.wasPaid) 'after payment',
+              if (amendment.reason != null && amendment.reason!.isNotEmpty)
+                amendment.reason!,
+            ].join(' · '),
+            style: theme.textTheme.bodySmall?.copyWith(color: AppColors.inkMuted),
+          ),
+        ],
       ),
     );
   }

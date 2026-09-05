@@ -399,6 +399,61 @@ test('a voided bill cannot be amended', async () => {
   await close(ctx)
 })
 
+test('a reopened order marks the bill total as out of date', async () => {
+  // The till has to know, or it shows a settled-looking figure while the lines
+  // behind it have already moved — and someone takes payment against it.
+  const ctx = await setup()
+  const bill = await makeBill(ctx, await makeOrder(ctx, [{ variantId: ctx.full, qty: 1 }]))
+
+  const before = await ctx.app.inject({
+    method: 'GET',
+    url: `/bills/${bill.id}`,
+    headers: ctx.admin,
+  })
+  assertEqual(
+    (before.json() as { bill: { orderReopened: boolean } }).bill.orderReopened,
+    false,
+    'a settled bill is not flagged',
+  )
+
+  await reopen(ctx, bill.id)
+
+  const after = await ctx.app.inject({
+    method: 'GET',
+    url: `/bills/${bill.id}`,
+    headers: ctx.admin,
+  })
+  assertEqual(
+    (after.json() as { bill: { orderReopened: boolean } }).bill.orderReopened,
+    true,
+    'flagged while the order is open',
+  )
+  await close(ctx)
+})
+
+test('the bill reports how many times it has been amended', async () => {
+  // Drives whether the history is offered at all: most bills are never
+  // changed, and a section on all of them would be noise.
+  const ctx = await setup()
+  const bill = await makeBill(ctx, await makeOrder(ctx, [{ variantId: ctx.full, qty: 1 }]))
+
+  const count = async () => {
+    const res = await ctx.app.inject({
+      method: 'GET',
+      url: `/bills/${bill.id}`,
+      headers: ctx.admin,
+    })
+    return (res.json() as { bill: { amendmentCount: number } }).bill.amendmentCount
+  }
+
+  assertEqual(await count(), 0)
+  await amend(ctx, bill.id, { discountType: 'fixed', discountValue: 1_000 })
+  assertEqual(await count(), 1)
+  await amend(ctx, bill.id, { customerName: 'Ravi' })
+  assertEqual(await count(), 2)
+  await close(ctx)
+})
+
 test('an amendment that changes nothing is refused', async () => {
   // A no-op would write a history row saying nothing happened.
   const ctx = await setup()

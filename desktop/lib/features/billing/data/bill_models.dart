@@ -62,6 +62,62 @@ class TaxGroup {
   );
 }
 
+/// One change made to a bill after it was created.
+///
+/// A bill is overwritten in place, so it holds only its latest figures. This is
+/// the record of what it said before — the only place the original total
+/// survives, and what someone reads when a number does not reconcile.
+class BillAmendment {
+  const BillAmendment({
+    required this.id,
+    required this.kind,
+    required this.wasPrinted,
+    required this.wasPaid,
+    required this.createdAt,
+    this.totalBefore,
+    this.totalAfter,
+    this.reason,
+    this.amendedBy,
+  });
+
+  final String id;
+
+  /// `items`, `discount`, or `customer`.
+  final String kind;
+
+  /// Null for a customer-detail edit, which moves no money.
+  final int? totalBefore;
+  final int? totalAfter;
+
+  /// Whether a document already existed when this change was made.
+  final bool wasPrinted;
+  final bool wasPaid;
+
+  final String? reason;
+  final String? amendedBy;
+  final DateTime? createdAt;
+
+  String get label => switch (kind) {
+    'items' => 'Items changed',
+    'discount' => 'Discount changed',
+    _ => 'Customer details changed',
+  };
+
+  bool get movedMoney => totalBefore != null && totalAfter != null;
+
+  factory BillAmendment.fromJson(Map<String, dynamic> json) => BillAmendment(
+    id: json['id'] as String,
+    kind: json['kind'] as String? ?? 'items',
+    totalBefore: json['totalBefore'] as int?,
+    totalAfter: json['totalAfter'] as int?,
+    wasPrinted: json['wasPrinted'] as bool? ?? false,
+    wasPaid: json['wasPaid'] as bool? ?? false,
+    reason: json['reason'] as String?,
+    amendedBy: json['amendedBy'] as String?,
+    createdAt: DateTime.tryParse(json['createdAt'] as String? ?? '')?.toLocal(),
+  );
+}
+
 /// A computed total that has not been persisted.
 class BillPreview {
   const BillPreview({
@@ -206,6 +262,8 @@ class Bill {
     this.tableName,
     this.customerName,
     this.customerPhone,
+    this.orderReopened = false,
+    this.amendmentCount = 0,
   });
 
   final String id;
@@ -248,6 +306,18 @@ class Bill {
   /// a walk-in, which is why search must never require it to match.
   final String? customerName;
   final String? customerPhone;
+
+  /// The order is open again for its items to be changed.
+  ///
+  /// While it is, the lines and these totals can disagree — the bill is only
+  /// brought back in step when the amendment is saved. Payment is held back
+  /// until then, because the figure on screen may already be wrong.
+  final bool orderReopened;
+
+  /// How many times this bill has been amended. Zero for most bills.
+  final int amendmentCount;
+
+  bool get wasAmended => amendmentCount > 0;
 
   /// Whether [query] matches anything a person would search a bill by.
   ///
@@ -295,6 +365,9 @@ class Bill {
     tableName: json['tableName'] as String?,
     customerName: json['customerName'] as String?,
     customerPhone: json['customerPhone'] as String?,
+    // Absent on the list endpoint, which does not join the order's status.
+    orderReopened: json['orderReopened'] as bool? ?? false,
+    amendmentCount: json['amendmentCount'] as int? ?? 0,
     subtotal: json['subtotal'] as int,
     discountAmount: json['discountAmount'] as int? ?? 0,
     cgst: json['cgst'] as int? ?? 0,

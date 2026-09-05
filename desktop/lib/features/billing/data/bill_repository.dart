@@ -66,6 +66,54 @@ class BillRepository {
     await _api.post('/bills/$billId/void', {'reason': reason});
   }
 
+  /// Changes a bill that already exists, keeping its number. Admin only.
+  ///
+  /// The bill is overwritten rather than replaced: staff correct a mistake
+  /// without handing the customer a second piece of paper with a different
+  /// number for the same meal. The previous figures survive only in the
+  /// amendment history, which the backend writes on every call.
+  ///
+  /// [recalculate] re-reads the order's lines, and is what a change to items
+  /// needs. A discount or customer edit does not.
+  Future<Bill> amend(
+    String billId, {
+    DiscountType? discountType,
+    int? discountValue,
+    String? customerName,
+    String? customerPhone,
+    bool recalculate = false,
+    String? reason,
+  }) async {
+    final json = await _api.patch('/bills/$billId', {
+      if (discountType != null) 'discountType': discountType.name,
+      if (discountValue != null) 'discountValue': discountValue,
+      if (customerName != null) 'customerName': customerName,
+      if (customerPhone != null) 'customerPhone': customerPhone,
+      if (recalculate) 'recalculate': true,
+      if (reason != null && reason.isNotEmpty) 'reason': reason,
+    });
+    return Bill.fromJson(json['bill'] as Map<String, dynamic>);
+  }
+
+  /// Reopens the billed order so its lines can be changed. Admin only.
+  ///
+  /// Items live on the order, not the bill — the bill's totals are computed
+  /// from `order_items` — so editing them means editing the order and then
+  /// amending the bill with `recalculate`. The bill number survives; between
+  /// the two calls its total is stale, which the till shows rather than hides.
+  Future<String> reopenOrder(String billId) async {
+    final json = await _api.post('/bills/$billId/reopen');
+    return json['orderId'] as String;
+  }
+
+  /// What this bill said before each change made to it.
+  Future<List<BillAmendment>> amendments(String billId) async {
+    final json = await _api.get('/bills/$billId/amendments');
+    return ((json['amendments'] as List<dynamic>?) ?? const [])
+        .map((a) => BillAmendment.fromJson(a as Map<String, dynamic>))
+        .toList();
+  }
+
   Future<Bill> reversePayment(
     String billId,
     String paymentId,

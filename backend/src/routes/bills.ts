@@ -225,9 +225,14 @@ export async function billRoutes(app: FastifyInstance): Promise<void> {
     }[]
 
     const order = app.db
-      .prepare('SELECT order_no, type, table_id FROM orders WHERE id = ?')
+      .prepare('SELECT order_no, type, table_id, status FROM orders WHERE id = ?')
       .get(bill.order_id) as
-      | { order_no: number; type: 'dine_in' | 'takeaway'; table_id: string | null }
+      | {
+          order_no: number
+          type: 'dine_in' | 'takeaway'
+          table_id: string | null
+          status: string
+        }
       | undefined
 
     const table = order?.table_id
@@ -242,6 +247,17 @@ export async function billRoutes(app: FastifyInstance): Promise<void> {
         orderNo: order?.order_no ?? null,
         orderType: order?.type ?? null,
         tableName: table?.name ?? null,
+        // An order reopened for editing leaves the bill's totals stale — the
+        // lines have moved and the bill has not been recalculated yet. The till
+        // must say so rather than show a figure someone could take payment
+        // against.
+        orderReopened: order?.status === 'open',
+        /** Whether this bill has ever been amended, so the UI can offer the history. */
+        amendmentCount: (
+          app.db
+            .prepare('SELECT COUNT(*) AS n FROM bill_amendments WHERE bill_id = ?')
+            .get(bill.id) as { n: number }
+        ).n,
         items: items.map((item) => ({
           itemName: item.item_name,
           variantName: item.variant_name,
