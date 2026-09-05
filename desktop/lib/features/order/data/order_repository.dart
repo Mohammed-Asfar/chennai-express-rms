@@ -76,8 +76,15 @@ class OrderRepository {
   }
 
   /// Returns whether the kitchen needs a cancellation slip.
+  ///
+  /// [reason] is optional — most cancellations are an order opened on the wrong
+  /// table seconds earlier, and there is nothing useful to write. Omitted from
+  /// the body when blank rather than sent empty, so the record holds null and
+  /// reports do not show a reason that happens to be an empty string.
   Future<bool> cancel(String orderId, String reason) async {
-    final json = await _api.post('/orders/$orderId/cancel', {'reason': reason});
+    final json = await _api.post('/orders/$orderId/cancel', {
+      if (reason.isNotEmpty) 'reason': reason,
+    });
     return json['kotCancellationNeeded'] as bool? ?? false;
   }
 }

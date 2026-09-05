@@ -1,7 +1,6 @@
 import { randomUUID } from 'node:crypto'
 import type { FastifyInstance } from 'fastify'
 import { z } from 'zod'
-import { requiredText } from '../lib/validation.js'
 import type { Db } from '../db/client.js'
 import { AppError } from '../lib/errors.js'
 import { currentUser, requireAuth } from '../lib/guards.js'
@@ -49,8 +48,20 @@ const updateOrderBody = z.object({
   version: z.number().int().min(1).optional(),
 })
 
+/**
+ * Cancelling an order.
+ *
+ * The reason is optional. It was required so a pattern of cancellations could
+ * be read later, but the common cancellation is an order opened on the wrong
+ * table and abandoned seconds afterwards — making someone type an explanation
+ * for that taught them to type anything at all, which is worse than an empty
+ * field: it fills the record with noise that reads like data.
+ *
+ * Voiding a *bill* still demands one. That is money already recorded against a
+ * sale, and by then a reason is worth the friction.
+ */
 const cancelBody = z.object({
-  reason: requiredText(200),
+  reason: z.string().max(200).trim().optional(),
 })
 
 interface OrderRow {
@@ -473,7 +484,10 @@ export async function orderRoutes(app: FastifyInstance): Promise<void> {
                                version = version + 1, updated_at = ?, synced_at = NULL
              WHERE id = ?`,
           )
-          .run(body.reason, now, now, order.id)
+          // NULL rather than '' when none was given: an empty string reads as
+          // a reason that happens to be blank, and reports would show it as
+          // one.
+          .run(body.reason && body.reason.length > 0 ? body.reason : null, now, now, order.id)
 
         // Freeing the table must be derived: another party may still be seated.
         if (order.table_id) refreshTableStatus(app.db, order.table_id)

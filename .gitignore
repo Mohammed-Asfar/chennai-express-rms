@@ -53,3 +53,7 @@ dist/
 
 # Database backups taken before a wipe. Trading data - never committed.
 backups/
+
+# Local database backups taken before a destructive change. Never committed:
+# they hold real trading data.
+.backups/

@@ -523,6 +523,80 @@ test('cancelling an order frees the table and records a reason', async () => {
   await close(ctx)
 })
 
+test('an order cancels without a reason', async () => {
+  // Requiring one taught staff to type anything at all to get past the box,
+  // which filled the record with noise that reads like data. The common
+  // cancellation is an order opened on the wrong table seconds earlier.
+  const ctx = await setup()
+  const order = await newOrder(ctx, { type: 'dine_in', tableId: ctx.tableId })
+
+  const res = await ctx.app.inject({
+    method: 'POST',
+    url: `/orders/${order.id}/cancel`,
+    headers: ctx.auth,
+    payload: {},
+  })
+  assertEqual(res.statusCode, 200)
+
+  const row = ctx.db
+    .prepare('SELECT status, cancel_reason FROM orders WHERE id = ?')
+    .get(order.id) as { status: string; cancel_reason: string | null }
+  assertEqual(row.status, 'cancelled')
+  assertEqual(row.cancel_reason, null, 'no reason recorded, rather than an empty one')
+
+  const table = await ctx.app.inject({
+    method: 'GET',
+    url: `/tables/${ctx.tableId}`,
+    headers: ctx.auth,
+  })
+  assertEqual(
+    (table.json() as { table: { status: string } }).table.status,
+    'free',
+    'the table is freed either way',
+  )
+  await close(ctx)
+})
+
+test('a blank reason is stored as none at all', async () => {
+  // '' would read as a reason that happens to be empty, and a report would
+  // show it as one.
+  const ctx = await setup()
+  const order = await newOrder(ctx, { type: 'takeaway' })
+
+  await ctx.app.inject({
+    method: 'POST',
+    url: `/orders/${order.id}/cancel`,
+    headers: ctx.auth,
+    payload: { reason: '   ' },
+  })
+
+  const row = ctx.db
+    .prepare('SELECT cancel_reason FROM orders WHERE id = ?')
+    .get(order.id) as { cancel_reason: string | null }
+  assertEqual(row.cancel_reason, null)
+  await close(ctx)
+})
+
+test('a reason is still kept when one is given', async () => {
+  // Optional does not mean discarded — the times someone writes a real note
+  // are exactly the times it matters.
+  const ctx = await setup()
+  const order = await newOrder(ctx, { type: 'takeaway' })
+
+  await ctx.app.inject({
+    method: 'POST',
+    url: `/orders/${order.id}/cancel`,
+    headers: ctx.auth,
+    payload: { reason: 'Kitchen out of stock' },
+  })
+
+  const row = ctx.db
+    .prepare('SELECT cancel_reason FROM orders WHERE id = ?')
+    .get(order.id) as { cancel_reason: string | null }
+  assertEqual(row.cancel_reason, 'Kitchen out of stock')
+  await close(ctx)
+})
+
 test('cancelling one party leaves the table occupied by the other', async () => {
   const ctx = await setup()
   const a = await newOrder(ctx, { type: 'dine_in', tableId: ctx.tableId, seatLabel: 'A' })

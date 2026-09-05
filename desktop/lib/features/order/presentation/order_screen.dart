@@ -215,17 +215,21 @@ class OrderScreen extends ConsumerWidget {
           ],
         ),
       );
-      reason = confirmed == true
-          ? 'Discarded before anything was ordered'
-          : null;
+      if (confirmed != true) return;
+      reason = 'Discarded before anything was ordered';
     } else {
-      reason = await showDialog<String>(
+      // Two results, not one: null means the dialog was dismissed, an empty
+      // string means cancel with no note. Reading an empty reason as "changed
+      // my mind" would leave the order open with nothing on screen to say why.
+      final result = await showDialog<String>(
         context: context,
         builder: (_) => const _CancelDialog(),
       );
+      if (result == null) return;
+      reason = result;
     }
 
-    if (reason == null || reason.isEmpty || !context.mounted) return;
+    if (!context.mounted) return;
 
     final kitchenNeedsTelling = await controller.cancel(reason);
     if (!context.mounted) return;
@@ -601,15 +605,29 @@ class _CancelDialogState extends State<_CancelDialog> {
   Widget build(BuildContext context) {
     return AlertDialog(
       title: const Text('Cancel this order?'),
-      content: TextField(
-        controller: _controller,
-        autofocus: true,
-        // A reason is required: a pattern of cancellations is a loss signal
-        // worth being able to read later.
-        decoration: const InputDecoration(
-          labelText: 'Reason',
-          hintText: 'Customer left, wrong table...',
-        ),
+      content: Column(
+        mainAxisSize: MainAxisSize.min,
+        crossAxisAlignment: CrossAxisAlignment.stretch,
+        children: [
+          Text(
+            'The order is cancelled and the table freed.',
+            style: Theme.of(context).textTheme.bodyMedium,
+          ),
+          const SizedBox(height: AppSpacing.md),
+          TextField(
+            controller: _controller,
+            // Not autofocused, and optional. Requiring a reason taught staff
+            // to type anything at all to get past it, which filled the record
+            // with noise that reads like data. Somewhere to put a real note
+            // is still worth having for the times there is one.
+            decoration: const InputDecoration(
+              labelText: 'Note (optional)',
+              hintText: 'Customer left, wrong table…',
+            ),
+            // Enter cancels, so the common case is one keypress.
+            onSubmitted: (value) => Navigator.of(context).pop(value.trim()),
+          ),
+        ],
       ),
       actions: [
         TextButton(
@@ -617,6 +635,8 @@ class _CancelDialogState extends State<_CancelDialog> {
           child: const Text('Keep order'),
         ),
         ElevatedButton(
+          // Always enabled: an empty note is a valid cancellation, and the
+          // string is what distinguishes it from dismissing the dialog.
           onPressed: () => Navigator.of(context).pop(_controller.text.trim()),
           child: const Text('Cancel order'),
         ),

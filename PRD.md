@@ -294,7 +294,7 @@ any date the day bar reaches; there is no month view.
 | FR-O7 | Items with more than one variant prompt for portion selection; single-variant items add directly |
 | FR-O8 | Item quantity can be changed and lines removed while the order is open |
 | FR-O9 | `item_name`, `variant_name`, `unit_price`, and `tax_rate` are copied onto the order line at add time |
-| FR-O10 | An open order can be cancelled with a reason; it is soft-deleted, never removed |
+| FR-O10 | An open order can be cancelled with an **optional** note; it is soft-deleted, never removed. Requiring a reason taught staff to type filler to get past the box, which fills the record with noise that reads like data. Voiding a *bill* still demands one — that is money already recorded against a sale |
 | FR-O11 | Adding the same variant again increments the existing line rather than creating a duplicate — unless its `unit_price` snapshot differs |
 | FR-O12 | An order whose items have all been removed cannot be billed; it must be cancelled |
 | FR-O13 | Removing or reducing a line **after** its KOT printed flags the order so the kitchen can be told |
