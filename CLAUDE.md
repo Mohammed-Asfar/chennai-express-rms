@@ -90,6 +90,8 @@ inclusive to exclusive must not change what last month's bills mean.
 | **Validate every request with Zod at the API boundary** | Trust nothing from the client, including a client you wrote. |
 | **An update check never blocks billing** | No internet, no cloud, or a slow response all resolve to "no update". Never an error the user cannot act on. |
 | **An installer's SHA-256 is verified before it runs** | The app executes this binary on the billing PC. An unverified download is remote code execution. |
+| **A published installer is checked by size *and* hash** | 1.0.5 passed a hash check and shipped a file the host was serving 11 MB short. The size the host reports for the stored asset is an independent witness, and it disagreed instantly. Two hashes say something is wrong; two byte counts say what. |
+| **A Postgres migration is run, not just written** | SQLite migrates itself at boot; the cloud does not. `npm run db:migrate:cloud` before the tills get code that pushes a new column, or sync stops on a column the cloud has never heard of. See `RELEASING.md` §0. |
 | **Version comparison uses `build_number`** | Never parse or compare version strings — a monotonic integer cannot be ambiguous. |
 
 ---
@@ -202,10 +204,17 @@ Changing a colour or text style means editing `core/theme/` — never a widget.
 - [ ] `SCHEMA.md` updated if the schema changed
 - [ ] `PRD.md` updated if behaviour changed
 - [ ] Both SQLite and Postgres migrations written
+- [ ] Postgres migration **run** against the cloud — `npm run db:status:cloud`
 - [ ] Money paths use integers end to end
 - [ ] No hardcoded colours, text styles, or spacing in widgets
 - [ ] No debug logging left in
 - [ ] Version and build number bumped if this is a release
+- [ ] Published installer downloaded back and checked on **both** size and hash
+
+**"Verified" means you checked, not that a script printed a reassuring word.**
+The 1.0.5 publisher reported `Matches.` about a file that was 11 MB short, and
+that was relayed as done. If a check cannot fail, it is not a check — and
+reporting its output as a verification is worse than not running it.
 
 Report what actually happened. If tests fail, say so with the output. If something
 was skipped, say that. Do not describe partial work as complete.

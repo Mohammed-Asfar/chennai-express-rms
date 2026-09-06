@@ -58,6 +58,37 @@ flutter test
 green suite says nothing about types — a push with 503 passing tests failed CI on
 two type errors in the tests themselves.
 
+### Migrate the cloud, before the tills get the new code
+
+```bash
+cd backend
+npm run db:status:cloud    # what the cloud has
+npm run db:migrate:cloud   # apply what it does not
+```
+
+**A migration written is not a migration run.** SQLite migrates itself at
+startup, so a dev machine and a till both pick up a new column the moment they
+boot the new build. Postgres does not — it is migrated deliberately, by this
+command, and nothing reminds you.
+
+Skip it and the tills upgrade, start pushing a column the cloud has never heard
+of, and sync stops with `column "surcharge" of relation "sections" does not
+exist`. Billing keeps working — sync failing never blocks a sale — but nothing
+reaches the cloud until someone runs the migration.
+
+This happened during 1.0.5. It cost only a confusing error because the branch was
+not yet trading.
+
+**Check which database you are pointed at first.** `backend/.env` holds one
+`CLOUD_DATABASE_URL`, and test and production look identical from the terminal:
+
+```bash
+node -e "const m=require('fs').readFileSync('.env','utf8').match(/CLOUD_DATABASE_URL=(.*)/);const p=m[1].match(/@([^/]+)\//);console.log('host:',p[1])"
+```
+
+Migrations that only add columns are survivable if you get this wrong. One that
+rewrites a table is not.
+
 ---
 
 ## 1. Bump the version
@@ -155,16 +186,44 @@ What it does, in order:
 1. Hashes the local file
 2. Refuses if the build number is not newer than the published one
 3. Creates the GitHub release for `v<version>` if needed, uploads the installer
-4. **Downloads the published file back and re-hashes it**
-5. Writes the `app_releases` row only if the two hashes match
+4. **Asks GitHub what size it stored for the asset**, and re-uploads once if that
+   disagrees with the file on disk
+5. **Downloads the published file back**, checks its byte count, then its hash
+6. Writes the `app_releases` row only if every check passes
 
-Step 4 is the one that matters. A hash taken from a different build than the one
-uploaded means every till downloads the installer, fails verification, and
-refuses to update — with no obvious cause, because both halves look right on
-their own.
+Steps 4 and 5 are both required, and 4 exists because 5 alone was not enough —
+see below. Nothing is written to the database until they pass: a row pointing at
+a URL that does not serve the installer offers every branch an update it cannot
+install.
 
-Nothing is written to the database until the upload is verified. A row pointing
-at a URL that does not work would offer every branch an update it cannot install.
+### Why the size is checked as well as the hash
+
+**1.0.5 was published, reported as verified, and shipped an installer GitHub was
+serving 11 MB short.**
+
+The publisher downloaded the file back and re-hashed it, exactly as step 5 says,
+and reported `Matches.` Yet the asset GitHub had stored was 43,542,605 bytes of a
+54,964,421-byte installer — and it was marked `uploaded`, so nothing looked
+wrong. Every till downloaded it, found the hash disagreed with `app_releases`,
+and refused to install. Which was correct: an installer runs with full privileges
+on the billing PC, so an unverified binary must never execute.
+
+The size GitHub records for the asset is a **second, independent witness**. It
+disagreed immediately, and it costs one API call rather than a 50 MB download.
+Two hashes tell you something is wrong; two byte counts tell you what.
+
+A short upload is retried once automatically — re-uploading is exactly the fix,
+and the release is already broken. A download that still disagrees after that is
+not retried: something is serving the wrong bytes, and that needs a person.
+
+`curl` runs with `--fail`. Without it a 404 is followed into an HTML body, curl
+exits zero, and a few hundred bytes get hashed as though they were the installer.
+
+The decisions live in `src/db/publish-checks.ts`, tested without a network or a
+token — including the real truncation, asserted down to the 11,421,816 bytes.
+
+**Do not weaken these to make a publish succeed.** A failing check means the
+release is broken, not that the check is.
 
 | Flag | |
 |---|---|
@@ -193,6 +252,24 @@ npm run release:list
 Branches are offered the new build the next time someone opens the app. The check
 is startup-only by design — a till stays open all day, and a dialog appearing
 mid-service interrupts someone who never asked for it.
+
+### Confirm a till would get the real file
+
+The publisher checks this, but it is worth seeing once with your own eyes,
+because it is the exact request a restaurant's PC makes:
+
+```bash
+curl -sL --fail -o /tmp/check.exe "<download_url from release:list>"
+sha256sum /tmp/check.exe        # must equal app_releases.sha256
+stat -c %s /tmp/check.exe       # must equal app_releases.file_size
+```
+
+Both, not just the hash. That is the lesson of 1.0.5.
+
+**If a till reports "The downloaded file failed its security check", believe
+it.** The app hashes what it downloaded and refuses to run a binary that does not
+match — that message means the file on the host is wrong, not that the till is.
+Check the asset before touching anything on the restaurant's PC.
 
 ---
 
