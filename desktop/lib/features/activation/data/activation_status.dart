@@ -1,7 +1,8 @@
 /// What the backend says about this installation's licence.
 ///
 /// Every field is served from the backend's local cache, so this arrives even
-/// with no internet. See `LICENSING.md` for the grace period rules.
+/// with no internet — and an installation that never reaches the cloud again
+/// keeps billing. See `LICENSING.md`.
 class ActivationStatus {
   const ActivationStatus({
     required this.allowed,
@@ -27,7 +28,8 @@ class ActivationStatus {
   final String? branchCode;
   final String? restaurant;
 
-  /// Whole days before billing stops. Null when not in a grace period.
+  /// Whole days before a withdrawn licence stops billing. Null otherwise —
+  /// including when offline, which no longer counts down.
   final int? graceDaysRemaining;
 
   /// True when staff should be told something without being blocked.

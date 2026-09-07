@@ -3,11 +3,11 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import '../../../core/theme/app_spacing.dart';
 import 'activation_controller.dart';
 
-/// Warns that the licence is running out of grace, above the work area.
+/// Warns that a licence has been withdrawn, above the work area.
 ///
-/// Only appears in the last few days of the grace period. Earlier than that a
-/// brief internet outage is normal and a banner would be noise staff learn to
-/// ignore — which is exactly what must not happen on the day it matters.
+/// Shown only while a revocation is counting down. **Being offline does not
+/// raise it** — a branch with no internet bills indefinitely, so a banner there
+/// would announce a deadline that does not exist.
 ///
 /// It never blocks anything. Billing continues underneath it.
 class LicenseBanner extends ConsumerWidget {

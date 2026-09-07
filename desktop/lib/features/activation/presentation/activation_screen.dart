@@ -38,9 +38,9 @@ class _ActivationScreenState extends ConsumerState<ActivationScreen> {
     final state = ref.watch(activationControllerProvider);
     final status = state.status;
 
-    // Already activated but out of grace, or revoked. There is no key to enter —
-    // the one they have is the right one, so offering the field would send staff
-    // round a loop that cannot succeed.
+    // Already activated, and revoked. There is no key to enter — the one they
+    // have is the right one, so offering the field would send staff round a
+    // loop that cannot succeed. Being offline no longer reaches this screen.
     final expired = status?.activated == true;
 
     return Scaffold(

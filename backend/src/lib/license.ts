@@ -3,19 +3,39 @@ import { execFileSync } from 'node:child_process'
 import type { Db } from '../db/client.js'
 
 /**
- * Licence keys, machine binding, and the grace period.
+ * Licence keys, machine binding, and revocation.
  *
  * The rule this file exists to enforce: **an activation check never stops a
- * restaurant billing because the internet is down.** A licence that cannot be
- * verified is trusted for GRACE_DAYS, and only then does the till stop. A dead
- * Neon, a flat ADSL line, or a slow morning must all resolve to "keep working".
+ * restaurant billing.** A dead Neon, a flat ADSL line, or a branch that has no
+ * internet at all must every one of them resolve to "keep working".
+ *
+ * **Being offline is not a licensing failure.** It used to be: a till that had
+ * not reached the cloud for seven days refused to bill. That is wrong for a
+ * restaurant whose PC is simply not on a network — one client had no wifi, and
+ * their till was a week from stopping on a licence that was paid for and valid.
+ *
+ * The licence is one-time, so there is no subscription to lapse and nothing to
+ * check up on. What still matters is that a key belongs to one machine, and
+ * **that is enforced at activation, not here**: claiming a key writes the
+ * machine's fingerprint into the cloud, and a second PC trying the same key
+ * matches no row and is refused. Activation needs the cloud; billing does not.
+ *
+ * Revocation is kept, and is the one thing that still stops a till — a paid
+ * licence issued in error, or a machine that has to be cut off, still can be.
+ * It cannot reach a till that never connects again, which is an accepted limit
+ * rather than an oversight.
  */
 
-/** Days a branch keeps billing without reaching the cloud. */
+/**
+ * Days a *revoked* branch keeps billing before stopping.
+ *
+ * Only ever applied to a revocation. Cutting a restaurant off mid service on
+ * the day someone flips a flag is how a billing system loses a day's takings;
+ * a week is enough notice to settle whatever the dispute was.
+ *
+ * Never applied to being offline — see the note above.
+ */
 export const GRACE_DAYS = 7
-
-/** Days left at which the UI starts warning. */
-export const WARN_WITHIN_DAYS = 3
 
 export type LicenseStatus = 'active' | 'revoked'
 
@@ -264,6 +284,10 @@ export function evaluate(state: LicenseState | null, now = new Date()): LicenseV
     lastVerifiedAt: state.lastVerifiedAt,
   }
 
+  // Only a revocation counts days. An unparseable timestamp yields Infinity,
+  // which spends a revoked licence's notice immediately — the safe direction,
+  // since the alternative is a withdrawn licence running forever on a corrupt
+  // date. It does not affect an active one, which no longer counts at all.
   const elapsedDays = daysBetween(state.lastVerifiedAt, now)
   const remaining = Math.max(0, GRACE_DAYS - Math.floor(elapsedDays))
 
@@ -283,29 +307,17 @@ export function evaluate(state: LicenseState | null, now = new Date()): LicenseV
     }
   }
 
-  // Active, but the cloud has not confirmed it recently.
-  if (remaining <= 0) {
-    return {
-      ...base,
-      allowed: false,
-      graceDaysRemaining: 0,
-      warn: true,
-      message:
-        'This installation has not reached the licence server for over a week. ' +
-        'Connect it to the internet to continue.',
-    }
-  }
-
-  const stale = elapsedDays >= 1
+  // Active, however long it has been since the cloud last confirmed it.
+  //
+  // A branch with no internet bills indefinitely. The licence is one-time and
+  // the key is already bound to this machine, so there is nothing a weekly
+  // check-in would establish that activation did not.
   return {
     ...base,
     allowed: true,
-    graceDaysRemaining: stale ? remaining : null,
-    warn: stale && remaining <= WARN_WITHIN_DAYS,
-    message:
-      stale && remaining <= WARN_WITHIN_DAYS
-        ? `Could not reach the licence server. Billing stops in ${remaining} ${plural(remaining, 'day')} unless this PC gets internet access.`
-        : null,
+    graceDaysRemaining: null,
+    warn: false,
+    message: null,
   }
 }
 

@@ -69,8 +69,9 @@ The field upper-cases and inserts the dashes as you type, and stops at a full
 key — someone reading it off a phone screen does not have to get the punctuation
 right.
 
-Once the grace period is nearly spent, a banner appears above the work area
-naming the days left, with a **Retry now** button. It never blocks anything.
+If the licence is ever withdrawn, a banner appears above the work area naming
+the days left, with a **Retry now** button. It never blocks anything. Being
+offline raises nothing — see §4.
 
 ### Seeing what is out there
 
@@ -121,7 +122,7 @@ also the answer to a failed hard drive or a Windows reinstall.
    │                          │◄─────────────────────────┤  active, bound
    │                          │                          │
    │                          │  cached locally          │
-   │                          │  works offline 7 days    │
+   │                          │  works offline forever   │
 ```
 
 The claim is a single statement, so two PCs racing with the same key cannot both
@@ -155,27 +156,50 @@ Off Windows, a hostname-derived fallback keeps development and tests working.
 
 ---
 
-## 4. The grace period
+## 4. Being offline
 
-**An activation check never stops a restaurant billing because the internet is
-down.** This is the same rule sync and update checks follow.
+**An activation check never stops a restaurant billing.** Not after a day, not
+after a year. A branch whose PC has never been on a network bills indefinitely.
 
 | Days since last successful check | Behaviour |
 |---|---|
 | 0 | Normal. Nothing shown. |
-| 1–4 | Normal. Nothing shown. |
-| 5–7 | Billing continues, with a warning naming the days left |
+| any number | Normal. Nothing shown. |
+
+### Why there is no offline expiry
+
+There used to be: seven days without reaching the cloud and the till refused to
+bill. It was removed because a client had no wifi, and their till was a week
+from stopping on a licence that was paid for and valid. That is the wrong
+outcome, and it would have arrived mid-service on a Monday morning.
+
+The check earned nothing. **The licence is one time**, so there is no
+subscription to lapse and no renewal to enforce. The one thing that matters —
+that a key runs on one machine — is settled at activation and does not decay:
+claiming a key writes that PC's fingerprint into the cloud, and a second PC
+trying the same key matches no row and is refused. Activation needs the
+internet; billing never does.
+
+What was actually being enforced weekly was "this restaurant still has working
+internet", which is not a licence condition.
+
+### Revocation still stops a till
+
+| Days since revoked | Behaviour |
+|---|---|
+| 0–6 | Billing continues, with a banner naming the days left |
 | 7+ | Billing stops |
 
-A revoked licence gets the same 7 days. Cutting a restaurant off the instant a
-flag flips would cost them a day's takings over what is usually a billing
-dispute.
+Kept because it costs nothing and is occasionally needed — a licence issued in
+error, or a machine that has to be cut off. The seven days exist so a
+revocation does not take a day's takings out of a restaurant mid-service.
 
-A failed check leaves `last_verified_at` untouched, so the window **counts down**
-rather than resetting. An install that never reaches the cloud again does
-eventually stop — but not today, and not mid-service.
+**It cannot reach a till that never connects again.** That is an accepted limit,
+not an oversight: the alternative is the offline expiry that was just removed.
 
-A corrupted or unparseable timestamp fails **closed**, not open.
+A corrupted timestamp still fails **closed for a revocation** — it reads as
+infinitely stale, spending the notice at once rather than letting a withdrawn
+licence run forever. It has no effect on an active one.
 
 ---
 
@@ -198,7 +222,8 @@ Cloud-only. Never pushed up by a branch, never in `SYNC_TABLES`.
 ### Branch — `license_state` (SQLite, migration 0008)
 
 A single row (`CHECK (id = 1)`) caching what the till last heard, so it can keep
-billing offline. `last_verified_at` drives the grace period.
+billing offline. `last_verified_at` records when the cloud last confirmed it,
+and counts down only a revocation.
 
 ---
 
@@ -299,7 +324,7 @@ the app start together and the service does not always win. Treating a slow star
 as "not activated" would put an activated restaurant in front of the key screen
 every morning.
 
-A licence that is activated but out of grace, or revoked, shows the same screen
+A licence that is activated and revoked shows the same screen
 with no key field — the key they hold is the right one, so offering the field
 would send staff round a loop that cannot succeed. They get **Check again**
 instead.
@@ -308,8 +333,9 @@ instead.
 
 ## 10. Testing
 
-`backend/test/license.test.ts` — 21 cases covering key format and normalisation,
-fingerprint stability, the full grace-period ladder, revocation, fail-closed on a
+`backend/test/license.test.ts` — 27 cases covering key format and normalisation,
+fingerprint stability, offline billing at ten years, revocation and its notice,
+the machine-binding predicate, fail-closed on a
 corrupt timestamp, and the single-row constraint.
 
 `desktop/test/activation_test.dart` — 13 cases covering the verdict model, the
@@ -319,8 +345,9 @@ Each was verified by deliberately breaking the implementation:
 
 | Break | Caught by |
 |---|---|
-| Grace period never expires | `billing stops once the grace period is spent` |
+| Offline expiry creeps back in | `a branch that has never had internet bills indefinitely` |
 | Revoked licence runs forever | `a revoked licence stops after its grace period` |
+| A second PC accepted | `a second machine cannot claim a key already in use` |
 | Missing `allowed` defaults to true | `an empty response fails closed` |
 | No length cap on key entry | `the field stops at a full key` |
 

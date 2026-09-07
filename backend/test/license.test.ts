@@ -107,28 +107,33 @@ test('a freshly verified licence runs with nothing shown', () => {
   assertEqual(verdict.graceDaysRemaining, null, 'not in a grace period')
 })
 
-test('a day offline keeps billing and says nothing yet', () => {
-  // The point of the grace period: a normal internet outage is invisible.
+test('a day offline keeps billing and says nothing', () => {
   const verdict = evaluate(state({ lastVerifiedAt: daysAgo(1) }), NOW)
   assertEqual(verdict.allowed, true, 'still billing')
-  assertEqual(verdict.warn, false, 'no warning this early')
-  assertEqual(verdict.graceDaysRemaining, GRACE_DAYS - 1, 'days counted')
+  assertEqual(verdict.warn, false, 'nothing to warn about')
+  assertEqual(verdict.graceDaysRemaining, null, 'nothing is counting down')
 })
 
-test('the warning starts only in the last three days', () => {
-  const quiet = evaluate(state({ lastVerifiedAt: daysAgo(3) }), NOW)
-  assertEqual(quiet.warn, false, 'four days left is not yet a warning')
-
-  const warned = evaluate(state({ lastVerifiedAt: daysAgo(5) }), NOW)
-  assertEqual(warned.allowed, true, 'still billing')
-  assertEqual(warned.warn, true, 'now warning')
-  assertEqual(warned.graceDaysRemaining, 2, 'two days left')
+test('a branch that has never had internet bills indefinitely', () => {
+  // The case this rule exists for. A client with no wifi was a week from
+  // their till refusing to bill on a licence that was paid for and valid.
+  //
+  // The licence is one-time, so there is no subscription to lapse, and the
+  // key is already bound to this machine by activation. A weekly check-in
+  // would establish nothing that claiming the key did not.
+  for (const days of [8, 30, 365, 3_650]) {
+    const verdict = evaluate(state({ lastVerifiedAt: daysAgo(days) }), NOW)
+    assertEqual(verdict.allowed, true, `still billing after ${days} days offline`)
+    assertEqual(verdict.warn, false, `and not nagged at ${days} days`)
+    assertEqual(verdict.message, null, `nothing shown at ${days} days`)
+  }
 })
 
-test('billing stops once the grace period is spent', () => {
-  const verdict = evaluate(state({ lastVerifiedAt: daysAgo(GRACE_DAYS + 1) }), NOW)
-  assertEqual(verdict.allowed, false, 'blocked')
-  assertEqual(verdict.graceDaysRemaining, 0, 'nothing left')
+test('being offline is never described as a countdown', () => {
+  // graceDaysRemaining drives the banner. A number here would put a deadline
+  // in front of staff that no longer exists.
+  const verdict = evaluate(state({ lastVerifiedAt: daysAgo(GRACE_DAYS + 90) }), NOW)
+  assertEqual(verdict.graceDaysRemaining, null, 'no deadline to show')
 })
 
 test('a revoked licence still gets its grace period', () => {
@@ -148,10 +153,29 @@ test('a revoked licence stops after its grace period', () => {
   assertEqual(verdict.allowed, false, 'blocked')
 })
 
-test('an unparseable verification date does not grant an unlimited licence', () => {
-  // A corrupted timestamp must fail closed, not open.
+test('an unparseable date does not keep a revoked licence running', () => {
+  // A corrupt timestamp must not be a way to outlive a revocation: it yields
+  // Infinity, which spends the notice at once rather than granting forever.
+  const verdict = evaluate(
+    state({ status: 'revoked', lastVerifiedAt: 'not a date' }),
+    NOW,
+  )
+  assertEqual(verdict.allowed, false, 'blocked')
+})
+
+test('an unparseable date does not stop an active licence', () => {
+  // It once did, because being offline was a block and a bad date read as
+  // infinitely offline. A corrupt local timestamp is not evidence of anything
+  // a paying restaurant did wrong.
   const verdict = evaluate(state({ lastVerifiedAt: 'not a date' }), NOW)
-  assertEqual(verdict.allowed, false, 'blocked rather than trusted')
+  assertEqual(verdict.allowed, true, 'still billing')
+})
+
+test('activation is still required before anything works', () => {
+  // Removing the offline expiry does not mean an unactivated copy runs. The
+  // key must still be claimed against the cloud once, which is where the
+  // machine binding is written.
+  assertEqual(evaluate(null, NOW).allowed, false, 'blocked until activated')
 })
 
 // --- local state ---
@@ -194,18 +218,21 @@ test('an empty database has no licence', () => {
   db.close()
 })
 
-test('a successful check moves the grace window forward', () => {
+test('a successful check records when the cloud last confirmed it', () => {
+  // The timestamp no longer gates an active licence, but it is still written:
+  // it is what a revocation's notice counts from, and it is shown in Settings
+  // so someone can see whether the cloud has been reached at all.
   const db = freshDb()
-  writeLicenseState(db, state({ lastVerifiedAt: daysAgo(6) }), NOW)
+  writeLicenseState(db, state({ lastVerifiedAt: daysAgo(60) }), NOW)
 
   const before = evaluate(readLicenseState(db), NOW)
-  assertEqual(before.warn, true, 'nearly out of grace')
+  assertEqual(before.allowed, true, 'two months offline still bills')
 
   markVerified(db, 'active', NOW)
 
   const after = evaluate(readLicenseState(db), NOW)
-  assertEqual(after.warn, false, 'the window reset')
-  assertEqual(after.graceDaysRemaining, null, 'no longer counting down')
+  assertEqual(after.allowed, true, 'and still does afterwards')
+  assertEqual(after.lastVerifiedAt, NOW.toISOString(), 'the check was recorded')
   db.close()
 })
 
@@ -266,4 +293,37 @@ test('a timestamp that is already text is left alone', () => {
     'passed through unchanged',
   )
   assertEqual(claimedTimestamp(null), null, 'null survives as null')
+})
+
+// --- machine binding ---
+//
+// With the offline expiry gone, this is the only thing stopping one key from
+// running on two PCs. It is enforced by the claim's WHERE clause, which needs
+// a Postgres to exercise end to end — so what is pinned here is the predicate
+// itself, against the rows it has to accept and refuse.
+
+/** The guard in claimInCloud: `fingerprint IS NULL OR fingerprint = ?`. */
+function claimable(row: { fingerprint: string | null; status: string }, machine: string): boolean {
+  return row.status !== 'revoked' && (row.fingerprint === null || row.fingerprint === machine)
+}
+
+test('an unclaimed key activates on the first machine', () => {
+  assertEqual(claimable({ fingerprint: null, status: 'active' }, 'pc-a'), true)
+})
+
+test('the same machine may re-activate its own key', () => {
+  // Reinstalling Windows keeps the MachineGuid, and a repair install must not
+  // lock a restaurant out of the licence they paid for.
+  assertEqual(claimable({ fingerprint: 'pc-a', status: 'active' }, 'pc-a'), true)
+})
+
+test('a second machine cannot claim a key already in use', () => {
+  // The control that replaces the weekly check-in: copying the installer to
+  // another PC gets as far as the activation screen and no further.
+  assertEqual(claimable({ fingerprint: 'pc-a', status: 'active' }, 'pc-b'), false)
+})
+
+test('a revoked key activates nowhere', () => {
+  assertEqual(claimable({ fingerprint: null, status: 'revoked' }, 'pc-a'), false)
+  assertEqual(claimable({ fingerprint: 'pc-a', status: 'revoked' }, 'pc-a'), false)
 })
