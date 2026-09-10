@@ -217,8 +217,10 @@ export async function settingsRoutes(app: FastifyInstance): Promise<void> {
             lineTotal: 76_000,
           },
           {
+            // A base portion: the preview must show that its name is left off.
             name: 'Filter Coffee',
-            variantName: 'Standard',
+            variantName: 'Regular',
+            variantIsBase: true,
             qty: 1,
             unitPrice: 3_000,
             lineTotal: 3_000,

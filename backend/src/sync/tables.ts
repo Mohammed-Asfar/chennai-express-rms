@@ -74,7 +74,7 @@ export const SYNC_TABLES: SyncTable[] = [
     // No branch_id: it belongs to its item.
     columns: [
       'id', 'menu_item_id', 'name', 'price', 'sort_order', 'is_available',
-      'created_at', 'updated_at', 'deleted_at',
+      'is_base', 'created_at', 'updated_at', 'deleted_at',
     ],
     conflictKeys: ['id'],
     tracked: true,
@@ -101,8 +101,8 @@ export const SYNC_TABLES: SyncTable[] = [
   {
     name: 'order_items',
     columns: [
-      'id', 'order_id', 'variant_id', 'item_name', 'variant_name', 'unit_price',
-      'tax_rate', 'qty', 'line_base', 'line_tax', 'line_total', 'notes',
+      'id', 'order_id', 'variant_id', 'item_name', 'variant_name', 'variant_is_base',
+      'unit_price', 'tax_rate', 'qty', 'line_base', 'line_tax', 'line_total', 'notes',
       'kot_printed_at', 'created_at', 'updated_at', 'deleted_at',
     ],
     conflictKeys: ['id'],

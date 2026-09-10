@@ -218,7 +218,7 @@ export async function billRoutes(app: FastifyInstance): Promise<void> {
 
     const items = app.db
       .prepare(
-        `SELECT item_name, variant_name, qty, unit_price, tax_rate,
+        `SELECT item_name, variant_name, variant_is_base, qty, unit_price, tax_rate,
                 line_base, line_tax, line_total
          FROM order_items
          WHERE order_id = ? AND deleted_at IS NULL
@@ -227,6 +227,7 @@ export async function billRoutes(app: FastifyInstance): Promise<void> {
       .all(bill.order_id) as {
       item_name: string
       variant_name: string
+      variant_is_base: number
       qty: number
       unit_price: number
       tax_rate: number
@@ -272,6 +273,7 @@ export async function billRoutes(app: FastifyInstance): Promise<void> {
         items: items.map((item) => ({
           itemName: item.item_name,
           variantName: item.variant_name,
+          variantIsBase: item.variant_is_base === 1,
           qty: item.qty,
           unitPrice: item.unit_price,
           taxRate: item.tax_rate,
@@ -411,6 +413,7 @@ export async function billRoutes(app: FastifyInstance): Promise<void> {
         .all(bill.order_id) as {
         item_name: string
         variant_name: string
+        variant_is_base: number
         qty: number
         unit_price: number
         line_total: number
@@ -491,6 +494,7 @@ export async function billRoutes(app: FastifyInstance): Promise<void> {
           lines: items.map((item) => ({
             name: item.item_name,
             variantName: item.variant_name,
+            variantIsBase: item.variant_is_base === 1,
             qty: item.qty,
             unitPrice: item.unit_price,
             lineTotal: item.line_total,

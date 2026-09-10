@@ -57,7 +57,7 @@ interface ItemPayload {
   name: string
   taxRate: number
   isAvailable: boolean
-  variants: { id: string; name: string; price: number; isAvailable: boolean }[]
+  variants: { id: string; name: string; price: number; isAvailable: boolean; isBase: boolean }[]
 }
 
 async function makeItem(
@@ -474,5 +474,146 @@ test('a cashier cannot create or reprice menu items', async () => {
     ).statusCode,
     403,
   )
+  await close(ctx)
+})
+
+
+// --- the base portion ---
+//
+// The portion whose name the bill leaves off. Marked rather than guessed from
+// the word, because "Regular", "Base" and "Normal" all mean the same thing and
+// no list of them is complete.
+
+test('a lone portion is the base whatever it is named', async () => {
+  const ctx = await setup()
+  const categoryId = await makeCategory(ctx, 'Biryani')
+
+  for (const name of ['Regular', 'Base', 'Normal', 'Sadha']) {
+    const item = await makeItem(ctx, {
+      categoryId,
+      name: `Biryani ${name}`,
+      variants: [{ name, price: 20_000 }],
+    })
+    assertEqual(item.variants[0]?.isBase, true, `"${name}" alone is base`)
+  }
+
+  await close(ctx)
+})
+
+test('an item created with several portions has no base', async () => {
+  // Dry and Gravy cost the same and neither is a default. Hiding either would
+  // print two different dishes under one name.
+  const ctx = await setup()
+  const categoryId = await makeCategory(ctx, 'Starters')
+  const item = await makeItem(ctx, {
+    categoryId,
+    name: 'Gobi Chilly',
+    variants: [{ name: 'Dry', price: 14_000 }, { name: 'Gravy', price: 15_000 }],
+  })
+
+  assertEqual(item.variants.every((v) => !v.isBase), true, 'neither portion is base')
+  await close(ctx)
+})
+
+test('adding a second portion demotes the one that was base by being alone', async () => {
+  // Otherwise "Regular" keeps printing with no portion at all, and the two
+  // sizes are indistinguishable on the bill.
+  const ctx = await setup()
+  const categoryId = await makeCategory(ctx, 'Beverages')
+  const item = await makeItem(ctx, { categoryId, name: 'Filter Coffee', price: 3_000 })
+  assertEqual(item.variants[0]?.isBase, true, 'base while alone')
+
+  const res = await ctx.app.inject({
+    method: 'POST',
+    url: `/menu-items/${item.id}/variants`,
+    headers: ctx.admin,
+    payload: { name: 'Large', price: 5_000 },
+  })
+  assertEqual(res.statusCode, 201)
+
+  const after = (res.json() as { item: ItemPayload }).item
+  assertEqual(after.variants.every((v) => !v.isBase), true, 'no base once there is a choice')
+  await close(ctx)
+})
+
+test('deleting back down to one portion restores the base', async () => {
+  const ctx = await setup()
+  const categoryId = await makeCategory(ctx, 'Beverages')
+  const item = await makeItem(ctx, {
+    categoryId,
+    name: 'Tea',
+    variants: [{ name: 'Regular', price: 2_000 }, { name: 'Large', price: 3_000 }],
+  })
+  const large = item.variants.find((v) => v.name === 'Large')!
+
+  const res = await ctx.app.inject({
+    method: 'DELETE',
+    url: `/menu-items/${item.id}/variants/${large.id}`,
+    headers: ctx.admin,
+  })
+  assertEqual(res.statusCode, 200)
+
+  const after = (res.json() as { item: ItemPayload }).item
+  assertEqual(after.variants.length, 1)
+  assertEqual(after.variants[0]?.isBase, true, 'alone again, so base again')
+  await close(ctx)
+})
+
+test('a multi-portion item can name one portion the base', async () => {
+  // Tandoori Chicken is Full, Half and Single — "Full" is what a customer
+  // means by the dish name, so the bill can leave it off.
+  const ctx = await setup()
+  const categoryId = await makeCategory(ctx, 'Tandoor')
+  const item = await makeItem(ctx, {
+    categoryId,
+    name: 'Tandoori Chicken',
+    variants: [
+      { name: 'Full', price: 52_000 },
+      { name: 'Half', price: 28_000 },
+      { name: 'Single', price: 15_000 },
+    ],
+  })
+  const full = item.variants.find((v) => v.name === 'Full')!
+
+  const res = await ctx.app.inject({
+    method: 'PATCH',
+    url: `/menu-items/${item.id}/variants/${full.id}`,
+    headers: ctx.admin,
+    payload: { isBase: true },
+  })
+  assertEqual(res.statusCode, 200)
+
+  const after = (res.json() as { item: ItemPayload }).item
+  assertEqual(after.variants.find((v) => v.name === 'Full')?.isBase, true)
+  assertEqual(after.variants.find((v) => v.name === 'Half')?.isBase, false)
+  assertEqual(after.variants.find((v) => v.name === 'Single')?.isBase, false)
+  await close(ctx)
+})
+
+test('naming a new base demotes the previous one', async () => {
+  // Two hidden portions would print two dishes under the same name.
+  const ctx = await setup()
+  const categoryId = await makeCategory(ctx, 'Tandoor')
+  const item = await makeItem(ctx, {
+    categoryId,
+    name: 'Chicken Tikka',
+    variants: [{ name: 'Full', price: 40_000 }, { name: 'Half', price: 22_000 }],
+  })
+  const [full, half] = [item.variants[0]!, item.variants[1]!]
+
+  const base = (id: string) =>
+    ctx.app.inject({
+      method: 'PATCH',
+      url: `/menu-items/${item.id}/variants/${id}`,
+      headers: ctx.admin,
+      payload: { isBase: true },
+    })
+
+  await base(full.id)
+  const res = await base(half.id)
+  const after = (res.json() as { item: ItemPayload }).item
+
+  assertEqual(after.variants.filter((v) => v.isBase).length, 1, 'exactly one base')
+  assertEqual(after.variants.find((v) => v.name === 'Half')?.isBase, true)
   await close(ctx)
 })

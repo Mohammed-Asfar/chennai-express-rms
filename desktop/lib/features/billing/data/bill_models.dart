@@ -159,6 +159,7 @@ class BillItem {
   const BillItem({
     required this.itemName,
     required this.variantName,
+    this.variantIsBase = false,
     required this.qty,
     required this.unitPrice,
     required this.taxRate,
@@ -168,6 +169,9 @@ class BillItem {
 
   final String itemName;
   final String variantName;
+
+  /// Whether this is the plain portion, snapshotted when the line was added.
+  final bool variantIsBase;
   final int qty;
 
   /// Paise, as charged.
@@ -178,14 +182,17 @@ class BillItem {
   final int lineTax;
   final int lineTotal;
 
-  /// Portions named `Standard` are the only size, so naming them adds nothing.
-  String get displayName => variantName.isEmpty || variantName == 'Standard'
+  /// The base portion is the only size worth ordering by name, so naming it on
+  /// the bill adds nothing — "Chicken Biryani (Regular)" tells the customer
+  /// what they already know. Matches what the printed bill does.
+  String get displayName => variantName.isEmpty || variantIsBase
       ? itemName
       : '$itemName ($variantName)';
 
   factory BillItem.fromJson(Map<String, dynamic> json) => BillItem(
     itemName: json['itemName'] as String? ?? '',
     variantName: json['variantName'] as String? ?? '',
+    variantIsBase: json['variantIsBase'] as bool? ?? false,
     qty: json['qty'] as int? ?? 0,
     unitPrice: json['unitPrice'] as int? ?? 0,
     taxRate: json['taxRate'] as int? ?? 0,

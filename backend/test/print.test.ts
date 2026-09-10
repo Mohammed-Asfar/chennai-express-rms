@@ -208,11 +208,18 @@ test('a long note wraps with every line indented', () => {
   }
 })
 
-test('Standard is not printed as a portion name', () => {
-  // "Filter Coffee (Standard)" is noise; the dish has only one size.
-  const text = readable(renderKot(kotBase))
-  assertEqual(text.includes('(Standard)'), false)
-  assertEqual(text.includes('(Full)'), true, 'a real portion still shows')
+test('the KOT prints every portion name, base or not', () => {
+  // The cook must never infer a portion from its absence: a wrong size is a
+  // remade dish, and an absence is not something to read at a hot pass.
+  const text = readable(renderKot({
+    ...kotBase,
+    lines: [
+      { name: 'Filter Coffee', variantName: 'Regular', variantIsBase: true, qty: 1 },
+      { name: 'Mutton Biryani', variantName: 'Full', qty: 2 },
+    ],
+  }))
+  assertEqual(text.includes('(Regular)'), true, 'the base portion still shows')
+  assertEqual(text.includes('(Full)'), true, 'a chosen portion shows')
 })
 
 // --- the bill ---
@@ -245,6 +252,43 @@ const billBase = {
   payments: [{ mode: 'cash', amount: 76_000 }],
   footer: 'Thank you, come again',
 }
+
+test('the bill leaves a base portion name off', () => {
+  // "Chicken Biryani (Regular)" tells the customer nothing they did not
+  // already know, and costs a line on a 58mm roll.
+  const bill = readable(renderBill({
+    ...billBase,
+    lines: [
+      { name: 'Chicken Biryani', variantName: 'Regular', variantIsBase: true, qty: 1, unitPrice: 18_000, lineTotal: 18_000 },
+    ],
+  }))
+  assertEqual(bill.includes('(Regular)'), false, 'the base portion is hidden')
+  assertEqual(bill.includes('Chicken Biryani'), true, 'the dish still prints')
+})
+
+test('the bill prints a portion that is not the base', () => {
+  // Whatever the portion is called. The name is arbitrary — what matters is
+  // the flag, so an item whose plain portion is named "Base" is not special.
+  for (const portion of ['Dry', 'Gravy', 'Single', 'Half', 'Full', 'Fry', 'Regular']) {
+    const bill = readable(renderBill({
+      ...billBase,
+      lines: [{ name: 'Chicken 65', variantName: portion, qty: 1, unitPrice: 18_000, lineTotal: 18_000 }],
+    }))
+    assertEqual(bill.includes(`(${portion})`), true, `bill shows "${portion}"`)
+  }
+})
+
+test('both halves of a same-priced pair stay on the bill', () => {
+  // Dry and Gravy are a genuine either/or and neither is a default. Hiding
+  // one would print two different dishes under the same name.
+  for (const portion of ['Dry', 'Gravy']) {
+    const bill = readable(renderBill({
+      ...billBase,
+      lines: [{ name: 'Gobi Chilly', variantName: portion, qty: 1, unitPrice: 14_000, lineTotal: 14_000 }],
+    }))
+    assertEqual(bill.includes(`Gobi Chilly (${portion})`), true, `"${portion}" is distinguishable`)
+  }
+})
 
 test('a bill says which kind of order it was', () => {
   // Delivery and takeaway are both counter sales with no table, so the label

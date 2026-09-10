@@ -138,7 +138,7 @@ depend on.
 | `reservation_tables` | Which tables a booking holds |
 | `categories` | Menu grouping |
 | `menu_items` | Dishes — holds no price |
-| `menu_item_variants` | Portions (Half / Full / Standard) — holds the price |
+| `menu_item_variants` | Portions (Half / Full / Regular) — holds the price |
 | `orders` | Dine-in, takeaway or delivery order |
 | `order_items` | Lines on an order |
 | `bills` | Finalised bill |
@@ -151,7 +151,7 @@ depend on.
 ### 5.2 Three rules the requirements depend on
 
 **Price lives on the variant, not the item.** Every menu item has at least one
-variant; items without portions get one named `Standard`. So `order_items` always
+variant; items without portions get one named `Regular`. So `order_items` always
 references a `variant_id` — one code path, no special case.
 
 **Order lines are snapshots.** `item_name`, `variant_name`, `unit_price`, and
@@ -202,7 +202,7 @@ sales on the previous trading day, with the cutoff configured in settings.
 | FR-M2 | Categories have a sort order controlling menu display |
 | FR-M3 | Admin can create, edit, and delete menu items under a category |
 | FR-M4 | Each item has one or more **variants** (portions), each with a name and a price in paise |
-| FR-M5 | An item with no portion sizes gets a single variant named `Standard`, created automatically |
+| FR-M5 | An item with no portion sizes gets a single variant named `Regular`, created automatically |
 | FR-M6 | Admin can add, rename, reprice, and remove variants; the last variant cannot be removed |
 | FR-M7 | Each item has a `tax_rate`, defaulting to the branch GST rate in settings, overridable per item |
 | FR-M8 | An item can be marked unavailable — it stays on the menu but cannot be ordered |
@@ -224,6 +224,7 @@ sales on the previous trading day, with the cutoff configured in settings.
 | FR-M22 | The order screen shows menu prices **with the surcharge already in them**, so the figure a cashier reads is the one the customer is charged |
 | FR-M23 | An order taken in a surcharged section says so in its header, so the raised prices read as intended rather than as a fault |
 | FR-M24 | The till is told the section's amount by the backend; it never derives a price rule of its own |
+| FR-M25 | One portion per item can be the **base** — the bill prints the dish name without it, so a one-size dish is not billed as "Chicken Biryani (Regular)". An item with one portion is always its own base; an item with several has none unless one is chosen, and choosing one clears the previous. The KOT always names the portion regardless |
 
 ### 6.2 Sections & Tables
 
@@ -779,6 +780,11 @@ Scenarios that occur in a working restaurant and their required behaviour.
 | Tagline left empty | Nothing prints — no blank line pushing the bill down |
 | Logo missing or corrupt | Bill prints without it |
 | Bill reprinted | Prints exactly as the original; `reprint_count` records that it happened |
+| Dish with only one portion | The bill prints "Chicken Biryani", not "Chicken Biryani (Regular)" — the portion is the base and its name adds nothing |
+| Two portions at the same price (Dry / Gravy) | Both print their names. Neither is a default, and hiding either would put two different dishes on the bill under one name |
+| Base marked after a bill was already printed | The old bill reprints as it was issued — `variant_is_base` is snapshotted on the line, like the name and price beside it |
+| A second portion added to a one-size dish | The original stops being the base, so "Regular" and "Large" stay distinguishable on the bill |
+| Base portion on the kitchen ticket | Always printed. A cook must never infer "Full" from the absence of "Half" |
 
 ### 7.4 Time and reporting
 
