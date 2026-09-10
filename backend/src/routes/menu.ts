@@ -14,6 +14,14 @@ const variantInput = z.object({
   /** Paise. The client converts rupees at the boundary. */
   price: z.number().int().min(0),
   isAvailable: z.boolean().optional(),
+  /**
+   * Whether this is the plain portion, whose name the bill leaves off.
+   *
+   * "Chicken Biryani (Regular)" tells the customer nothing. Marked rather than
+   * guessed from the name, because the word is arbitrary — Regular, Base and
+   * Normal all mean the same thing and no list of them is complete.
+   */
+  isBase: z.boolean().optional(),
 })
 
 const createBody = z.object({
@@ -49,6 +57,7 @@ const updateVariantBody = z.object({
   price: z.number().int().min(0).optional(),
   isAvailable: z.boolean().optional(),
   sortOrder: z.number().int().min(0).optional(),
+  isBase: z.boolean().optional(),
 })
 
 interface ItemRow {
@@ -70,6 +79,7 @@ interface VariantRow {
   price: number
   sort_order: number
   is_available: number
+  is_base: number
 }
 
 const toPublicVariant = (row: VariantRow) => ({
@@ -78,6 +88,7 @@ const toPublicVariant = (row: VariantRow) => ({
   price: row.price,
   sortOrder: row.sort_order,
   isAvailable: row.is_available === 1,
+  isBase: row.is_base === 1,
 })
 
 const toPublicItem = (row: ItemRow, variants: VariantRow[]) => ({
@@ -173,9 +184,14 @@ export async function menuRoutes(app: FastifyInstance): Promise<void> {
 
       const insertVariant = app.db.prepare(
         `INSERT INTO menu_item_variants (id, menu_item_id, name, price, sort_order,
-                                         is_available, created_at, updated_at)
-         VALUES (?, ?, ?, ?, ?, ?, ?, ?)`,
+                                         is_available, is_base, created_at, updated_at)
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`,
       )
+      // A lone portion has nothing to distinguish, so it is the base whatever
+      // it is named. With several, none is base unless the caller says so:
+      // Dry and Gravy cost the same and neither is a default, so hiding either
+      // would print two different dishes under one name.
+      const onlyPortion = variants.length === 1
       variants.forEach((variant, index) => {
         insertVariant.run(
           randomUUID(),
@@ -184,6 +200,7 @@ export async function menuRoutes(app: FastifyInstance): Promise<void> {
           variant.price,
           index,
           variant.isAvailable === false ? 0 : 1,
+          onlyPortion || variant.isBase === true ? 1 : 0,
           now,
           now,
         )
@@ -282,13 +299,43 @@ export async function menuRoutes(app: FastifyInstance): Promise<void> {
 
       const now = new Date().toISOString()
       const id = randomUUID()
-      app.db
-        .prepare(
-          `INSERT INTO menu_item_variants (id, menu_item_id, name, price, sort_order,
-                                           is_available, created_at, updated_at)
-           VALUES (?, ?, ?, ?, ?, ?, ?, ?)`,
-        )
-        .run(id, item.id, body.name, body.price, existing.length, body.isAvailable === false ? 0 : 1, now, now)
+      app.db.transaction(() => {
+        // The item now has a choice to communicate, so the portion that was
+        // base only by being alone stops being one. Without this, adding
+        // "Large" beside an auto-based "Regular" would keep printing the
+        // regular size with no portion at all — the two would be
+        // indistinguishable on the bill.
+        const soleExisting = existing.length === 1 ? existing[0] : undefined
+        if (soleExisting && body.isBase !== true) {
+          app.db
+            .prepare(
+              `UPDATE menu_item_variants SET is_base = 0, updated_at = ?, synced_at = NULL
+               WHERE id = ?`,
+            )
+            .run(now, soleExisting.id)
+        }
+
+        app.db
+          .prepare(
+            `INSERT INTO menu_item_variants (id, menu_item_id, name, price, sort_order,
+                                             is_available, is_base, created_at, updated_at)
+             VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+          )
+          .run(
+            id,
+            item.id,
+            body.name,
+            body.price,
+            existing.length,
+            body.isAvailable === false ? 0 : 1,
+            body.isBase === true ? 1 : 0,
+            now,
+            now,
+          )
+
+        // Only one portion can be the plain one.
+        if (body.isBase === true) clearOtherBases(app, item.id, id, now)
+      })()
 
       reply.status(201)
       return { item: toPublicItem(item, loadVariants(app, [item.id]).get(item.id) ?? []) }
@@ -325,11 +372,18 @@ export async function menuRoutes(app: FastifyInstance): Promise<void> {
       if (body.price !== undefined) push('price', body.price)
       if (body.isAvailable !== undefined) push('is_available', body.isAvailable ? 1 : 0)
       if (body.sortOrder !== undefined) push('sort_order', body.sortOrder)
+      if (body.isBase !== undefined) push('is_base', body.isBase ? 1 : 0)
 
       if (sets.length > 0) {
+        const now = new Date().toISOString()
         sets.push('updated_at = ?', 'synced_at = NULL')
-        values.push(new Date().toISOString(), variant.id)
-        app.db.prepare(`UPDATE menu_item_variants SET ${sets.join(', ')} WHERE id = ?`).run(...values)
+        values.push(now, variant.id)
+        app.db.transaction(() => {
+          app.db.prepare(`UPDATE menu_item_variants SET ${sets.join(', ')} WHERE id = ?`).run(...values)
+          // Only one portion can be the plain one, so naming a new base demotes
+          // whichever held it before.
+          if (body.isBase === true) clearOtherBases(app, item.id, variant.id, now)
+        })()
       }
 
       // Repricing never rewrites an existing order — order lines snapshot the price.
@@ -359,15 +413,51 @@ export async function menuRoutes(app: FastifyInstance): Promise<void> {
       }
 
       const now = new Date().toISOString()
-      app.db
-        .prepare(
-          'UPDATE menu_item_variants SET deleted_at = ?, updated_at = ?, synced_at = NULL WHERE id = ?',
-        )
-        .run(now, now, variant.id)
+      app.db.transaction(() => {
+        app.db
+          .prepare(
+            'UPDATE menu_item_variants SET deleted_at = ?, updated_at = ?, synced_at = NULL WHERE id = ?',
+          )
+          .run(now, now, variant.id)
+
+        // Back down to one portion, so it is the base again by being alone —
+        // the mirror of the demotion on add. Otherwise deleting "Large" would
+        // leave "Regular" printing its name forever.
+        const left = variants.filter((v) => v.id !== variant.id)
+        const sole = left.length === 1 ? left[0] : undefined
+        if (sole) {
+          app.db
+            .prepare(
+              `UPDATE menu_item_variants SET is_base = 1, updated_at = ?, synced_at = NULL
+               WHERE id = ?`,
+            )
+            .run(now, sole.id)
+        }
+      })()
 
       return { item: toPublicItem(item, loadVariants(app, [item.id]).get(item.id) ?? []) }
     },
   )
+}
+
+/**
+ * Demotes every other portion on an item, so at most one is ever the base.
+ *
+ * Two hidden portions would print two different dishes under the same name,
+ * which is worse than showing both.
+ */
+function clearOtherBases(
+  app: FastifyInstance,
+  itemId: string,
+  keepId: string,
+  now: string,
+): void {
+  app.db
+    .prepare(
+      `UPDATE menu_item_variants SET is_base = 0, updated_at = ?, synced_at = NULL
+       WHERE menu_item_id = ? AND id <> ? AND is_base = 1 AND deleted_at IS NULL`,
+    )
+    .run(now, itemId, keepId)
 }
 
 /** Loads variants for several items in one query rather than N. */

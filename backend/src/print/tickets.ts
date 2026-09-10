@@ -23,6 +23,15 @@ export type OrderType = 'dine_in' | 'takeaway' | 'delivery'
 export interface TicketLine {
   name: string
   variantName: string
+  /**
+   * Whether this portion is the plain one, snapshotted from the variant when
+   * the line was added.
+   *
+   * The bill leaves a base portion's name off — "Chicken Biryani (Regular)"
+   * tells the customer nothing. The KOT prints it regardless: the cook must
+   * never have to infer Full from the absence of Half.
+   */
+  variantIsBase?: boolean
   qty: number
   notes?: string | null
   /** Paise. Absent on a KOT, which never shows money. */
@@ -118,7 +127,9 @@ export function renderKot(data: KotData, paper: PaperWidth = '80mm'): Buffer {
     b.line(`${line.qty}  ${line.name}`)
     b.size(false).bold(false)
 
-    if (line.variantName && line.variantName !== 'Standard') {
+    // Always shown, base or not: an absence is not something to read at a hot
+    // pass, and a wrong portion is a remade dish.
+    if (line.variantName) {
       b.line(`    (${line.variantName})`)
     }
     if (line.notes) {
@@ -195,7 +206,7 @@ export function renderBill(data: BillData, paper: PaperWidth = '80mm'): Buffer {
   b.rule()
 
   for (const line of data.lines) {
-    const name = line.variantName && line.variantName !== 'Standard'
+    const name = line.variantName && !line.variantIsBase
       ? `${line.name} (${line.variantName})`
       : line.name
     const amount = formatMoney(line.lineTotal ?? 0)

@@ -382,18 +382,40 @@ Portions. **Every item has at least one.**
 |---|---|---|
 | `id` | `id` | |
 | `menu_item_id` | `fk` | |
-| `name` | `text` | "Half", "Full", "Standard" |
+| `name` | `text` | "Half", "Full", "Regular" |
 | `price` | `money` | Paise |
 | `sort_order` | `int` | |
 | `is_available` | `bool` | Full can sell out while Half remains |
+| `is_base` | `bool` | The plain portion, whose name the bill leaves off |
 
 ```sql
 UNIQUE (menu_item_id, name) WHERE deleted_at IS NULL
 ```
 
 **Invariant:** an item always has ≥1 non-deleted variant. Items created without
-portions get one named `Standard`. The last variant cannot be deleted. This keeps a
+portions get one named `Regular`. The last variant cannot be deleted. This keeps a
 single code path — `order_items` always points at a variant.
+
+**On `is_base`:** the portion a customer means when they say the dish name, so the
+bill prints "Chicken Biryani" rather than "Chicken Biryani (Regular)". Marked rather
+than inferred from the name, because the word is arbitrary — `Regular`, `Base`,
+`Normal` and `Standard` all mean the same thing and no list of them is complete.
+
+Maintained by the API, not by hand:
+
+- An item with **one** portion always has it set. It is alone, so there is nothing
+  to distinguish, whatever it is named.
+- Adding a second portion **clears** it, and deleting back down to one **restores**
+  it. Otherwise adding "Large" beside an auto-based "Regular" would keep printing
+  the regular size with no portion at all.
+- An item with **several** portions has none unless one is chosen. `Dry` and `Gravy`
+  cost the same and neither is a default; hiding either would print two different
+  dishes under one name.
+- **At most one per item.** Setting a base clears the previous one in the same
+  transaction — two hidden portions is the failure this prevents.
+
+The KOT ignores it and always prints the portion: a cook must never infer `Full`
+from the absence of `Half`.
 
 ### 3.10 `orders`
 
@@ -443,6 +465,7 @@ Every priced field is a **snapshot** — copied at add time, never read live fro
 | `variant_id` | `fk` | Reference only — never read for pricing |
 | `item_name` | `text` | **Snapshot** |
 | `variant_name` | `text` | **Snapshot** |
+| `variant_is_base` | `bool` | **Snapshot** — the bill leaves this portion's name off |
 | `unit_price` | `money` | **Snapshot** — paise |
 | `tax_rate` | `rate` | **Snapshot** — basis points |
 | `qty` | `int` | > 0 |

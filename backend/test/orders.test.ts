@@ -101,6 +101,7 @@ interface OrderPayload {
     id: string
     itemName: string
     variantName: string
+    variantIsBase: boolean
     unitPrice: number
     taxRate: number
     qty: number
@@ -947,5 +948,50 @@ test('a cancelled order is hidden from listings', async () => {
 
   const res = await ctx.app.inject({ method: 'GET', url: '/orders', headers: ctx.auth })
   assertEqual((res.json() as { orders: unknown[] }).orders.length, 0)
+  await close(ctx)
+})
+
+
+// --- the base portion snapshot ---
+
+test('an order line snapshots whether its portion is the base', async () => {
+  const ctx = await setup()
+  const order = await newOrder(ctx, { type: 'dine_in', tableId: ctx.tableId })
+
+  // Masala Tea has one portion, so it is the base. Biryani has Half and Full,
+  // so neither is.
+  const withTea = await addItem(ctx, order.id, { variantId: ctx.tea, qty: 1 })
+  assertEqual(withTea.items.find((i) => i.itemName === 'Masala Tea')?.variantIsBase, true)
+
+  const withBiryani = await addItem(ctx, order.id, { variantId: ctx.full, qty: 1 })
+  assertEqual(withBiryani.items.find((i) => i.variantName === 'Full')?.variantIsBase, false)
+
+  await close(ctx)
+})
+
+test('marking a base later does not change a line already ordered', async () => {
+  // The same rule as price and name: a bill means what it meant when issued.
+  // Reading is_base back from the menu at reprint time would let a menu edit
+  // restyle last month's bills.
+  const ctx = await setup()
+  const order = await newOrder(ctx, { type: 'dine_in', tableId: ctx.tableId })
+  await addItem(ctx, order.id, { variantId: ctx.full, qty: 1 })
+
+  const res = await ctx.app.inject({
+    method: 'PATCH',
+    url: `/menu-items/${
+      (ctx.db.prepare('SELECT menu_item_id AS id FROM menu_item_variants WHERE id = ?')
+        .get(ctx.full) as { id: string }).id
+    }/variants/${ctx.full}`,
+    headers: ctx.auth,
+    payload: { isBase: true },
+  })
+  assertEqual(res.statusCode, 200)
+
+  const snapshot = ctx.db
+    .prepare('SELECT variant_is_base AS b FROM order_items WHERE variant_id = ?')
+    .get(ctx.full) as { b: number }
+  assertEqual(snapshot.b, 0, 'the line still says what it said when ordered')
+
   await close(ctx)
 })

@@ -144,6 +144,8 @@ const BOOLEAN_COLUMNS = new Set([
   'print_logo',
   'is_active',
   'is_available',
+  'is_base',
+  'variant_is_base',
   'must_change_password',
   'was_printed',
   'was_paid',

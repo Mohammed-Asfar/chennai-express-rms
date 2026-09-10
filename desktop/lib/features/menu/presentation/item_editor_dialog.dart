@@ -87,7 +87,7 @@ class _ItemEditorDialogState extends ConsumerState<ItemEditorDialog> {
     } else {
       // A new dish starts with one unnamed portion, because the backend
       // guarantees every item has at least one.
-      _portions.add(_PortionRow(name: 'Standard'));
+      _portions.add(_PortionRow(name: 'Regular'));
     }
   }
 
@@ -326,6 +326,28 @@ class _ItemEditorDialogState extends ConsumerState<ItemEditorDialog> {
             ),
           ),
 
+          // Which portion the bill prints without its name. Only offered when
+          // there is a choice to make: a lone portion is the base by being
+          // alone, and a control saying so would only be a way to get it wrong.
+          //
+          // At most one, and never forced — Dry and Gravy cost the same and
+          // neither is a default, so hiding either would print two different
+          // dishes under one name.
+          if (_portions.length > 1)
+            Tooltip(
+              message: portion.isBase
+                  ? 'Printed on the bill as just the dish name'
+                  : 'Print this portion without naming it',
+              child: IconButton(
+                icon: Icon(
+                  portion.isBase ? Icons.label_off : Icons.label_outline,
+                  size: 18,
+                ),
+                isSelected: portion.isBase,
+                onPressed: _saving ? null : () => _setBase(index),
+              ),
+            ),
+
           // Removing the last portion would leave an item nobody can order, and
           // the backend rejects it anyway.
           IconButton(
@@ -336,6 +358,20 @@ class _ItemEditorDialogState extends ConsumerState<ItemEditorDialog> {
         ],
       ),
     );
+  }
+
+  /// Marks one portion as the plain one, or clears it if it already was.
+  ///
+  /// Exclusive by construction rather than by validation: setting one clears
+  /// the rest in the same frame, so two portions can never both be hidden.
+  void _setBase(int index) {
+    setState(() {
+      final wasBase = _portions[index].isBase;
+      for (final p in _portions) {
+        p.isBase = false;
+      }
+      _portions[index].isBase = !wasBase;
+    });
   }
 
   String? _validatePrice(String? value) {
@@ -429,6 +465,7 @@ class _ItemEditorDialogState extends ConsumerState<ItemEditorDialog> {
                 name: p.nameController.text.trim(),
                 price: Money.parse(p.priceController.text) ?? 0,
                 isAvailable: p.isAvailable,
+                isBase: p.isBase,
               ),
           ],
         );
@@ -476,7 +513,7 @@ class _ItemEditorDialogState extends ConsumerState<ItemEditorDialog> {
       final price = Money.parse(portion.priceController.text) ?? 0;
 
       if (portion.id == null) {
-        await repo.addVariant(item.id, name, price);
+        await repo.addVariant(item.id, name, price, isBase: portion.isBase);
         continue;
       }
 
@@ -484,13 +521,17 @@ class _ItemEditorDialogState extends ConsumerState<ItemEditorDialog> {
       final original = item.variants.firstWhere((v) => v.id == portion.id);
       if (original.name != name ||
           original.price != price ||
-          original.isAvailable != portion.isAvailable) {
+          original.isAvailable != portion.isAvailable ||
+          original.isBase != portion.isBase) {
         await repo.updateVariant(
           item.id,
           portion.id!,
           name: name,
           price: price,
           isAvailable: portion.isAvailable,
+          // Sent as a plain false too, so clearing the base reaches the backend
+          // rather than leaving the old one hidden.
+          isBase: portion.isBase,
         );
       }
     }
@@ -507,7 +548,13 @@ class _ItemEditorDialogState extends ConsumerState<ItemEditorDialog> {
 /// One editable portion row. Holds its own controllers so the list can grow and
 /// shrink without losing what is typed in the other rows.
 class _PortionRow {
-  _PortionRow({this.id, String name = '', int? price, this.isAvailable = true})
+  _PortionRow({
+    this.id,
+    String name = '',
+    int? price,
+    this.isAvailable = true,
+    this.isBase = false,
+  })
       : nameController = TextEditingController(text: name),
         priceController = TextEditingController(
           text: price == null ? '' : Money.format(price),
@@ -518,6 +565,7 @@ class _PortionRow {
         name: v.name,
         price: v.price,
         isAvailable: v.isAvailable,
+        isBase: v.isBase,
       );
 
   final String? id;
@@ -528,6 +576,9 @@ class _PortionRow {
   /// while the small one is still on — the order screen greys it out and
   /// refuses it, rather than the whole dish disappearing.
   bool isAvailable;
+
+  /// Whether the bill prints this portion without naming it.
+  bool isBase;
 
   void dispose() {
     nameController.dispose();

@@ -86,6 +86,7 @@ class MenuAdminRepository {
             'name': v.name,
             'price': v.price,
             if (!v.isAvailable) 'isAvailable': false,
+            if (v.isBase) 'isBase': true,
           },
       ],
     });
@@ -120,8 +121,17 @@ class MenuAdminRepository {
 
   // --- portions ---
 
-  Future<void> addVariant(String itemId, String name, int price) async {
-    await _api.post('/menu-items/$itemId/variants', {'name': name, 'price': price});
+  Future<void> addVariant(
+    String itemId,
+    String name,
+    int price, {
+    bool isBase = false,
+  }) async {
+    await _api.post('/menu-items/$itemId/variants', {
+      'name': name,
+      'price': price,
+      if (isBase) 'isBase': true,
+    });
   }
 
   Future<void> updateVariant(
@@ -130,11 +140,13 @@ class MenuAdminRepository {
     String? name,
     int? price,
     bool? isAvailable,
+    bool? isBase,
   }) async {
     await _api.patch('/menu-items/$itemId/variants/$variantId', {
       if (name != null) 'name': name,
       if (price != null) 'price': price,
       if (isAvailable != null) 'isAvailable': isAvailable,
+      if (isBase != null) 'isBase': isBase,
     });
   }
 

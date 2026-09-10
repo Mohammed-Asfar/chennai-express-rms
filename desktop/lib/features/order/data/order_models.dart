@@ -16,6 +16,7 @@ class OrderLine {
     required this.variantId,
     required this.itemName,
     required this.variantName,
+    this.variantIsBase = false,
     required this.unitPrice,
     required this.qty,
     required this.lineTotal,
@@ -29,6 +30,10 @@ class OrderLine {
   /// Snapshots taken when the line was added. The menu may have changed since.
   final String itemName;
   final String variantName;
+
+  /// Whether this is the plain portion, whose name the bill leaves off.
+  /// Snapshotted too, so marking a base later cannot restyle an old bill.
+  final bool variantIsBase;
   final int unitPrice;
 
   final int qty;
@@ -36,16 +41,18 @@ class OrderLine {
   final bool kotPrinted;
   final String? notes;
 
-  /// "Chicken Biryani" or "Chicken Biryani (Full)" — the portion is only worth
-  /// showing when the item has more than the default one.
+  /// Always names the portion, base or not. This list is what staff read back
+  /// to a customer and what the kitchen works from, and a portion inferred from
+  /// an absence is a portion got wrong. Only the bill hides the base.
   String get displayName =>
-      variantName == 'Standard' ? itemName : '$itemName ($variantName)';
+      variantName.isEmpty ? itemName : '$itemName ($variantName)';
 
   factory OrderLine.fromJson(Map<String, dynamic> json) => OrderLine(
         id: json['id'] as String,
         variantId: json['variantId'] as String,
         itemName: json['itemName'] as String,
         variantName: json['variantName'] as String,
+        variantIsBase: json['variantIsBase'] as bool? ?? false,
         unitPrice: json['unitPrice'] as int,
         qty: json['qty'] as int,
         lineTotal: json['lineTotal'] as int,

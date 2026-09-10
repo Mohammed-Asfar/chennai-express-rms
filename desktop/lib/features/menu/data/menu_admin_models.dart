@@ -38,6 +38,7 @@ class AdminVariant {
     required this.price,
     required this.sortOrder,
     required this.isAvailable,
+    this.isBase = false,
   });
 
   final String id;
@@ -48,12 +49,17 @@ class AdminVariant {
   final int sortOrder;
   final bool isAvailable;
 
+  /// The plain portion, whose name the bill leaves off. An item with one
+  /// portion is always its own base; with several, none is unless chosen.
+  final bool isBase;
+
   factory AdminVariant.fromJson(Map<String, dynamic> json) => AdminVariant(
         id: json['id'] as String,
         name: json['name'] as String,
         price: json['price'] as int,
         sortOrder: json['sortOrder'] as int? ?? 0,
         isAvailable: json['isAvailable'] as bool? ?? true,
+        isBase: json['isBase'] as bool? ?? false,
       );
 }
 
@@ -126,6 +132,7 @@ class VariantDraft {
     required this.name,
     required this.price,
     this.isAvailable = true,
+    this.isBase = false,
   });
 
   /// Null for a portion that has not been saved yet.
@@ -138,6 +145,9 @@ class VariantDraft {
   /// Whether it can be ordered. A portion sold out for the evening keeps its
   /// price and comes back with one tap.
   bool isAvailable;
+
+  /// Whether the bill leaves this portion's name off.
+  bool isBase;
 
   bool get isNew => id == null;
 }

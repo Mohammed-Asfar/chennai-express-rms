@@ -89,6 +89,7 @@ interface OrderItemRow {
   variant_id: string
   item_name: string
   variant_name: string
+  variant_is_base: number
   unit_price: number
   tax_rate: number
   qty: number
@@ -287,17 +288,20 @@ export async function orderRoutes(app: FastifyInstance): Promise<void> {
           app.db
             .prepare(
               `INSERT INTO order_items (id, order_id, variant_id, item_name, variant_name,
-                                        unit_price, tax_rate, qty, line_base, line_tax, line_total,
-                                        notes, created_at, updated_at)
-               VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+                                        variant_is_base, unit_price, tax_rate, qty, line_base,
+                                        line_tax, line_total, notes, created_at, updated_at)
+               VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
             )
             .run(
               randomUUID(),
               order.id,
               variant.id,
-              // Snapshots: renaming or repricing the dish must never alter this line.
+              // Snapshots: renaming or repricing the dish must never alter this
+              // line. Whether the portion is the plain one is snapshotted for the
+              // same reason — marking a base later must not restyle old bills.
               variant.item_name,
               variant.name,
+              variant.is_base,
               unitPrice,
               variant.tax_rate,
               body.qty,
@@ -627,6 +631,7 @@ function present(
       variantId: i.variant_id,
       itemName: i.item_name,
       variantName: i.variant_name,
+      variantIsBase: i.variant_is_base === 1,
       unitPrice: i.unit_price,
       taxRate: i.tax_rate,
       qty: i.qty,
@@ -748,6 +753,7 @@ interface VariantJoin {
   name: string
   price: number
   is_available: number
+  is_base: number
   item_name: string
   tax_rate: number
   item_available: number
@@ -781,7 +787,7 @@ function sectionSurcharge(db: Db, tableId: string | null): number | null {
 function loadOrderableVariant(app: FastifyInstance, branchId: string, variantId: string): VariantJoin {
   const row = app.db
     .prepare(
-      `SELECT v.id, v.name, v.price, v.is_available,
+      `SELECT v.id, v.name, v.price, v.is_available, v.is_base,
               m.name AS item_name, m.tax_rate, m.is_available AS item_available,
               m.ac_surcharge
        FROM menu_item_variants v
