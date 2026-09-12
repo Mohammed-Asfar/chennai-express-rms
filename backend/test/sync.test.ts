@@ -12,6 +12,8 @@ import {
   retryQuarantined,
   resyncMasterData,
   lastSyncedAt,
+  syncFailures,
+  unstampMissingParent,
 } from '../src/sync/push.js'
 import { SYNC_TABLES, NEVER_SYNCED, MAX_SYNC_ATTEMPTS, backoffMs } from '../src/sync/tables.js'
 import { setSetting } from '../src/lib/settings.js'
@@ -954,5 +956,138 @@ test('the idle heartbeat does not dial every minute', async () => {
   // interval, not the exact count on a shared CI runner.
   if (dials < 2) throw new Error(`the heartbeat never fired: ${dials} dials`)
 
+  db.close()
+})
+
+
+// --- why rows are stuck, and repairing a parent the cloud lost ---
+
+/** The message a live branch actually got, for three days running. */
+const FK_ERROR =
+  'insert or update on table "orders" violates foreign key constraint "orders_branch_id_fkey"'
+
+test('failures report the message the cloud gave, grouped', async () => {
+  const db = openDatabase(':memory:')
+  migrate(db)
+  await seedIfEmpty(db, env)
+
+  db.prepare('UPDATE branches SET synced_at = NULL, sync_error = ?, sync_attempts = 2').run(
+    FK_ERROR,
+  )
+
+  const failures = syncFailures(db)
+  assertEqual(failures.length, 1, 'one distinct message')
+  assertEqual(failures[0]!.table, 'branches')
+  assertEqual(failures[0]!.error, FK_ERROR, 'the cloud message, verbatim')
+  assertEqual(failures[0]!.count, 1)
+  assertEqual(failures[0]!.attempts, 2)
+  db.close()
+})
+
+test('a row that succeeded is not reported as a failure', async () => {
+  const db = openDatabase(':memory:')
+  migrate(db)
+  await seedIfEmpty(db, env)
+
+  // Stamped synced with a stale error from an earlier attempt: it landed, so it
+  // is not a problem and must not be shown as one.
+  db.prepare("UPDATE branches SET synced_at = '2026-09-09T00:00:00.000Z', sync_error = ?").run(
+    FK_ERROR,
+  )
+
+  assertEqual(syncFailures(db).length, 0)
+  db.close()
+})
+
+test('a rejected foreign key re-queues the parent the cloud is missing', async () => {
+  // The failure this exists for: the branch is stamped synced, so it is never
+  // selected again, while the cloud does not actually have it. Every order
+  // referencing it is refused forever and the till cannot notice on its own.
+  const db = openDatabase(':memory:')
+  migrate(db)
+  await seedIfEmpty(db, env)
+
+  db.prepare("UPDATE branches SET synced_at = '2026-09-05T15:08:37.483Z'").run()
+  assertEqual(
+    (db.prepare('SELECT COUNT(*) n FROM branches WHERE synced_at IS NULL').get() as { n: number })
+      .n,
+    0,
+    'the branch believes it is synced',
+  )
+
+  const unstamped = unstampMissingParent(db, FK_ERROR)
+
+  assertEqual(unstamped, 1, 'the branch was re-queued')
+  assertEqual(
+    (db.prepare('SELECT COUNT(*) n FROM branches WHERE synced_at IS NULL').get() as { n: number })
+      .n,
+    1,
+    'and will be picked up by the next cycle',
+  )
+  db.close()
+})
+
+test('a foreign key names its own parent, not whichever came first', async () => {
+  const db = openDatabase(':memory:')
+  migrate(db)
+  await seedIfEmpty(db, env)
+
+  db.prepare("UPDATE branches SET synced_at = '2026-09-05T00:00:00.000Z'").run()
+  db.prepare("UPDATE users SET synced_at = '2026-09-05T00:00:00.000Z'").run()
+
+  unstampMissingParent(
+    db,
+    'insert or update on table "bills" violates foreign key constraint "bills_voided_by_fkey"',
+  )
+
+  const branches = db
+    .prepare('SELECT COUNT(*) n FROM branches WHERE synced_at IS NULL')
+    .get() as { n: number }
+  const users = db.prepare('SELECT COUNT(*) n FROM users WHERE synced_at IS NULL').get() as {
+    n: number
+  }
+
+  assertEqual(users.n > 0, true, 'voided_by points at users, so users is re-queued')
+  assertEqual(branches.n, 0, 'branches was not implicated and is left alone')
+  db.close()
+})
+
+test('an error that is not a foreign key re-queues nothing', async () => {
+  // Re-pushing master data on every unrelated failure would be a self-inflicted
+  // outage on a branch with a genuinely broken column.
+  const db = openDatabase(':memory:')
+  migrate(db)
+  await seedIfEmpty(db, env)
+
+  db.prepare("UPDATE branches SET synced_at = '2026-09-05T00:00:00.000Z'").run()
+
+  assertEqual(unstampMissingParent(db, 'connection terminated unexpectedly'), 0)
+  assertEqual(
+    unstampMissingParent(db, 'column "surcharge" of relation "sections" does not exist'),
+    0,
+  )
+  assertEqual(
+    (db.prepare('SELECT COUNT(*) n FROM branches WHERE synced_at IS NULL').get() as { n: number })
+      .n,
+    0,
+    'the branch is left stamped',
+  )
+  db.close()
+})
+
+test('re-queuing a parent does not restart a pending row backoff', async () => {
+  // A parent already waiting to be sent is being dealt with. Clearing its
+  // attempt count would push its next try further away, not closer.
+  const db = openDatabase(':memory:')
+  migrate(db)
+  await seedIfEmpty(db, env)
+
+  db.prepare('UPDATE branches SET synced_at = NULL, sync_attempts = 3').run()
+  unstampMissingParent(db, FK_ERROR)
+
+  const row = db.prepare('SELECT sync_attempts FROM branches LIMIT 1').get() as {
+    sync_attempts: number
+  }
+  assertEqual(row.sync_attempts, 3, 'its attempt history is untouched')
   db.close()
 })

@@ -89,6 +89,30 @@ node -e "const m=require('fs').readFileSync('.env','utf8').match(/CLOUD_DATABASE
 Migrations that only add columns are survivable if you get this wrong. One that
 rewrites a table is not.
 
+### Refresh the certificate roots
+
+```bash
+cd backend
+npm run ca:refresh
+```
+
+Rewrites `desktop/assets/ca_roots.pem` from the root set built into the Node you
+run it on, then connects to the download hosts using only those roots and fails
+if either does not verify.
+
+The app validates the installer download against this bundle instead of the
+Windows certificate store, because a till's store is routinely missing issuers
+Windows was supposed to fetch on demand — that is what stopped a branch
+installing 1.0.7, with `CERTIFICATE_VERIFY_FAILED: unable to get local issuer
+certificate` while the update check itself worked fine.
+
+**This is the one file that cannot be fixed from the field.** Roots expire and
+get withdrawn; once the bundle can no longer verify the download host, the app
+that would fetch its own replacement is the app that can no longer connect. The
+fix at that point is a manual install on every till. Refresh it at release time,
+and run it on a current Node — the bundle is only as fresh as the Node that
+generated it.
+
 ---
 
 ## 1. Bump the version

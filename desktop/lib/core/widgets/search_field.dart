@@ -13,6 +13,8 @@ class SearchField extends StatefulWidget {
     required this.hintText,
     required this.onChanged,
     this.autofocus = false,
+    this.controller,
+    this.focusNode,
   });
 
   final String hintText;
@@ -22,48 +24,64 @@ class SearchField extends StatefulWidget {
 
   final bool autofocus;
 
+  /// Supply both to drive the box from outside — the order screen clears and
+  /// refocuses it after each item is added, so the next dish can be typed
+  /// without reaching for the mouse.
+  ///
+  /// A caller that passes these owns them, and disposes them. Omit them and the
+  /// field manages its own, which is what the screens that only ever filter do.
+  final TextEditingController? controller;
+  final FocusNode? focusNode;
+
   @override
   State<SearchField> createState() => _SearchFieldState();
 }
 
 class _SearchFieldState extends State<SearchField> {
-  final _controller = TextEditingController();
+  TextEditingController? _ownedController;
+
+  TextEditingController get _controller =>
+      widget.controller ?? (_ownedController ??= TextEditingController());
 
   @override
   void dispose() {
-    _controller.dispose();
+    // Only what this widget created. Disposing a caller's controller would
+    // break the next field built with it.
+    _ownedController?.dispose();
     super.dispose();
   }
 
   @override
   Widget build(BuildContext context) {
-    return TextField(
-      controller: _controller,
-      autofocus: widget.autofocus,
-      decoration: InputDecoration(
-        hintText: widget.hintText,
-        prefixIcon: const Icon(Icons.search, size: 20),
-        isDense: true,
-        // A clear button rather than only backspace: a stale query is the
-        // reason a list looks empty, and getting back to everything should be
-        // one tap.
-        suffixIcon: _controller.text.isEmpty
-            ? null
-            : IconButton(
-                icon: const Icon(Icons.close, size: 18),
-                tooltip: 'Clear',
-                onPressed: () {
-                  _controller.clear();
-                  widget.onChanged('');
-                  setState(() {});
-                },
-              ),
+    // Listening to the controller rather than rebuilding from onChanged: the
+    // text can also be cleared by whoever owns the controller, and a clear
+    // button still showing over an empty box would be a lie.
+    return ValueListenableBuilder<TextEditingValue>(
+      valueListenable: _controller,
+      builder: (context, value, _) => TextField(
+        controller: _controller,
+        focusNode: widget.focusNode,
+        autofocus: widget.autofocus,
+        decoration: InputDecoration(
+          hintText: widget.hintText,
+          prefixIcon: const Icon(Icons.search, size: 20),
+          isDense: true,
+          // A clear button rather than only backspace: a stale query is the
+          // reason a list looks empty, and getting back to everything should be
+          // one tap.
+          suffixIcon: value.text.isEmpty
+              ? null
+              : IconButton(
+                  icon: const Icon(Icons.close, size: 18),
+                  tooltip: 'Clear',
+                  onPressed: () {
+                    _controller.clear();
+                    widget.onChanged('');
+                  },
+                ),
+        ),
+        onChanged: (value) => widget.onChanged(value.trim().toLowerCase()),
       ),
-      onChanged: (value) {
-        widget.onChanged(value.trim().toLowerCase());
-        // Rebuilds only to show or hide the clear button.
-        setState(() {});
-      },
     );
   }
 }

@@ -6,6 +6,11 @@ export interface PushResult {
   pushed: number
   failed: number
   quarantined: number
+  /**
+   * Master rows re-queued this run because a child was rejected for
+   * referencing them. Non-zero means the next cycle should repair itself.
+   */
+  unstamped: number
   /** Tables that hit an error this run, with the first message seen. */
   errors: { table: string; message: string }[]
 }
@@ -29,7 +34,13 @@ export async function pushPending(
 ): Promise<PushResult> {
   const batchSize = options.batchSize ?? 200
   const now = options.now ?? new Date()
-  const result: PushResult = { pushed: 0, failed: 0, quarantined: 0, errors: [] }
+  const result: PushResult = {
+    pushed: 0,
+    failed: 0,
+    quarantined: 0,
+    unstamped: 0,
+    errors: [],
+  }
 
   // Strictly in order: a child arriving before its parent is rejected.
   for (const table of SYNC_TABLES) {
@@ -38,6 +49,7 @@ export async function pushPending(
       result.pushed += outcome.pushed
       result.failed += outcome.failed
       result.quarantined += outcome.quarantined
+      result.unstamped += outcome.unstamped
       if (outcome.error) result.errors.push({ table: table.name, message: outcome.error })
     } catch (error) {
       // A whole-table failure (connection lost mid-run) stops this cycle for
@@ -54,6 +66,8 @@ interface TableOutcome {
   pushed: number
   failed: number
   quarantined: number
+  /** Parent rows re-queued because the cloud turned out not to have them. */
+  unstamped: number
   error?: string
 }
 
@@ -64,7 +78,7 @@ async function pushTable(
   batchSize: number,
   now: Date,
 ): Promise<TableOutcome> {
-  const outcome: TableOutcome = { pushed: 0, failed: 0, quarantined: 0 }
+  const outcome: TableOutcome = { pushed: 0, failed: 0, quarantined: 0, unstamped: 0 }
   const rows = selectPending(db, table, batchSize, now)
   if (rows.length === 0) return outcome
 
@@ -89,6 +103,9 @@ async function pushTable(
           const attempts = recordFailure(db, table, row, message, now)
           if (attempts >= MAX_SYNC_ATTEMPTS) outcome.quarantined += 1
         }
+        // A missing parent is repairable, and waiting for someone to notice is
+        // not good enough — the branch stops backing up until they do.
+        outcome.unstamped += unstampMissingParent(db, message)
         outcome.error ??= message
       }
     }
@@ -281,6 +298,104 @@ export function syncCounts(db: Db): { pending: number; quarantined: number } {
   }
 
   return { pending, quarantined }
+}
+
+/**
+ * The master tables a business row can point at, by the column naming them.
+ *
+ * Only these: re-pushing a parent is a handful of rows, whereas treating any
+ * rejection as a reason to re-push business tables would turn one missing user
+ * into thousands of re-uploaded bills.
+ */
+const PARENT_OF: Record<string, string> = {
+  branch_id: 'branches',
+  created_by: 'users',
+  voided_by: 'users',
+  user_id: 'users',
+  section_id: 'sections',
+  table_id: 'tables',
+  category_id: 'categories',
+}
+
+/**
+ * Re-queues a parent the cloud turns out not to have.
+ *
+ * A row stamped `synced_at` is never selected again, so when the cloud copy is
+ * missing — restored from an older backup, wiped, or never actually committed —
+ * the till has no way to find out. Its children fail their foreign key forever
+ * while the parent sits marked done, and the branch silently stops backing up.
+ * A live branch sat like that for three days.
+ *
+ * [resyncMasterData] fixes this too, but only when a person presses the button,
+ * and only if they know to. Clearing the stamp here means the next cycle
+ * repairs it — the push is an idempotent upsert, so re-sending a parent that
+ * was actually fine costs one row.
+ *
+ * Returns how many rows were re-queued, so a cycle can report that it expects
+ * to do better next time rather than looking identical to one that cannot.
+ */
+export function unstampMissingParent(db: Db, message: string): number {
+  // Postgres names the constraint it rejected:
+  //   insert or update on table "orders" violates foreign key constraint
+  //   "orders_branch_id_fkey"
+  const constraint = /violates foreign key constraint "([^"]+)"/.exec(message)?.[1]
+  if (!constraint) return 0
+
+  const column = Object.keys(PARENT_OF).find((c) => constraint.includes(`_${c}_fkey`))
+  const parent = column ? PARENT_OF[column] : undefined
+  if (!parent) return 0
+
+  // Only rows that believe they are synced. A parent already queued is being
+  // dealt with, and clearing its attempt count would restart its backoff.
+  const info = db
+    .prepare(`UPDATE ${parent} SET synced_at = NULL WHERE synced_at IS NOT NULL`)
+    .run()
+
+  return info.changes
+}
+
+export interface SyncFailure {
+  table: string
+  error: string
+  count: number
+  attempts: number
+  oldest: string | null
+}
+
+/**
+ * Why rows are not reaching the cloud, grouped by the message the cloud gave.
+ *
+ * `sync_error` was recorded on every failure from the start and read by nothing,
+ * so a branch could say "28 stuck" and not one word about why. Diagnosing it
+ * meant reading the server log on the till, which is not something a restaurant
+ * can do — and the answer was already sitting in a column.
+ *
+ * Grouped rather than listed per row: thirty bills rejected by one foreign key
+ * are one problem, and thirty copies of the same sentence hide that.
+ */
+export function syncFailures(db: Db): SyncFailure[] {
+  const failures: SyncFailure[] = []
+
+  for (const table of SYNC_TABLES) {
+    if (!table.tracked) continue
+    const rows = db
+      .prepare(
+        `SELECT sync_error AS error,
+                COUNT(*)   AS count,
+                MAX(sync_attempts) AS attempts,
+                MIN(updated_at)    AS oldest
+         FROM ${table.name}
+         WHERE synced_at IS NULL AND sync_error IS NOT NULL
+         GROUP BY sync_error`,
+      )
+      .all() as { error: string; count: number; attempts: number; oldest: string | null }[]
+
+    for (const row of rows) failures.push({ table: table.name, ...row })
+  }
+
+  // Worst first: the biggest group is usually the cause, and the rest follow
+  // from it — children failing on a parent that never landed.
+  return failures.sort((a, b) => b.count - a.count)
 }
 
 /**

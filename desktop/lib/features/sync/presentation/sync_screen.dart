@@ -85,6 +85,14 @@ class _SyncScreenState extends ConsumerState<SyncScreen> {
           padding: const EdgeInsets.all(AppSpacing.lg),
           children: [
             _Verdict(status: value),
+
+            // Only when something is actually stuck. On a healthy branch this
+            // is silent rather than a reassuring empty panel.
+            if (value.quarantined > 0 || value.pending > 0) ...[
+              const SizedBox(height: AppSpacing.md),
+              const _WhyStuck(),
+            ],
+
             const SizedBox(height: AppSpacing.lg),
 
             _Facts(status: value),
@@ -370,6 +378,70 @@ class _Verdict extends StatelessWidget {
           ),
         ],
       ),
+    );
+  }
+}
+
+/// What the cloud objected to, in words, above the raw message.
+///
+/// The screen could say "28 stuck" and nothing about why, so diagnosing a
+/// branch meant reading the server log on the till — while the reason sat
+/// recorded in the database, written on every failure and read by nothing.
+class _WhyStuck extends ConsumerWidget {
+  const _WhyStuck();
+
+  @override
+  Widget build(BuildContext context, WidgetRef ref) {
+    final theme = Theme.of(context);
+    final failures = ref.watch(syncFailuresProvider);
+
+    return failures.maybeWhen(
+      orElse: () => const SizedBox.shrink(),
+      data: (list) {
+        if (list.isEmpty) return const SizedBox.shrink();
+
+        return Container(
+          padding: const EdgeInsets.all(AppSpacing.md),
+          decoration: BoxDecoration(
+            color: AppColors.surface,
+            borderRadius: BorderRadius.circular(AppSpacing.radiusMd),
+            border: Border.all(color: AppColors.border),
+          ),
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              Text('Why they are not going up', style: theme.textTheme.titleSmall),
+              const SizedBox(height: AppSpacing.sm),
+              for (final failure in list) ...[
+                Padding(
+                  padding: const EdgeInsets.only(bottom: AppSpacing.sm),
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      Text(
+                        '${failure.count} in ${failure.table}',
+                        style: theme.textTheme.bodyMedium?.copyWith(
+                          fontWeight: FontWeight.w600,
+                        ),
+                      ),
+                      Text(failure.plain, style: theme.textTheme.bodyMedium),
+                      const SizedBox(height: AppSpacing.xs),
+                      // The unedited message as well: the sentence above is for
+                      // the restaurant, this is what support needs to act on.
+                      SelectableText(
+                        failure.error,
+                        style: theme.textTheme.bodySmall?.copyWith(
+                          color: AppColors.inkMuted,
+                        ),
+                      ),
+                    ],
+                  ),
+                ),
+              ],
+            ],
+          ),
+        );
+      },
     );
   }
 }

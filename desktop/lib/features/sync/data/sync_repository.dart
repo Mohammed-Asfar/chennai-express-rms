@@ -76,6 +76,112 @@ class SyncStatus {
   );
 }
 
+/// Why rows are not reaching the cloud, as the cloud itself put it.
+///
+/// The status says how many are stuck; this says what was actually objected to.
+/// Without it the only way to find out was the server log on the till, which is
+/// not something a restaurant can read.
+class SyncFailure {
+  const SyncFailure({
+    required this.table,
+    required this.error,
+    required this.count,
+    required this.attempts,
+  });
+
+  /// The table whose rows were refused — "orders", "bills".
+  final String table;
+
+  /// The database's own message, unedited. Support needs the real text.
+  final String error;
+
+  final int count;
+  final int attempts;
+
+  /// The message with the parts a person can act on, and none of the rest.
+  ///
+  /// A foreign key failure reads as
+  /// `insert or update on table "orders" violates foreign key constraint
+  /// "orders_branch_id_fkey"`, which says the same thing three times and buries
+  /// the one useful word. What it means is that something this row points at is
+  /// not in the cloud yet.
+  String get plain {
+    // Matched against the known foreign-key columns rather than by splitting
+    // the constraint name: a table whose own name contains an underscore
+    // ("order_items_menu_item_variant_id_fkey") cannot be split reliably, and
+    // the column is the only part that says what is missing.
+    final fk = RegExp(r'violates foreign key constraint "(\w+)_fkey"')
+        .firstMatch(error);
+    if (fk != null) {
+      final constraint = fk.group(1)!;
+      final column = _foreignKeyColumns.firstWhere(
+        (c) => constraint.endsWith('_$c'),
+        orElse: () => '',
+      );
+      if (column.isNotEmpty) {
+        return 'Waiting for the ${_parentName(column)} record to reach the '
+            'cloud first.';
+      }
+      return 'Something this record points at has not reached the cloud yet.';
+    }
+
+    if (error.contains('does not exist')) {
+      return 'The cloud is missing a column this version sends. It needs updating.';
+    }
+    if (error.contains('connection') || error.contains('timeout')) {
+      return 'The connection dropped part way through.';
+    }
+    return error;
+  }
+
+  /// Longest first, so `menu_item_variant_id` wins over `variant_id`.
+  static const _foreignKeyColumns = [
+    'menu_item_variant_id',
+    'reservation_id',
+    'category_id',
+    'section_id',
+    'created_by',
+    'voided_by',
+    'branch_id',
+    'variant_id',
+    'order_id',
+    'table_id',
+    'user_id',
+    'bill_id',
+    'item_id',
+  ];
+
+  static String _parentName(String column) {
+    switch (column) {
+      case 'branch_id':
+        return 'restaurant';
+      case 'created_by':
+      case 'voided_by':
+      case 'user_id':
+        return 'staff';
+      case 'table_id':
+        return 'table';
+      case 'section_id':
+        return 'section';
+      case 'category_id':
+        return 'category';
+      case 'order_id':
+        return 'order';
+      case 'bill_id':
+        return 'bill';
+      default:
+        return column.replaceAll('_id', '').replaceAll('_', ' ');
+    }
+  }
+
+  factory SyncFailure.fromJson(Map<String, dynamic> json) => SyncFailure(
+    table: json['table'] as String? ?? '',
+    error: json['error'] as String? ?? '',
+    count: json['count'] as int? ?? 0,
+    attempts: json['attempts'] as int? ?? 0,
+  );
+}
+
 /// How much cloud room the backup is using.
 ///
 /// The question behind it is commercial: a restaurant on a free plan wants to
@@ -180,6 +286,17 @@ class SyncRepository {
     return SyncStatus.fromJson(json['status'] as Map<String, dynamic>);
   }
 
+  /// What the cloud objected to, grouped by message.
+  ///
+  /// Empty is the normal answer and not an error — nothing is wrong.
+  Future<List<SyncFailure>> failures() async {
+    final json = await _api.get('/sync/errors');
+    final list = json['failures'] as List<dynamic>? ?? const [];
+    return list
+        .map((e) => SyncFailure.fromJson(e as Map<String, dynamic>))
+        .toList();
+  }
+
   /// Clears quarantine and pushes again.
   ///
   /// Needed after the cause is fixed — a cloud migration, usually. Without it
@@ -196,6 +313,11 @@ final syncRepositoryProvider = Provider<SyncRepository>((ref) {
 
 final syncStatusProvider = FutureProvider<SyncStatus>((ref) {
   return ref.watch(syncRepositoryProvider).status();
+});
+
+/// Why rows are stuck. Empty when nothing is.
+final syncFailuresProvider = FutureProvider<List<SyncFailure>>((ref) {
+  return ref.watch(syncRepositoryProvider).failures();
 });
 
 /// The live status, pushed over a websocket.
