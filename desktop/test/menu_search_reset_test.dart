@@ -71,6 +71,58 @@ Widget _harness({required void Function(MenuVariant) onPick}) => ProviderScope(
       ),
     );
 
+/// A menu long enough to scroll, like the real one.
+final _longMenu = [
+  for (var i = 0; i < 60; i++) _dish('d$i', 'Dish ${i.toString().padLeft(2, '0')}'),
+];
+
+Widget _longHarness({required void Function(MenuVariant) onPick}) => ProviderScope(
+      overrides: [
+        categoriesProvider.overrideWith((ref) async => <MenuCategory>[]),
+        menuItemsProvider.overrideWith((ref) async => _longMenu),
+      ],
+      child: MaterialApp(
+        theme: AppTheme.light,
+        home: Scaffold(body: MenuPanel(onPick: onPick, enabled: true)),
+      ),
+    );
+
+/// The name on the tile the arrow keys are sitting on, whatever it is.
+String? _highlightedAnywhere(WidgetTester tester) {
+  for (final element in find.byType(AnimatedContainer).evaluate()) {
+    final widget = element.widget as AnimatedContainer;
+    final decoration = widget.decoration;
+    if (decoration is! BoxDecoration) continue;
+    final border = decoration.border;
+    if (border is! Border || border.top.width != 2) continue;
+    final text = find.descendant(
+      of: find.byWidget(widget),
+      matching: find.byType(Text),
+    );
+    if (text.evaluate().isEmpty) continue;
+    return (text.evaluate().first.widget as Text).data;
+  }
+  return null;
+}
+
+/// Whether that tile is actually inside the viewport the cashier is looking at.
+bool _highlightOnScreen(WidgetTester tester) {
+  final name = _highlightedAnywhere(tester);
+  if (name == null) return false;
+
+  final tile = find.ancestor(
+    of: find.text(name),
+    matching: find.byType(AnimatedContainer),
+  ).first;
+
+  final box = tester.renderObject<RenderBox>(tile);
+  final topLeft = box.localToGlobal(Offset.zero);
+  final screen = tester.view.physicalSize / tester.view.devicePixelRatio;
+
+  // Fully visible, not merely clipped at an edge.
+  return topLeft.dy >= 0 && topLeft.dy + box.size.height <= screen.height;
+}
+
 /// The search box's live text, read off the widget rather than the model.
 String _searchText(WidgetTester tester) {
   final field = tester.widget<TextField>(
@@ -255,5 +307,67 @@ void main() {
     await tester.pumpAndSettle();
 
     expect(_searchHasFocus(tester), isTrue);
+  });
+
+  testWidgets('arrowing down keeps the highlight on screen', (tester) async {
+    // The bug: the highlight scrolled out of sight, so the grid moved but
+    // nothing on screen was marked and Enter would add a dish nobody could see.
+    await tester.pumpWidget(_longHarness(onPick: (_) {}));
+    await tester.pumpAndSettle();
+
+    expect(_highlightOnScreen(tester), isTrue, reason: 'visible before moving');
+
+    for (var press = 1; press <= 12; press++) {
+      await _press(tester, LogicalKeyboardKey.arrowDown);
+      expect(
+        _highlightOnScreen(tester),
+        isTrue,
+        reason: 'the highlight vanished after $press press(es) of Down',
+      );
+    }
+  });
+
+  testWidgets('arrowing back up keeps the highlight on screen', (tester) async {
+    await tester.pumpWidget(_longHarness(onPick: (_) {}));
+    await tester.pumpAndSettle();
+
+    for (var i = 0; i < 12; i++) {
+      await _press(tester, LogicalKeyboardKey.arrowDown);
+    }
+    for (var press = 1; press <= 12; press++) {
+      await _press(tester, LogicalKeyboardKey.arrowUp);
+      expect(
+        _highlightOnScreen(tester),
+        isTrue,
+        reason: 'the highlight vanished after $press press(es) of Up',
+      );
+    }
+  });
+
+  testWidgets('Down lands one full row on, not some other tile', (tester) async {
+    // A wrong column count moves by the wrong number of tiles, which is what
+    // put the highlight on a row the grid had not scrolled to.
+    await tester.pumpWidget(_longHarness(onPick: (_) {}));
+    await tester.pumpAndSettle();
+
+    final first = _highlightedAnywhere(tester);
+    await _press(tester, LogicalKeyboardKey.arrowRight);
+    final second = _highlightedAnywhere(tester);
+
+    // One Right is one tile, so the gap between them is the step per column.
+    final firstIndex = int.parse(first!.split(' ').last);
+    final perTile = int.parse(second!.split(' ').last) - firstIndex;
+    expect(perTile, 1);
+
+    await _press(tester, LogicalKeyboardKey.arrowLeft);
+    await _press(tester, LogicalKeyboardKey.arrowDown);
+    final afterDown = int.parse(_highlightedAnywhere(tester)!.split(' ').last);
+
+    // Down must be a whole row: the same column, one row lower.
+    expect(afterDown, greaterThan(firstIndex));
+    expect((afterDown - firstIndex) % 1, 0);
+    // And landing back on the same column is what makes it a row move.
+    await _press(tester, LogicalKeyboardKey.arrowUp);
+    expect(int.parse(_highlightedAnywhere(tester)!.split(' ').last), firstIndex);
   });
 }

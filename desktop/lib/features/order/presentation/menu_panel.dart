@@ -79,15 +79,24 @@ class _MenuPanelState extends ConsumerState<MenuPanel> {
   /// tile would mean the next keystroke went nowhere.
   int _highlight = 0;
 
+  // The grid's own geometry, repeated here because the scroll offset of a row
+  // has to be worked out before that row has been built.
+  static const double _tileExtent = 200;
+  static const double _tileHeight = 104;
+  static const double _gridSpacing = AppSpacing.md;
+  static const double _gridPadding = AppSpacing.lg;
+
   /// How many tiles fit across, matching the grid's own arithmetic.
   ///
-  /// Up and Down move by a row, so this has to be the real column count. It
-  /// mirrors SliverGridDelegateWithMaxCrossAxisExtent: ceil of the available
-  /// width over the max extent, with the spacing accounted for.
+  /// Up and Down move by a row, so this has to be the real column count, and
+  /// [width] must be the width the grid is laid out in — not the panel's, which
+  /// includes the category rail.
+  ///
+  /// Mirrors SliverGridDelegateWithMaxCrossAxisExtent: it fits
+  /// ceil(width / (maxExtent + spacing)) columns into the padded width.
   int _columns(double width) {
-    const maxExtent = 200.0;
-    const spacing = AppSpacing.md;
-    final count = (width / (maxExtent + spacing)).ceil();
+    final usable = width - _gridPadding * 2;
+    final count = (usable / (_tileExtent + _gridSpacing)).ceil();
     return count < 1 ? 1 : count;
   }
 
@@ -96,35 +105,52 @@ class _MenuPanelState extends ConsumerState<MenuPanel> {
   /// Clamped rather than wrapped: arrowing off the last dish and landing back
   /// on the first reads as the list having jumped, and a cashier holding Down
   /// to reach the end would cycle past it forever.
-  void _move(int delta, int count) {
+  void _move(int delta, int count, int columns) {
     if (count == 0) return;
     final next = (_highlight + delta).clamp(0, count - 1);
     if (next == _highlight) return;
     setState(() => _highlight = next);
-    _revealHighlight(next);
+    _revealHighlight(next, columns);
   }
 
   /// Brings the highlighted tile into view when arrowing past the fold.
   ///
-  /// The grid is taller than the panel on a full menu, and a selection that has
+  /// The grid is taller than the panel on a full menu, and a highlight that has
   /// scrolled out of sight is worse than none — the cashier presses Enter on a
   /// dish they cannot see.
-  void _revealHighlight(int index) {
+  ///
+  /// [columns] is passed in rather than recomputed: the only width available
+  /// here is the whole panel's, which is wider than the grid by the category
+  /// rail, and one column too many puts the highlight on the wrong row.
+  void _revealHighlight(int index, int columns) {
     if (!_gridScroll.hasClients) return;
 
-    const rowHeight = 104.0 + AppSpacing.md;
-    final position = _gridScroll.position;
-    final row = index ~/ _columns(context.size?.width ?? position.viewportDimension);
-    final top = row * rowHeight;
-    final bottom = top + rowHeight;
+    // Laid out after the frame, because the row that has just been highlighted
+    // may not have been built yet and the scroll extent would be short.
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      if (!mounted || !_gridScroll.hasClients) return;
 
-    if (top < position.pixels) {
-      _gridScroll.jumpTo(top.clamp(0.0, position.maxScrollExtent));
-    } else if (bottom > position.pixels + position.viewportDimension) {
-      _gridScroll.jumpTo(
-        (bottom - position.viewportDimension).clamp(0.0, position.maxScrollExtent),
-      );
-    }
+      final position = _gridScroll.position;
+      const rowStride = _tileHeight + _gridSpacing;
+
+      // Rows sit below the grid's top padding, and the last one is followed by
+      // the bottom padding — both count toward the offset a row rests at.
+      final top = _gridPadding + (index ~/ columns) * rowStride;
+      final bottom = top + _tileHeight;
+
+      final double target;
+      if (top < position.pixels) {
+        // Off the top: bring the row's padding edge to the top of the viewport.
+        target = top - _gridPadding;
+      } else if (bottom > position.pixels + position.viewportDimension) {
+        // Off the bottom: sit the row against the bottom edge.
+        target = bottom + _gridPadding - position.viewportDimension;
+      } else {
+        return;
+      }
+
+      _gridScroll.jumpTo(target.clamp(0.0, position.maxScrollExtent));
+    });
   }
 
   /// The dishes currently on show, in grid order.
@@ -155,13 +181,13 @@ class _MenuPanelState extends ConsumerState<MenuPanel> {
     final key = event.logicalKey;
 
     if (key == LogicalKeyboardKey.arrowRight) {
-      _move(1, visible.length);
+      _move(1, visible.length, columns);
     } else if (key == LogicalKeyboardKey.arrowLeft) {
-      _move(-1, visible.length);
+      _move(-1, visible.length, columns);
     } else if (key == LogicalKeyboardKey.arrowDown) {
-      _move(columns, visible.length);
+      _move(columns, visible.length, columns);
     } else if (key == LogicalKeyboardKey.arrowUp) {
-      _move(-columns, visible.length);
+      _move(-columns, visible.length, columns);
     } else if (key == LogicalKeyboardKey.enter ||
         key == LogicalKeyboardKey.numpadEnter) {
       // Down only, never repeat. Arrows are fine to hold; Enter held down
