@@ -156,7 +156,14 @@ function dpapi(direction: 'Protect' | 'Unprotect', input: string): string {
       input,
       encoding: 'utf8',
       windowsHide: true,
-      timeout: 15_000,
+      // Generous, because this is a guard against a hung process rather than a
+      // check on anything. A DPAPI call costs well under a second once Windows
+      // has started PowerShell and loaded System.Security, but the *first* one
+      // on a cold machine pays for both. At 15s that was enough to time out a
+      // CI runner mid-release while every later call in the same run passed —
+      // the failure mode is a spurious one, so the limit only needs to be low
+      // enough to notice a process that is never coming back.
+      timeout: 60_000,
       stdio: ['pipe', 'pipe', 'ignore'],
     },
   )
