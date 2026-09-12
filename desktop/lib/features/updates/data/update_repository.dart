@@ -2,17 +2,31 @@ import 'dart:io';
 import 'package:crypto/crypto.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import 'package:http/http.dart' as http;
+import 'package:http/io_client.dart';
 import 'package:path_provider/path_provider.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 import '../../../core/api/api_client.dart';
+import '../../../core/api/ca_trust.dart';
 import '../../../core/api/api_exception.dart';
 import '../../../core/api/providers.dart';
 import 'release_info.dart';
 
 class UpdateRepository {
-  UpdateRepository(this._api);
+  UpdateRepository(this._api, {Future<http.Client> Function()? downloadClient})
+      : _downloadClient = downloadClient ?? _defaultDownloadClient;
 
   final ApiClient _api;
+
+  /// Opens the client used to fetch the installer.
+  ///
+  /// Injectable so a test can exercise the download without a network, and so
+  /// the CA bundle is loaded lazily — reading it at construction would pull an
+  /// asset in on every screen that touches this repository.
+  final Future<http.Client> Function() _downloadClient;
+
+  static Future<http.Client> _defaultDownloadClient() async =>
+      IOClient(await CaTrust.httpClient());
+
   static const _dismissedKey = 'update_dismissed_build';
   static const _dismissedDateKey = 'update_dismissed_date';
 
@@ -45,11 +59,14 @@ class UpdateRepository {
 
   static String _today() => DateTime.now().toIso8601String().split('T').first;
 
-  /// Downloads the installer and verifies its checksum.
+  /// Downloads the installer and verifies its size and checksum.
   ///
-  /// Throws if the SHA-256 does not match. The app is about to execute this file
-  /// on the billing PC — running an unverified binary is the worst outcome in the
+  /// Throws if either does not match. The app is about to execute this file on
+  /// the billing PC — running an unverified binary is the worst outcome in the
   /// system, so a mismatch aborts and the downloaded file is deleted.
+  ///
+  /// TLS is validated against the roots bundled with the app rather than the
+  /// Windows store. See [CaTrust].
   Future<File> download(
     ReleaseInfo release, {
     required void Function(int received, int total) onProgress,
@@ -59,7 +76,7 @@ class UpdateRepository {
     final file = File('${dir.path}/chennai-express-${release.version}.exe');
     if (await file.exists()) await file.delete();
 
-    final client = http.Client();
+    final client = await _downloadClient();
     try {
       final request = http.Request('GET', Uri.parse(release.downloadUrl));
       final response = await client.send(request);
@@ -87,6 +104,18 @@ class UpdateRepository {
         await sink.close();
       }
 
+      // Size before hash, because the two failures mean different things: a
+      // hash mismatch says the bytes are wrong, a size mismatch says how. The
+      // 1.0.5 installer was published 11 MB short and the byte count is what
+      // said so immediately.
+      final onDisk = await file.length();
+      if (release.fileSize > 0 && onDisk != release.fileSize) {
+        await file.delete();
+        throw const UpdateException(
+          'The download finished early and was discarded. Try again.',
+        );
+      }
+
       final digest = sha256.convert(await file.readAsBytes()).toString();
       if (digest.toLowerCase() != release.sha256.toLowerCase()) {
         await file.delete();
@@ -96,9 +125,27 @@ class UpdateRepository {
       }
 
       return file;
+    } on HandshakeException {
+      // The secure connection could not be established. With our own roots
+      // bundled this should no longer be the machine's trust store, so what is
+      // left is usually software on the PC re-signing HTTPS — antivirus or a
+      // filtering router. Neither is something a cashier can diagnose from a
+      // BoringSSL path, which is what 1.0.7 put in front of one.
+      if (await file.exists()) await file.delete();
+      throw const UpdateException(
+        'The secure connection to the download server could not be verified. '
+        'Antivirus or network filtering on this PC is usually the cause. '
+        'Install the update manually, or ask support.',
+      );
     } on SocketException {
       if (await file.exists()) await file.delete();
       throw const UpdateException('Could not reach the download server.');
+    } on http.ClientException {
+      // A connection that dies mid-stream arrives here rather than as a
+      // SocketException, and leaves a partial file that must not survive to be
+      // mistaken for a complete download.
+      if (await file.exists()) await file.delete();
+      throw const UpdateException('The download was interrupted. Try again.');
     } finally {
       client.close();
     }

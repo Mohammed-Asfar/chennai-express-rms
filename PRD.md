@@ -621,7 +621,7 @@ means the owner believes their cloud reports are complete when they are not.
 | FR-U3 | A newer release shows a dialog with the version and release notes |
 | FR-U4 | The user chooses when to install — the app downloads the installer and launches it |
 | FR-U5 | Download progress is visible and can be cancelled |
-| FR-U6 | The installer's SHA-256 is verified before it is executed; a mismatch aborts the update |
+| FR-U6 | The installer's SHA-256 **and byte size** are verified before it is executed; either mismatching aborts the update |
 | FR-U7 | An optional update can be dismissed, and is not shown again that day |
 | FR-U8 | A release can be marked **mandatory**; its dialog cannot be dismissed |
 | FR-U9 | A build below `min_supported_build` is forced to update before billing continues |
@@ -630,6 +630,7 @@ means the owner believes their cloud reports are complete when they are not.
 | FR-U12 | A failed download or install leaves the current version working and reports the reason |
 | FR-U13 | Version comparison uses `build_number`, never a parsed version string |
 | FR-U14 | A release can be withdrawn by deactivating it, without publishing a new build |
+| FR-U15 | The installer download validates TLS against certificate roots shipped with the app, not the Windows certificate store |
 
 **FR-U10 and FR-U11 are the ones that matter operationally.** An update dialog
 appearing mid-transaction, or a check that hangs because the internet is down, turns
@@ -648,7 +649,28 @@ a dialog. Forcing is reserved for that class of fix — not for features.
 
 **FR-U6 is a security requirement.** The app downloads a binary and executes it on
 the billing PC. Without checksum verification, anyone who can intercept the download
-runs code on that machine.
+runs code on that machine. The size is checked alongside the hash because the two
+answer different questions: a hash says the bytes are wrong, a byte count says how.
+1.0.5 shipped a file the host was serving 11 MB short.
+
+**FR-U15 exists because a till's certificate store is not trustworthy.** Windows
+fetches most roots on demand from Windows Update, so a PC kept off updates — or
+behind a firewall blocking the root-update endpoint — cannot build a chain to the
+download host. A branch hit exactly this on 1.0.7:
+`CERTIFICATE_VERIFY_FAILED: unable to get local issuer certificate`.
+
+The update *check* kept working, which made it confusing to diagnose. The check is
+plain HTTP to the local backend, and the Node process behind it does its own TLS
+against a CA list compiled into Node. Only the installer download is Flutter doing
+TLS itself, so only the download saw the broken store.
+
+The bundled roots are the whole trust decision — the system store is excluded, not
+added to. This has a cost worth stating: the bundle ages, and a root set that has
+expired cannot be repaired from the field, because the app that would download its
+own replacement is the one that can no longer connect. Refresh it at release time
+with `npm run ca:refresh`. It also means an intercepting proxy is refused rather
+than trusted, which is the correct answer for a binary about to be executed, but
+will need a manual install at a site that mandates one.
 
 ### 6.12 Licensing and Activation
 
@@ -812,7 +834,11 @@ Scenarios that occur in a working restaurant and their required behaviour.
 | A row repeatedly fails to sync | Surfaced in the UI rather than retried forever in silence |
 | Update check with no internet | Fails silently; the app works normally |
 | Update available while an order is open | The prompt waits until no order is in progress |
-| Installer checksum does not match | Update aborts; the current version keeps running |
+| Installer checksum does not match | Update aborts; the file is deleted and the current version keeps running |
+| Installer arrives smaller than published | Rejected on size before it is hashed; the partial file is deleted |
+| Download interrupted mid-stream | Reported as interrupted; the partial file is deleted, nothing half-written survives |
+| The PC's certificate store cannot verify the download host | Unaffected — TLS uses the roots shipped with the app, not the Windows store |
+| Antivirus or a proxy re-signs the download's HTTPS | Refused, with a message naming interception as the likely cause; install manually |
 | A published release turns out to be broken | Deactivated in the cloud; clients stop being offered it |
 | A build below the minimum supported version | Forced to update before billing continues |
 | Activation attempted with no internet | Reports that the licence server is unreachable; nothing is written locally |

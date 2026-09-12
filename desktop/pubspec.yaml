@@ -33,6 +33,11 @@ flutter:
 
   assets:
     - assets/logo.png
+    # Certificate roots for the installer download. Shipped rather than read
+    # from the Windows store, which on a till is often missing issuers it was
+    # meant to fetch from Windows Update. Regenerate with:
+    #   npm run ca:refresh   (from backend/)
+    - assets/ca_roots.pem
 
 # The Windows title bar and taskbar icon. Regenerate with:
 #   dart run flutter_launcher_icons
