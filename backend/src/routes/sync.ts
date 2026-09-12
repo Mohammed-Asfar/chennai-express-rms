@@ -1,7 +1,7 @@
 import type { FastifyInstance } from 'fastify'
 import { requireAuth, requireRole } from '../lib/guards.js'
 import { verifyToken } from '../lib/auth.js'
-import { resyncMasterData, retryQuarantined } from '../sync/push.js'
+import { resyncMasterData, retryQuarantined, syncFailures } from '../sync/push.js'
 
 /**
  * Sync visibility. Silent failure is the worst outcome: the owner would believe
@@ -9,6 +9,18 @@ import { resyncMasterData, retryQuarantined } from '../sync/push.js'
  */
 export async function syncRoutes(app: FastifyInstance): Promise<void> {
   app.get('/sync/status', { preHandler: requireAuth }, async () => app.sync.status())
+
+  /**
+   * Why rows are not reaching the cloud.
+   *
+   * The status says how many are stuck; this says what the cloud actually
+   * objected to. Without it the only way to find out was the server log on the
+   * till, which a restaurant cannot read — while the answer sat unread in a
+   * column the whole time.
+   */
+  app.get('/sync/errors', { preHandler: requireAuth }, async () => ({
+    failures: syncFailures(app.db),
+  }))
 
   /**
    * The status, pushed as it changes.

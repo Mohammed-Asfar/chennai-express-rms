@@ -136,6 +136,62 @@ and is usually empty, so pushing it whole costs nothing worth a migration.
 
 ---
 
+## 6.1 A parent the cloud does not have
+
+A tracked row is selected only while `synced_at IS NULL`. Once it is stamped it
+is never looked at again — which is the whole point, and also a trap.
+
+If the cloud copy of a *master* row goes missing — restored from an older
+backup, wiped, or never actually committed — the till has no way to find out. It
+believes the row is up there. Every child then fails its foreign key:
+
+```
+insert or update on table "orders" violates foreign key constraint
+"orders_branch_id_fkey"
+```
+
+and keeps failing, for ever, while the parent sits marked done. A branch sat
+exactly like that for three days: 28 records quarantined, sales only on the one
+PC, and nothing on the screen saying why.
+
+Two things fix it, and both are needed:
+
+**The push repairs itself.** A foreign-key rejection clears `synced_at` on the
+table the constraint names, so the next cycle re-sends the parent. The push is
+an idempotent upsert, so re-sending a parent that was fine costs one row. Only
+the master tables are eligible — treating every rejection as a reason to
+re-push business tables would turn one missing user into thousands of
+re-uploaded bills.
+
+It deliberately does not touch `sync_attempts`: a parent already queued is being
+dealt with, and resetting its count would restart its backoff and push the next
+try further away.
+
+**`resyncMasterData` stays.** It clears the stamp on every master table at once
+and is what the Retry button calls. The automatic repair handles the case nobody
+has noticed yet; the button handles the case where someone has, and wants it
+fixed now.
+
+---
+
+## 6.2 Why rows are stuck, on the screen
+
+`sync_error` was written on every failure from the first migration and read by
+**nothing**. A branch could report "28 stuck" and not one word about the cause,
+so diagnosing it meant reading the server log on the till — which a restaurant
+cannot do, while the answer sat in a column the whole time.
+
+`GET /sync/errors` groups the pending rows by message. The backup screen shows a
+plain-language version above the database's own text: the sentence is for the
+restaurant, the raw message is what support acts on. Grouped, because thirty
+bills rejected by one foreign key are one problem, and thirty copies of the same
+sentence hide that.
+
+The translation never invents. An unrecognised message is passed through
+unedited — a raw error beats a confident wrong one.
+
+---
+
 ## 7. Sync never blocks billing
 
 Non-negotiable, and the reason several things above look over-careful:

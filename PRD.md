@@ -853,7 +853,9 @@ Scenarios that occur in a working restaurant and their required behaviour.
 | Restore completes but a table failed | Nothing is swapped in — the till seeds clean rather than opening with silently missing history |
 | No internet for days | Billing unaffected; sync resumes when connectivity returns |
 | Same row pushed to cloud twice | Idempotent — no duplicate created |
-| A row repeatedly fails to sync | Surfaced in the UI rather than retried forever in silence |
+| A row repeatedly fails to sync | Surfaced in the UI rather than retried forever in silence, with the reason the cloud gave |
+| A master row the cloud no longer has | The rejection re-queues the parent automatically; the next cycle repairs it without anyone noticing |
+| Rows stuck and nobody knows why | The backup screen names the cause in plain words, with the database's own message beneath it for support |
 | Update check with no internet | Fails silently; the app works normally |
 | Update available while an order is open | The prompt waits until no order is in progress |
 | Installer checksum does not match | Update aborts; the file is deleted and the current version keeps running |
