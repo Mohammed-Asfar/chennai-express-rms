@@ -1,4 +1,5 @@
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
 import '../../../core/api/api_exception.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 import '../../../core/theme/app_colors.dart';
@@ -40,6 +41,145 @@ class _MenuPanelState extends ConsumerState<MenuPanel> {
   String? _categoryId;
   String _search = '';
 
+  // Owned here rather than inside SearchField, because adding an item has to
+  // reach in and reset the box.
+  final _searchController = TextEditingController();
+  final _searchFocus = FocusNode();
+  final _gridScroll = ScrollController();
+
+  @override
+  void dispose() {
+    _searchController.dispose();
+    _searchFocus.dispose();
+    _gridScroll.dispose();
+    super.dispose();
+  }
+
+  /// Empties the search and puts the caret back in it.
+  ///
+  /// An order is typed one dish after another. Leaving the last query in place
+  /// means the grid still shows a filtered menu the cashier has to clear by
+  /// hand before the next item, and leaving focus on the tapped tile means
+  /// typing goes nowhere. Both together are what makes adding a second item
+  /// feel slower than the first.
+  void _resetSearch() {
+    _searchController.clear();
+    setState(() {
+      _search = '';
+      _highlight = 0;
+    });
+    _searchFocus.requestFocus();
+  }
+
+  /// The tile the arrow keys are sitting on, as an index into the visible list.
+  ///
+  /// Kept rather than moving real focus onto the tiles, because focus has to
+  /// stay in the search box: the point is to type a few letters, arrow to the
+  /// dish and press Enter without ever leaving the keyboard. Moving focus to a
+  /// tile would mean the next keystroke went nowhere.
+  int _highlight = 0;
+
+  /// How many tiles fit across, matching the grid's own arithmetic.
+  ///
+  /// Up and Down move by a row, so this has to be the real column count. It
+  /// mirrors SliverGridDelegateWithMaxCrossAxisExtent: ceil of the available
+  /// width over the max extent, with the spacing accounted for.
+  int _columns(double width) {
+    const maxExtent = 200.0;
+    const spacing = AppSpacing.md;
+    final count = (width / (maxExtent + spacing)).ceil();
+    return count < 1 ? 1 : count;
+  }
+
+  /// Moves the highlight, keeping it inside the list.
+  ///
+  /// Clamped rather than wrapped: arrowing off the last dish and landing back
+  /// on the first reads as the list having jumped, and a cashier holding Down
+  /// to reach the end would cycle past it forever.
+  void _move(int delta, int count) {
+    if (count == 0) return;
+    final next = (_highlight + delta).clamp(0, count - 1);
+    if (next == _highlight) return;
+    setState(() => _highlight = next);
+    _revealHighlight(next);
+  }
+
+  /// Brings the highlighted tile into view when arrowing past the fold.
+  ///
+  /// The grid is taller than the panel on a full menu, and a selection that has
+  /// scrolled out of sight is worse than none — the cashier presses Enter on a
+  /// dish they cannot see.
+  void _revealHighlight(int index) {
+    if (!_gridScroll.hasClients) return;
+
+    const rowHeight = 104.0 + AppSpacing.md;
+    final position = _gridScroll.position;
+    final row = index ~/ _columns(context.size?.width ?? position.viewportDimension);
+    final top = row * rowHeight;
+    final bottom = top + rowHeight;
+
+    if (top < position.pixels) {
+      _gridScroll.jumpTo(top.clamp(0.0, position.maxScrollExtent));
+    } else if (bottom > position.pixels + position.viewportDimension) {
+      _gridScroll.jumpTo(
+        (bottom - position.viewportDimension).clamp(0.0, position.maxScrollExtent),
+      );
+    }
+  }
+
+  /// The dishes currently on show, in grid order.
+  List<MenuItem> _visible(List<MenuItem> all) {
+    return all.where((item) {
+      if (_categoryId != null && item.categoryId != _categoryId) return false;
+      if (_search.isEmpty) return true;
+      return item.name.toLowerCase().contains(_search);
+    }).toList();
+  }
+
+  /// Arrow keys walk the grid; Enter adds what they landed on.
+  ///
+  /// Handled here rather than on the tiles so that focus never leaves the
+  /// search box — a cashier types "chick", arrows across to the right biriyani
+  /// and presses Enter, without a hand leaving the keyboard.
+  ///
+  /// Only the keys we claim are consumed. Everything else falls through to the
+  /// text field, or the arrow keys would stop moving the caret through a query
+  /// being corrected.
+  KeyEventResult _onKey(KeyEvent event, List<MenuItem> visible, double width) {
+    if (event is! KeyDownEvent && event is! KeyRepeatEvent) {
+      return KeyEventResult.ignored;
+    }
+    if (visible.isEmpty) return KeyEventResult.ignored;
+
+    final columns = _columns(width);
+    final key = event.logicalKey;
+
+    if (key == LogicalKeyboardKey.arrowRight) {
+      _move(1, visible.length);
+    } else if (key == LogicalKeyboardKey.arrowLeft) {
+      _move(-1, visible.length);
+    } else if (key == LogicalKeyboardKey.arrowDown) {
+      _move(columns, visible.length);
+    } else if (key == LogicalKeyboardKey.arrowUp) {
+      _move(-columns, visible.length);
+    } else if (key == LogicalKeyboardKey.enter ||
+        key == LogicalKeyboardKey.numpadEnter) {
+      // Down only, never repeat. Arrows are fine to hold; Enter held down
+      // would put the same dish on the order over and over.
+      if (event is! KeyDownEvent) return KeyEventResult.handled;
+
+      final index = _highlight.clamp(0, visible.length - 1);
+      final item = visible[index];
+      // Same gate the tile applies. An unavailable dish must not be addable by
+      // keyboard when it cannot be tapped.
+      if (widget.enabled && item.canOrder) _pick(item);
+    } else {
+      return KeyEventResult.ignored;
+    }
+
+    return KeyEventResult.handled;
+  }
+
   @override
   Widget build(BuildContext context) {
     final categories = ref.watch(categoriesProvider);
@@ -73,6 +213,28 @@ class _MenuPanelState extends ConsumerState<MenuPanel> {
   }
 
   Widget _items(BuildContext context, AsyncValue<List<MenuItem>> items, ThemeData theme) {
+    // The key handler needs the same list the grid draws, and the width it is
+    // drawn at, to know how many tiles make a row.
+    return LayoutBuilder(
+      builder: (context, constraints) {
+        final visible = _visible(items.valueOrNull ?? const []);
+        return Focus(
+          // Does not take focus itself — it sits above the search box and reads
+          // the keys on their way through.
+          canRequestFocus: false,
+          onKeyEvent: (_, event) => _onKey(event, visible, constraints.maxWidth),
+          child: _body(context, items, theme, visible),
+        );
+      },
+    );
+  }
+
+  Widget _body(
+    BuildContext context,
+    AsyncValue<List<MenuItem>> items,
+    ThemeData theme,
+    List<MenuItem> visible,
+  ) {
     return Column(
       crossAxisAlignment: CrossAxisAlignment.stretch,
       children: [
@@ -85,7 +247,18 @@ class _MenuPanelState extends ConsumerState<MenuPanel> {
           ),
           child: SearchField(
             hintText: 'Search the menu',
-            onChanged: (value) => setState(() => _search = value),
+            controller: _searchController,
+            focusNode: _searchFocus,
+            // Focused on arrival, so the first dish of an order is typed
+            // straight away and the arrow keys work without a click first.
+            autofocus: true,
+            // Typing narrows the list, so the old position is meaningless —
+            // start again at the first match, which is what a cashier expects
+            // to add when they stop typing.
+            onChanged: (value) => setState(() {
+              _search = value;
+              _highlight = 0;
+            }),
           ),
         ),
 
@@ -97,12 +270,6 @@ class _MenuPanelState extends ConsumerState<MenuPanel> {
               child: ErrorBanner(message: userMessage(error)),
             ),
             data: (all) {
-              final visible = all.where((item) {
-                if (_categoryId != null && item.categoryId != _categoryId) return false;
-                if (_search.isEmpty) return true;
-                return item.name.toLowerCase().contains(_search);
-              }).toList();
-
               if (visible.isEmpty) {
                 return Center(
                   child: Text(
@@ -115,6 +282,7 @@ class _MenuPanelState extends ConsumerState<MenuPanel> {
               }
 
               return GridView.builder(
+                controller: _gridScroll,
                 padding: const EdgeInsets.fromLTRB(
                   AppSpacing.lg,
                   0,
@@ -132,6 +300,7 @@ class _MenuPanelState extends ConsumerState<MenuPanel> {
                   item: visible[index],
                   enabled: widget.enabled,
                   surcharge: widget.surcharge,
+                  highlighted: index == _highlight,
                   onTap: () => _pick(visible[index]),
                 ),
               );
@@ -147,7 +316,10 @@ class _MenuPanelState extends ConsumerState<MenuPanel> {
     // staff confirm "Standard" on every tap would slow service for nothing.
     if (!item.hasChoice) {
       final variant = item.variants.first;
-      if (variant.isAvailable) widget.onPick(variant);
+      if (variant.isAvailable) {
+        widget.onPick(variant);
+        _resetSearch();
+      }
       return;
     }
 
@@ -155,7 +327,16 @@ class _MenuPanelState extends ConsumerState<MenuPanel> {
       context: context,
       builder: (_) => _VariantPicker(item: item, surcharge: widget.surcharge),
     );
-    if (chosen != null) widget.onPick(chosen);
+
+    // The dialog is awaited, so the panel may be gone by now.
+    if (!mounted) return;
+
+    // Only when something was added. A cancelled picker leaves the query alone
+    // — the cashier is still looking for that dish.
+    if (chosen != null) {
+      widget.onPick(chosen);
+      _resetSearch();
+    }
   }
 }
 
@@ -270,11 +451,16 @@ class _ItemTile extends StatefulWidget {
     required this.enabled,
     required this.onTap,
     this.surcharge = 0,
+    this.highlighted = false,
   });
 
   final MenuItem item;
   final bool enabled;
   final VoidCallback onTap;
+
+  /// Where the arrow keys are sitting. Drawn like hover, because it means the
+  /// same thing — this is what activating now would add.
+  final bool highlighted;
 
   /// Paise this table's section adds. Already in the price shown.
   final int surcharge;
@@ -292,6 +478,10 @@ class _ItemTileState extends State<_ItemTile> {
     final item = widget.item;
     final canOrder = widget.enabled && item.canOrder;
 
+    // The keyboard highlight reads the same as hover, with a heavier border so
+    // it survives on a screen where a mouse is also sitting over something.
+    final marked = (_hovered || widget.highlighted) && canOrder;
+
     return MouseRegion(
       onEnter: (_) => setState(() => _hovered = true),
       onExit: (_) => setState(() => _hovered = false),
@@ -299,10 +489,15 @@ class _ItemTileState extends State<_ItemTile> {
       child: AnimatedContainer(
         duration: const Duration(milliseconds: 120),
         decoration: BoxDecoration(
-          color: _hovered && canOrder ? AppColors.surfaceHover : AppColors.surface,
+          color: widget.highlighted && canOrder
+              ? AppColors.accentTint
+              : marked
+                  ? AppColors.surfaceHover
+                  : AppColors.surface,
           borderRadius: BorderRadius.circular(AppSpacing.radiusMd),
           border: Border.all(
-            color: _hovered && canOrder ? AppColors.accent : AppColors.border,
+            color: marked ? AppColors.accent : AppColors.border,
+            width: widget.highlighted && canOrder ? 2 : 1,
           ),
         ),
         clipBehavior: Clip.antiAlias,

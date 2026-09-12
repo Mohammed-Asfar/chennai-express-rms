@@ -386,6 +386,23 @@ a picker. Every "the table's order" assumption in the UI must handle several.
 | FR-B45 | The type filter resets to all orders each time the bills screen is opened — a filter left set would show a partial day that reads as the whole of it |
 | FR-O21 | Leaving an order with nothing on it discards it, so the table does not stay seated |
 | FR-O22 | A table held only by empty orders can be freed from its card on the floor |
+| FR-O23 | The menu search is focused when the order screen opens, and is cleared and refocused after each item is added |
+| FR-O24 | Arrow keys move a highlight through the menu grid and Enter adds the highlighted dish, so an order can be typed without the mouse |
+
+**FR-O23 and FR-O24 are about the pace of service.** An order is several dishes in
+a row, and the slow part was never the tapping — it was the hand leaving the
+keyboard between items. Typing a few letters, arrowing to the dish and pressing
+Enter keeps a whole order on the keyboard.
+
+Both details matter. A query left in the box after an item is added means the grid
+still shows a filtered menu that has to be cleared by hand; focus left on the
+tapped tile means the next keystroke goes nowhere. Neither is visible in a
+one-item test, which is why they survived to be noticed at a counter.
+
+Only the arrows and Enter are claimed. Every other key falls through to the search
+box, or the arrows could not move the caret through a query being corrected.
+Enter acts on key-down and never on repeat — held down, it would put the same dish
+on the order over and over.
 
 #### Tax calculation
 
@@ -769,6 +786,11 @@ Scenarios that occur in a working restaurant and their required behaviour.
 |---|---|
 | Two parties at one table | Two orders, two bills; table frees only when the last settles |
 | Same item added twice | Merged into one line if `unit_price` matches, separate if not |
+| Portion picker cancelled | The search query is left alone — nothing was added, so the dish is still being looked for |
+| Arrow keys pressed with nothing matching the search | Ignored; there is nothing to highlight |
+| Enter held down on a dish | Adds once. Key repeat is ignored for Enter, though not for the arrows |
+| The highlighted dish is scrolled out of view | The grid scrolls it back into view, so Enter never adds something unseen |
+| Arrowing past the first or last dish | Stops there. Wrapping reads as the list having jumped |
 | All items removed from an order | Cannot be billed — must be cancelled |
 | Order cancelled after KOT printed | Cancellation slip sent to the kitchen |
 | Item removed after KOT printed | Order flagged so the kitchen can be told |
